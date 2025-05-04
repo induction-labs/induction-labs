@@ -7,7 +7,9 @@ authors = [
     { name = "Jeffrey Li", email = "jeffrey.dot.li@gmail.com" }
 ]
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "vllm>=0.8.5.post1",
+]
 
 [build-system]
 requires = ["hatchling"]
