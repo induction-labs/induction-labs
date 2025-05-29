@@ -8,7 +8,7 @@ dependencies = []
 
 
 [tool.uv.workspace]
-members = ["repos/*"]
+members = ["./repos/modeling", "./repos/vllm"]
 
 [dependency-groups]
 dev = ["pre-commit>=4.2.0", "ruff>=0.11.8"]

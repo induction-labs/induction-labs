@@ -7,9 +7,10 @@ authors = [{ name = "Jeffrey Li", email = "jeffrey.dot.li@gmail.com" }]
 requires-python = ">=3.12"
 dependencies = [
   "ray>=2.45.0",
-  "vllm>=0.9.0",
+  # "vllm>=0.9.0",
   "torch==2.7.0+cu128; platform_system == 'Linux' and platform_machine == 'x86_64'",
   "torch==2.7.0; platform_system != 'Linux' or platform_machine != 'x86_64'",
+  "vllm",
 ]
 
 
@@ -17,7 +18,8 @@ dependencies = [
 torch = [
   { index = "torch_12.8", marker = "platform_system == 'Linux' and platform_machine == 'x86_64'" },
 ]
-vllm = { path = "../../../vllm", editable = true }
+vllm = { workspace = true }
+# vllm = { path = "../vllm", editable = true }
 
 [[tool.uv.index]]
 name = "torch_12.8"

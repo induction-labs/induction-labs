@@ -1,0 +1,3 @@
+[submodule "repos/vllm"]
+	path = repos/vllm
+	url = https://github.com/jeffrey-dot-li/vllm
