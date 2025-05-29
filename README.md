@@ -1,0 +1,2 @@
+# Repository Structure. 
+We use [Hatchling](https://hatch.pypa.io/latest/) to build python packages, with toplevel uv project configuration. This is why individual repo code needs to be nested like `action-space/repos/<repo_name>/src/<repo_name>/src_code.py`. It is unfortunate that we need to nest like this but that is how hatchling works.

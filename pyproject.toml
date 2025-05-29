@@ -1,13 +1,14 @@
 [project]
-name = "vllm-project"
+name = "action-space"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = []
 
+
 [tool.uv.workspace]
-members = ["numbers"]
+members = ["repos/*"]
 
 [dependency-groups]
 dev = ["pre-commit>=4.2.0", "ruff>=0.11.8"]
