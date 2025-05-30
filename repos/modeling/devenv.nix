@@ -10,6 +10,9 @@
   env.UV = "1";
   # If you turn this off, recompile with uv cache clean first.
   env.VLLM_USE_PRECOMPILED = "1";
+  # Set this for cuda kernels we need to compile
+  # https://github.com/ssakar/tutorial/blob/main/vllm/Dockerfile
+  env.TORCH_CUDA_ARCH_LIST = "12.0+PTX";
 
   # https://devenv.sh/packages/
   packages = with pkgs; [
@@ -42,6 +45,8 @@
   enterShell = ''
     hello
     git --version
+    # We need to set this manually otherwise triton tries to call `ldconfig` which is UB in nix.
+    export TRITON_LIBCUDA_PATH="$LD_LIBRARY_PATH";
   '';
 
   # https://devenv.sh/tasks/
@@ -53,7 +58,8 @@
   # https://devenv.sh/tests/
   enterTest = ''
     echo "Running tests"
-    git --version | grep --color=auto "${pkgs.git.version}"
+    uv sync --all-extras
+    pytest
   '';
 
   # https://devenv.sh/git-hooks/
