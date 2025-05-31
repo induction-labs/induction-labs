@@ -8,7 +8,9 @@ dependencies = []
 
 
 [tool.uv.workspace]
-members = ["./repos/modeling", "./repos/vllm"]
+members = ["repos/*"]
+# We need to exclude vllm as a workspace dep because it is dynamically versioned :/
+# exclude = ["repos/vllm"]
 
 [dependency-groups]
 dev = ["pre-commit>=4.2.0", "ruff>=0.11.8"]

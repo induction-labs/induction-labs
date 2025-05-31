@@ -14,8 +14,13 @@
   # https://github.com/ssakar/tutorial/blob/main/vllm/Dockerfile
   env.TORCH_CUDA_ARCH_LIST = "12.0+PTX";
 
+  # Allow buildx bake by default to access ../../ context
+  env.BUILDX_BAKE_ENTITLEMENTS_FS = "0";
+
   # https://devenv.sh/packages/
   packages = with pkgs; [
+    kmod # for lsmod
+    git
   ];
 
   # https://devenv.sh/languages/
