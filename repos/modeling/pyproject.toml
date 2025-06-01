@@ -9,12 +9,14 @@ dependencies = [
   "ray>=2.45.0",
   "torch==2.7.0+cu128; platform_system == 'Linux' and platform_machine == 'x86_64'",
   "torch==2.7.0; platform_system != 'Linux' or platform_machine != 'x86_64'",
-  "vllm",
 ]
 
 [dependency-groups]
 dev = ["pytest>=8.3.5"]
+workspace = ["vllm"]
 
+[tool.uv]
+default-groups = ["dev", "workspace"]
 
 [tool.uv.sources]
 torch = [

@@ -1000,12 +1000,14 @@ dependencies = [
     { name = "ray" },
     { name = "torch", version = "2.7.0", source = { registry = "https://pypi.org/simple" }, marker = "platform_machine != 'x86_64' or sys_platform != 'linux'" },
     { name = "torch", version = "2.7.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
-    { name = "vllm" },
 ]
 
 [package.dev-dependencies]
 dev = [
     { name = "pytest" },
+]
+workspace = [
+    { name = "vllm" },
 ]
 
 [package.metadata]
@@ -1013,11 +1015,11 @@ requires-dist = [
     { name = "ray", specifier = ">=2.45.0" },
     { name = "torch", marker = "platform_machine != 'x86_64' or sys_platform != 'linux'", specifier = "==2.7.0" },
     { name = "torch", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'", specifier = "==2.7.0+cu128", index = "https://download.pytorch.org/whl/cu128" },
-    { name = "vllm", editable = "repos/vllm" },
 ]
 
 [package.metadata.requires-dev]
 dev = [{ name = "pytest", specifier = ">=8.3.5" }]
+workspace = [{ name = "vllm", editable = "repos/vllm" }]
 
 [[package]]
 name = "mpmath"

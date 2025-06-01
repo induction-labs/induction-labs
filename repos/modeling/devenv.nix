@@ -20,7 +20,6 @@
   # https://devenv.sh/packages/
   packages = with pkgs; [
     kmod # for lsmod
-    git
   ];
 
   # https://devenv.sh/languages/
