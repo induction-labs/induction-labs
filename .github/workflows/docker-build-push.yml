@@ -51,11 +51,16 @@ jobs:
           type=ref,event=pr
           type=sha,prefix={{branch}}-
           type=raw,value=latest,enable={{is_default_branch}}
-        
-    - name: Build and push with Bake
-      working-directory: ./repos/modeling
-      run: |
-        export COMMIT_SHA=${{ github.sha }}
-        export SHORT_SHA=${COMMIT_SHA:0:7}
-        docker buildx bake ci \
-          --set "*.args.COMMIT_SHA=${SHORT_SHA}"
+    
+    - name: Build and push Docker image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        file: repos/modeling/Dockerfile
+        push: ${{ github.event_name != 'pull_request' }}
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+        allow: |
+          fs.read=/home/runner/work/induction-labs/induction-labs
