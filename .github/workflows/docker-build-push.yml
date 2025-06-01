@@ -53,6 +53,7 @@ jobs:
           type=raw,value=latest,enable={{is_default_branch}}
         
     - name: Build and push with Bake
+      working-directory: ./repos/modeling
       run: |
         export COMMIT_SHA=${{ github.sha }}
         export SHORT_SHA=${COMMIT_SHA:0:7}
