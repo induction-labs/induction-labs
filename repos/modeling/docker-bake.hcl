@@ -15,7 +15,7 @@ target "local" {
     ]
 }
 
-target "default" {
+target "remote" {
     inherits = ["local"]
     tags = [
         "${REGISTRY}/modeling:latest",
@@ -24,6 +24,10 @@ target "default" {
     push = true
     cache-from = ["type=gha"]
     cache-to = ["type=gha,mode=max"]
+}
+
+group "default" {
+    targets = ["local", "remote"]
 }
 
 # CI-specific target

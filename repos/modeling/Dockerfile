@@ -7,7 +7,7 @@ RUN curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/
   --extra-conf "sandbox = false" \
   --init none \
   --no-confirm
-i
+
 ENV PATH="${PATH}:/nix/var/nix/profiles/default/bin"
 RUN nix profile install nixpkgs#devenv
 
@@ -36,7 +36,8 @@ ENV SETUPTOOLS_SCM_PRETEND_VERSION="0.0.0"
 RUN uv sync --frozen --no-group workspace --no-install-workspace
 
 # TODO: Make this build depend on vllm build, so we dont do this giant copy and have a huge layer.
-COPY ../../ ../../
+COPY repos/modeling/ /workspace/repos/modeling/
+# COPY ../../ ../../
 # For now don't sync vllm :/
 # RUN uv sync --frozen
 
