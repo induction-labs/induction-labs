@@ -1,23 +1,30 @@
+variable "SHORT_SHA" {
+  default = "latest"
+}
+
+variable "PR_NUMBER" {
+  default = ""
+}
+
+target "base" {
+  context = "../../"
+  dockerfile = "repos/modeling/Dockerfile"
+}
+
 target "local" {
-    context = "../../"
-    dockerfile = "repos/modeling/Dockerfile"
-    tags = [
-        "modeling:latest",
-        "modeling:0.1.0",
-    ]
-    # Builds locally, no push
+  inherits = ["base"]
+  tags = [
+    "modeling:latest",
+    "modeling:${SHORT_SHA}",
+  ]
 }
 
-target "remote" {
-    inherits = ["local"]
-    tags = [
-        "us-central1-docker.pkg.dev/induction-labs/induction-docker/modeling:latest",
-        "us-central1-docker.pkg.dev/induction-labs/induction-docker/modeling:0.1.0",
-    ]
-    push = true
-}
-
-# Group target to build both
-group "default" {
-    targets = [ "remote"]
+target "default" {
+  inherits = ["base"]
+  tags = [
+    "us-central1-docker.pkg.dev/induction-labs/induction-docker/modeling:${SHORT_SHA}",
+    "us-central1-docker.pkg.dev/induction-labs/induction-docker/modeling:latest",
+    notequal("", PR_NUMBER) ? "us-central1-docker.pkg.dev/induction-labs/induction-docker/modeling:pr-${PR_NUMBER}" : "",
+  ]
+  push = true
 }

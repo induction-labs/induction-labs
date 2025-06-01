@@ -1,0 +1,29 @@
+# .travis.yml
+language: minimal
+
+services:
+  - docker
+
+if: type = pull_request
+
+env:
+  global:
+    - PROJECT_ID=induction-labs
+
+before_install:
+  - curl https://sdk.cloud.google.com | bash > /dev/null
+  - source $HOME/google-cloud-sdk/path.bash.inc
+
+install:
+  - echo $GCLOUD_SERVICE_KEY | base64 --decode > ${HOME}/gcloud-service-key.json
+  - gcloud auth activate-service-account --key-file ${HOME}/gcloud-service-key.json
+  - gcloud config set project $PROJECT_ID
+  - gcloud auth configure-docker us-central1-docker.pkg.dev
+
+script:
+  - export SHORT_SHA=${TRAVIS_COMMIT:0:8}
+  - export PR_NUMBER=${TRAVIS_PULL_REQUEST}
+  
+  # Use bake with environment variables
+  - cd repos/modeling
+  - docker buildx bake --push remote
