@@ -1,30 +1,36 @@
-variable "SHORT_SHA" {
-  default = "latest"
+variable "COMMIT_SHA" {
+    default = "latest"
 }
 
-variable "PR_NUMBER" {
-  default = ""
-}
-
-target "base" {
-  context = "../../"
-  dockerfile = "repos/modeling/Dockerfile"
+variable "REGISTRY" {
+    default = "us-central1-docker.pkg.dev/induction-labs/induction-docker"
 }
 
 target "local" {
-  inherits = ["base"]
-  tags = [
-    "modeling:latest",
-    "modeling:${SHORT_SHA}",
-  ]
+    context = "../../"
+    dockerfile = "repos/modeling/Dockerfile"
+    tags = [
+        "modeling:latest",
+        "modeling:${COMMIT_SHA}",
+    ]
 }
 
 target "default" {
-  inherits = ["base"]
-  tags = [
-    "us-central1-docker.pkg.dev/induction-labs/induction-docker/modeling:${SHORT_SHA}",
-    "us-central1-docker.pkg.dev/induction-labs/induction-docker/modeling:latest",
-    notequal("", PR_NUMBER) ? "us-central1-docker.pkg.dev/induction-labs/induction-docker/modeling:pr-${PR_NUMBER}" : "",
-  ]
-  push = true
+    inherits = ["local"]
+    tags = [
+        "${REGISTRY}/modeling:latest",
+        "${REGISTRY}/modeling:${COMMIT_SHA}",
+    ]
+    push = true
+    cache-from = ["type=gha"]
+    cache-to = ["type=gha,mode=max"]
+}
+
+# CI-specific target
+target "ci" {
+    inherits = ["remote"]
+    tags = [
+        "${REGISTRY}/modeling:${COMMIT_SHA}",
+        "${REGISTRY}/modeling:latest",
+    ]
 }

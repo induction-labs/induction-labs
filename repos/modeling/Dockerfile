@@ -7,7 +7,7 @@ RUN curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/
   --extra-conf "sandbox = false" \
   --init none \
   --no-confirm
-
+i
 ENV PATH="${PATH}:/nix/var/nix/profiles/default/bin"
 RUN nix profile install nixpkgs#devenv
 
