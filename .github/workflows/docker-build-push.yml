@@ -51,6 +51,9 @@ jobs:
           type=ref,event=pr
           type=sha,prefix={{branch}}-
           type=raw,value=latest,enable={{is_default_branch}}
+
+    - name: Print Disk Usage
+      run: df -h
     
     - name: Build and push Docker image
       uses: docker/build-push-action@v5
