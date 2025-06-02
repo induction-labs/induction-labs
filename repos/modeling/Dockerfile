@@ -33,6 +33,10 @@ COPY uv.lock /workspace/uv.lock
 # based on git commit, and we don't copy the .git directory into the container.
 # See https://github.com/pypa/setuptools-scm/issues/771
 ENV SETUPTOOLS_SCM_PRETEND_VERSION="0.0.0"
+
+# Print amount of disk space available
+RUN df -h
+
 RUN uv sync --frozen --no-group workspace --no-install-workspace
 
 # TODO: Make this build depend on vllm build, so we dont do this giant copy and have a huge layer.
