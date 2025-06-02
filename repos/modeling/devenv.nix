@@ -20,6 +20,7 @@
   # https://devenv.sh/packages/
   packages = with pkgs; [
     kmod # for lsmod
+    strace
   ];
 
   # https://devenv.sh/languages/

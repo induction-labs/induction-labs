@@ -6,13 +6,17 @@ readme = "README.md"
 authors = [{ name = "Jeffrey Li", email = "jeffrey.dot.li@gmail.com" }]
 requires-python = ">=3.12"
 dependencies = [
+  "numpy>=2.2.6",
   "ray>=2.45.0",
   "torch==2.7.0+cu128; platform_system == 'Linux' and platform_machine == 'x86_64'",
   "torch==2.7.0; platform_system != 'Linux' or platform_machine != 'x86_64'",
 ]
 
 [dependency-groups]
-dev = ["pytest>=8.3.5"]
+dev = [
+    "ipython>=9.3.0",
+    "pytest>=8.3.5",
+]
 workspace = ["vllm"]
 
 [tool.uv]
