@@ -61,5 +61,6 @@ jobs:
         labels: ${{ steps.meta.outputs.labels }}
         cache-from: type=gha
         cache-to: type=gha,mode=max
-        allow: |
-          fs=/home/runner/work/induction-labs/induction-labs
+        buildx-args: --allow=fs.read=/home/runner/work/induction-labs/induction-labs
+        # allow: |
+        #   fs=/home/runner/work/induction-labs/induction-labs
