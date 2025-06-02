@@ -16,7 +16,7 @@ env:
 jobs:
   build-and-push:
     runs-on: 
-      labels: DockerBuildLargerDisk
+      labels: DockerBuildLargerDisk2
     permissions:
       contents: read
       id-token: write  # Required for workload identity federation
