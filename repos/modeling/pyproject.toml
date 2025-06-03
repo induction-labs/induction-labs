@@ -9,8 +9,8 @@ dependencies = [
   "datasets>=3.6.0",
   "numpy>=2.2.6",
   "ray>=2.45.0",
-  "torch==2.7.0+cu128; platform_system == 'Linux'",
-  "torch==2.7.0; platform_system != 'Linux'",
+  "torch==2.7.0+cu128; sys_platform == 'linux' and (platform_machine == 'aarch64' or platform_machine == 'x86_64')",
+  "torch==2.7.0; sys_platform != 'linux'",
   "tqdm>=4.67.1",
   "transformers>=4.52.4",
   "wandb>=0.19.11",
@@ -22,14 +22,34 @@ dev = ["ipython>=9.3.0", "pytest>=8.3.5"]
 
 [tool.uv]
 default-groups = ["dev"]
+environments = ["platform_machine == 'x86_64'", "platform_machine == 'aarch64'"]
 
 [tool.uv.sources]
-torch = [{ index = "torch_12.8", marker = "platform_system == 'Linux'" }]
+torch = [
+  { index = "torch_12.8_x86", marker = "sys_platform == 'linux' and platform_machine == 'x86_64'" },
+  { index = "torch_12.8_aarch64", marker = "sys_platform == 'linux' and platform_machine == 'aarch64'" },
+]
+triton = [
+  { index = "torch_general", marker = "sys_platform == 'linux' and platform_machine == 'aarch64'" },
+]
+
 # vllm = { path = "../vllm" }
 
 [[tool.uv.index]]
-name = "torch_12.8"
+name = "torch_general"
+url = "https://download.pytorch.org/whl"
+
+[[tool.uv.index]]
+name = "torch_12.8_x86"
 url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+
+[[tool.uv.index]]
+name = "torch_12.8_aarch64"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+# url = "https://download.pytorch.org/whl/cu128/torch-2.7.0%2Bcu128-cp310-cp310-manylinux_2_28_aarch64.whl"
 
 [build-system]
 requires = ["hatchling"]
