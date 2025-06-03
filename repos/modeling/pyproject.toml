@@ -10,6 +10,7 @@ dependencies = [
   "numpy>=2.2.6",
   "ray>=2.45.0",
   "torch==2.7.0+cu128; sys_platform == 'linux' and (platform_machine == 'aarch64' or platform_machine == 'x86_64')",
+  "triton>=3.3.0; sys_platform == 'linux' and (platform_machine == 'aarch64' or platform_machine == 'x86_64')",
   "torch==2.7.0; sys_platform != 'linux'",
   "tqdm>=4.67.1",
   "transformers>=4.52.4",
@@ -29,9 +30,7 @@ torch = [
   { index = "torch_12.8_x86", marker = "sys_platform == 'linux' and platform_machine == 'x86_64'" },
   { index = "torch_12.8_aarch64", marker = "sys_platform == 'linux' and platform_machine == 'aarch64'" },
 ]
-triton = [
-  { index = "torch_general", marker = "sys_platform == 'linux' and platform_machine == 'aarch64'" },
-]
+triton = [{ index = "torch_general" }]
 
 # vllm = { path = "../vllm" }
 
