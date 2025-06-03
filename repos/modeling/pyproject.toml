@@ -18,7 +18,7 @@ dependencies = [
 
 [dependency-groups]
 dev = ["ipython>=9.3.0", "pytest>=8.3.5"]
-workspace = ["vllm"]
+vllm = ["vllm"]
 
 [tool.uv]
 default-groups = ["dev"]
@@ -27,7 +27,7 @@ default-groups = ["dev"]
 torch = [
   { index = "torch_12.8", marker = "platform_system == 'Linux' and platform_machine == 'x86_64'" },
 ]
-vllm = { workspace = true }
+vllm = { path = "../vllm" }
 
 [[tool.uv.index]]
 name = "torch_12.8"
