@@ -19,6 +19,7 @@
 
   # https://devenv.sh/packages/
   packages = with pkgs; [
+    # Keep these here so it is easier to debug the docker image.
     kmod # for lsmod
     strace
   ];

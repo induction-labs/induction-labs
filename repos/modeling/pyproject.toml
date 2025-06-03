@@ -10,6 +10,7 @@ dependencies = [
   "numpy>=2.2.6",
   "ray>=2.45.0",
   "torch==2.7.0+cu128; sys_platform == 'linux' and (platform_machine == 'aarch64' or platform_machine == 'x86_64')",
+  # We need to tell uv to specifically use the torch index of triton instead of pypi or it won't find the arm64 version
   "triton>=3.3.0; sys_platform == 'linux' and (platform_machine == 'aarch64' or platform_machine == 'x86_64')",
   "torch==2.7.0; sys_platform != 'linux'",
   "tqdm>=4.67.1",
@@ -23,13 +24,11 @@ dev = ["ipython>=9.3.0", "pytest>=8.3.5"]
 
 [tool.uv]
 default-groups = ["dev"]
+# TODO: figure out how to only support linux aarch64/x86, and ban windows + darwin
 environments = ["platform_machine == 'x86_64'", "platform_machine == 'aarch64'"]
 
 [tool.uv.sources]
-torch = [
-  { index = "torch_12.8_x86", marker = "sys_platform == 'linux' and platform_machine == 'x86_64'" },
-  { index = "torch_12.8_aarch64", marker = "sys_platform == 'linux' and platform_machine == 'aarch64'" },
-]
+torch = [{ index = "torch_12.8", marker = "sys_platform == 'linux'" }]
 triton = [{ index = "torch_general" }]
 
 # vllm = { path = "../vllm" }
@@ -39,16 +38,10 @@ name = "torch_general"
 url = "https://download.pytorch.org/whl"
 
 [[tool.uv.index]]
-name = "torch_12.8_x86"
+name = "torch_12.8"
 url = "https://download.pytorch.org/whl/cu128"
 explicit = true
 
-
-[[tool.uv.index]]
-name = "torch_12.8_aarch64"
-url = "https://download.pytorch.org/whl/cu128"
-explicit = true
-# url = "https://download.pytorch.org/whl/cu128/torch-2.7.0%2Bcu128-cp310-cp310-manylinux_2_28_aarch64.whl"
 
 [build-system]
 requires = ["hatchling"]

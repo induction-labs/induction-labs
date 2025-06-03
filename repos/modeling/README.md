@@ -5,7 +5,24 @@
 `gcloud auth configure-docker us-central1-docker.pkg.dev`
 
 # Run with GPUs:
-`docker run --device nvidia.com/gpu=all docker.io/library/modeling:latest`
+
+To run on a GPU, first find where `libcuda.so` is located on your system. You can find it with:
+```bash
+docker run --rm --device nvidia.com/gpu=all us-central1-docker.pkg.dev/induction-labs/induction-docker/modeling:latest find /usr -name "libcuda.so*" 2>/dev/null
+```
+
+For example, it might be located at `/lib/x86_64-linux-gnu/libcuda.so` or `/usr/local/nvidia/lib64/libcuda.so`.
+
+Then run
+```sh
+docker run --device nvidia.com/gpu=all -e LD_PRELOAD=/usr/local/nvidia/lib64/libcuda.so us-central1-docker.pkg.dev/induction-labs/induction-docker/modeling:latest pytest
+```
+
+
+```sh
+docker run --gpus all -e LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libcuda.so us-central1-docker.pkg.dev/induction-labs/induction-docker/modeling:latest pytest
+```
+
 
 # Push to Google Artifact Registry:
 `docker push us-central1-docker.pkg.dev/induction-labs/induction-docker/modeling:latest`

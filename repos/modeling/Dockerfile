@@ -50,7 +50,6 @@ RUN --mount=type=secret,id=wandb_key \
 
 # COPY ../../ ../../
 # For now don't sync vllm :/
-ENV LD_LIBRARY_PATH="/usr/local/nvidia/lib64:$LD_LIBRARY_PATH"
 
 ENTRYPOINT [ "devenv", "shell" ]
 # CMD ["pytest"]
