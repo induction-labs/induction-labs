@@ -17,14 +17,11 @@ dependencies = [
 ]
 
 [dependency-groups]
-dev = [
-    "ipython>=9.3.0",
-    "pytest>=8.3.5",
-]
+dev = ["ipython>=9.3.0", "pytest>=8.3.5"]
 workspace = ["vllm"]
 
 [tool.uv]
-default-groups = ["dev", "workspace"]
+default-groups = ["dev"]
 
 [tool.uv.sources]
 torch = [
