@@ -81,3 +81,8 @@ MANIFEST
 **/Dockerfile
 **/docker-bake.hcl
 **/.devenv.flake.nix
+
+
+# ML Training stuff
+**/outputs/
+**/secrets/

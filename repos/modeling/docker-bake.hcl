@@ -13,6 +13,9 @@ target "local" {
         "modeling:latest",
         "modeling:${COMMIT_SHA}",
     ]
+    secret = [
+    "id=wandb_key,src=./secrets/wandb_key"
+    ]
 }
 
 target "remote" {

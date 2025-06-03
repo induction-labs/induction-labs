@@ -24,13 +24,12 @@ SHELL ["devenv", "shell", "--", "/bin/bash", "-c"]
 
 # We need the parents path otherwise it will overwrite at root level.
 COPY --parents ./repos/*/pyproject.toml /workspace/
-COPY --parents ./repos/*/README.md /workspace/
+# COPY --parents ./repos/*/README.md /workspace/
 
 COPY pyproject.toml /workspace/pyproject.toml
 COPY uv.lock /workspace/uv.lock
-COPY README.md /workspace/README.md
+# COPY README.md /workspace/README.md
 
-# WORKDIR /workspace/repos/modeling
 # We need to set PRETEND_VERSION because VLLM is dynamically versioned
 # based on git commit, and we don't copy the .git directory into the container.
 # See https://github.com/pypa/setuptools-scm/issues/771
@@ -39,14 +38,25 @@ ENV SETUPTOOLS_SCM_PRETEND_VERSION="0.0.0"
 ENV UV_LINK_MODE=copy
 # RUN uv sync --locked --no-group workspace --no-install-workspace
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-install-workspace
+  uv sync --frozen --no-install-workspace
 
 # TODO: Make this build depend on vllm build, so we dont do this giant copy and have a huge layer.
 COPY repos/modeling/ /workspace/repos/modeling/
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen
+  uv sync --frozen
+
+RUN --mount=type=secret,id=wandb_key \
+  wandb login $(cat /run/secrets/wandb_key)
+
 # COPY ../../ ../../
 # For now don't sync vllm :/
 ENV LD_LIBRARY_PATH="/usr/local/nvidia/lib64:$LD_LIBRARY_PATH"
 
-CMD ["devenv", "shell", "pytest"]
+ENTRYPOINT [ "devenv", "shell" ]
+# CMD ["pytest"]
+
+CMD uv run python -m src.modeling.train_llm \
+  --experiment-name gpt2-alpaca-single-gpu-$(date +%Y-%m-%dT%H-%M-%S) \
+  --dataset-name tatsu-lab/alpaca \
+  --model-name openai-community/gpt2 \
+  --num-epochs 1
