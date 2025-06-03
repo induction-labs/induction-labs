@@ -19,7 +19,7 @@ COPY repos/modeling/devenv.* ./repos/modeling/
 WORKDIR /workspace/repos/modeling
 # Setup the devenv shell. This install all non-cuda deps needed. 
 # This will be cached for future RUN commands.
-RUN --mount=type=cache,target=/workspace/repos/modeling/.devenv/state devenv shell
+RUN devenv shell
 SHELL ["devenv", "shell", "--", "/bin/bash", "-c"]
 
 # We need the parents path otherwise it will overwrite at root level.
