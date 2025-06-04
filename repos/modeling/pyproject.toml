@@ -9,13 +9,15 @@ dependencies = [
   "datasets>=3.6.0",
   "numpy>=2.2.6",
   "ray>=2.45.0",
-  "torch==2.7.0+cu128; sys_platform == 'linux' and (platform_machine == 'aarch64' or platform_machine == 'x86_64')",
-  # We need to tell uv to specifically use the torch index of triton instead of pypi or it won't find the arm64 version
-  "triton>=3.3.0; sys_platform == 'linux' and (platform_machine == 'aarch64' or platform_machine == 'x86_64')",
-  "torch==2.7.0; sys_platform != 'linux'",
+  "torch==2.7.0",
+  "torchvision>=0.22.0",
+  "torchaudio>=2.7.0",
+  "triton >=3.3.0",
   "tqdm>=4.67.1",
   "transformers>=4.52.4",
   "wandb>=0.19.11",
+  "accelerate>=1.7.0",
+  "pillow>=11.2.1",
 ]
 
 [dependency-groups]
@@ -29,8 +31,11 @@ environments = ["platform_machine == 'x86_64'", "platform_machine == 'aarch64'"]
 
 [tool.uv.sources]
 torch = [{ index = "torch_12.8", marker = "sys_platform == 'linux'" }]
+# We need to tell uv to specifically use the torch index of triton instead of pypi or it won't find the arm64 version
 triton = [{ index = "torch_general" }]
-
+torchvision = [{ index = "torch_12.8", marker = "sys_platform == 'linux'" }]
+torchaudio = [{ index = "torch_12.8", marker = "sys_platform == 'linux'" }]
+# TODO: Figure out hwo to get flash_attention_2 working.
 # vllm = { path = "../vllm" }
 
 [[tool.uv.index]]
