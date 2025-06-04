@@ -15,11 +15,12 @@ import torch
 import tqdm
 import wandb
 from torch.utils.data import DataLoader
-from transformers.data.data_collator import default_data_collator
-from transformers.models.qwen2_5_omni import (
-    Qwen2_5OmniProcessor,
-    Qwen2_5OmniThinkerForConditionalGeneration,
+from transformers import (
+    AutoConfig,
+    AutoModelForCausalLM,
+    AutoTokenizer,
 )
+from transformers.data.data_collator import default_data_collator
 
 LOGGER = logging.getLogger(__name__)
 
@@ -47,17 +48,21 @@ def main():
 
     # Note: Initializing an **untrained** model
 
-    # config = AutoConfig.from_pretrained(args.model_name, use_cache=False)
+    config = AutoConfig.from_pretrained(args.model_name, use_cache=False)
     with device:
-        # model = AutoModelForCausalLM.from_config(config, torch_dtype=dtype)
-        model = Qwen2_5OmniThinkerForConditionalGeneration.from_pretrained(
-            "Qwen/Qwen2.5-Omni-3B",
-            torch_dtype=dtype,
-            device_map="auto",
-        )
-    config = model.config.get_text_config()
-    processor = Qwen2_5OmniProcessor.from_pretrained("Qwen/Qwen2.5-Omni-3B")
-    tokenizer = processor.tokenizer
+        model = AutoModelForCausalLM.from_config(config, torch_dtype=dtype)
+        # model = Qwen2_5OmniThinkerForConditionalGeneration.from_pretrained(
+        #     "Qwen/Qwen2.5-Omni-3B",
+        #     torch_dtype=dtype,
+        #     device_map="auto",
+        # )
+    # config = model.config.get_text_config()
+
+    # processor = Qwen2_5OmniProcessor.from_pretrained("Qwen/Qwen2.5-Omni-3B")
+    # tokenizer = processor.tokenizer
+    # assert isinstance(tokenizer, Qwen2TokenizerFast)
+    # k = tokenizer
+    tokenizer = AutoTokenizer.from_pretrained(args.model_name, use_fast=True)
 
     LOGGER.info(f"{sum(p.numel() for p in model.parameters())} model parameters")
 

@@ -20,7 +20,7 @@ docker run --device nvidia.com/gpu=all -e LD_PRELOAD=/usr/local/nvidia/lib64/lib
 
 
 ```sh
-docker run --gpus all -e LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libcuda.so us-central1-docker.pkg.dev/induction-labs/induction-docker/modeling:latest pytest
+docker run --gpus all -it -e LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libcuda.so us-central1-docker.pkg.dev/induction-labs/induction-docker/modeling:latest /bin/bash
 ```
 
 
