@@ -15,12 +15,11 @@ import torch
 import tqdm
 import wandb
 from torch.utils.data import DataLoader
-from transformers import (
-    AutoConfig,
-    AutoModelForCausalLM,
-    AutoTokenizer,
-)
 from transformers.data.data_collator import default_data_collator
+from transformers.models.qwen2_5_omni import (
+    Qwen2_5OmniProcessor,
+    Qwen2_5OmniThinkerForConditionalGeneration,
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -47,12 +46,22 @@ def main():
     torch.manual_seed(args.seed)
 
     # Note: Initializing an **untrained** model
-    config = AutoConfig.from_pretrained(args.model_name, use_cache=False)
+
+    # config = AutoConfig.from_pretrained(args.model_name, use_cache=False)
     with device:
-        model = AutoModelForCausalLM.from_config(config, torch_dtype=dtype)
+        # model = AutoModelForCausalLM.from_config(config, torch_dtype=dtype)
+        model = Qwen2_5OmniThinkerForConditionalGeneration.from_pretrained(
+            "Qwen/Qwen2.5-Omni-3B",
+            torch_dtype=dtype,
+            device_map="auto",
+        )
+    config = model.config.get_text_config()
+    processor = Qwen2_5OmniProcessor.from_pretrained("Qwen/Qwen2.5-Omni-3B")
+    tokenizer = processor.tokenizer
+
     LOGGER.info(f"{sum(p.numel() for p in model.parameters())} model parameters")
 
-    train_data = _load_and_preprocess_data(args, config)
+    train_data = _load_and_preprocess_data(args, config, tokenizer)
     LOGGER.info(f"{len(train_data)} training samples")
 
     # Standard pytorch dataset iterator
@@ -195,12 +204,12 @@ def main():
         state["epoch_step"] = 0
 
 
-def _load_and_preprocess_data(args, config):
+def _load_and_preprocess_data(args, config, tokenizer):
     """
     Function created using code found in
     https://github.com/huggingface/transformers/blob/v4.45.1/examples/pytorch/language-modeling/run_clm_no_trainer.py
     """
-    tokenizer = AutoTokenizer.from_pretrained(args.model_name)
+    # tokenizer = AutoTokenizer.from_pretrained(args.model_name)
 
     data = datasets.load_dataset(args.dataset_name, trust_remote_code=True)
 
@@ -297,7 +306,7 @@ def _get_parser() -> argparse.ArgumentParser:
     parser.add_argument("-e", "--experiment-name", default=None, required=True)
     parser.add_argument("-d", "--dataset-name", default=None, required=True)
     parser.add_argument("-m", "--model-name", default=None, required=True)
-    parser.add_argument("--save-dir", default="../outputs")
+    parser.add_argument("--save-dir", default="./outputs")
     parser.add_argument("--seed", default=0, type=int)
     parser.add_argument("--num-epochs", default=100, type=int)
     parser.add_argument("--lr", default=3e-5, type=float)

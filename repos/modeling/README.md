@@ -27,6 +27,12 @@ docker run --gpus all -e LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libcuda.so us-cent
 # Push to Google Artifact Registry:
 `docker push us-central1-docker.pkg.dev/induction-labs/induction-docker/modeling:latest`
 
+```sh
+sudo usermod -aG docker $USER
+newgrp docker
+gcloud auth configure-docker us-central1-docker.pkg.dev
+docker ps 
+```
 
 
 # Secrets:
