@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import tempfile
+from pathlib import Path
+
 import lightning as L
 import torch
 from lightning.pytorch.loggers import WandbLogger
-from modeling.data.text_train import LoadDataArgs, load_and_preprocess_data
+from modeling.data.text_train import LoadDataArgs, TextPretrainDataModule
 from transformers import (
     AutoConfig,
     AutoModelForCausalLM,
@@ -26,7 +29,9 @@ class LitAutoModel(L.LightningModule):
     def training_step(self, inputs):
         # Forward pass through the model
         outputs = self.model.forward(**inputs)
-        # assert isinstance(outputs, )
+        assert isinstance(outputs.loss, torch.Tensor), (
+            f"Expected outputs.loss to be a Tensor, got {type(outputs.loss)}"
+        )
         return outputs.loss
 
     def configure_optimizers(self):
@@ -47,21 +52,21 @@ def main():
         tokenizer=model.tokenizer,
         batch_size=1,
     )
-    dataset = load_and_preprocess_data(args)
-
-    # Create a PyTorch Lightning Trainer
-    trainer = L.Trainer(
-        max_epochs=1,
-        accelerator="auto",
-        devices=1,
-        logger=wandb_logger,
-        precision="bf16-true" if torch.cuda.is_bf16_supported() else "16-mixed",
-    )
-    # Train the model
-    trainer.fit(
-        model,
-        train_dataloaders=dataset,
-    )
+    with tempfile.TemporaryDirectory() as tmpdir:
+        datamodule = TextPretrainDataModule(args, tmpdir=Path(tmpdir))
+        # Create a PyTorch Lightning Trainer
+        trainer = L.Trainer(
+            max_epochs=1,
+            accelerator="auto",
+            devices=1,
+            logger=wandb_logger,
+            precision="bf16-true" if torch.cuda.is_bf16_supported() else "16-mixed",
+        )
+        # Train the model
+        trainer.fit(
+            model,
+            datamodule=datamodule,
+        )
 
 
 # https://lightning.ai/docs/pytorch/stable/api/lightning.pytorch.loggers.wandb.html#module-lightning.pytorch.loggers.wandb

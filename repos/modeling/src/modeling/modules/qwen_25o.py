@@ -24,6 +24,7 @@ class LitQwen25O(L.LightningModule):
         ).train()
         processor = Qwen2_5OmniProcessor.from_pretrained(model_name)
         assert isinstance(processor, Qwen2_5OmniProcessor)
+
         tokenizer = processor.tokenizer
         assert isinstance(tokenizer, Qwen2TokenizerFast)
         self.tokenizer = tokenizer

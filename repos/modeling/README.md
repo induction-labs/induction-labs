@@ -31,7 +31,7 @@ docker run --gpus all -it -e LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libcuda.so us-
 sudo usermod -aG docker $USER
 newgrp docker
 gcloud auth configure-docker us-central1-docker.pkg.dev
-docker ps 
+docker pull us-central1-docker.pkg.dev/induction-labs/induction-docker/modeling:latest
 ```
 
 
