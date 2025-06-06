@@ -4,6 +4,7 @@ from modeling.config import (
     DistributedConfig,
     ExperimentConfig,
     ExperimentMetadata,
+    RunConfig,
     WandbConfig,
 )
 from modeling.data.text_train import TextPretrainDatapackConfig
@@ -17,8 +18,11 @@ TextPretrainExperimentConfig = ExperimentConfig(
     distributed=DistributedConfig.mock_data(),
     module_config=Qwen25OLITConfig(),
     datapack_config=TextPretrainDatapackConfig(),
-    sequence_length=1024,  # Default sequence length
-    batch_size=32,  # Default batch size
+    run_config=RunConfig(
+        sequence_length=1024,  # Default sequence length
+        batch_size=16,
+        steps_per_epoch=1000,  # Number of steps per epoch
+    ),
 )
 
 # mdl export modeling.experiments.text_pretrain.default.Qwen25OLITConfig

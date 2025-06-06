@@ -63,7 +63,31 @@ def invalid_toml_file(temp_toml_file: Path):
     return temp_toml_file
 
 
-def assert_config_equality(config1: BaseModel, config2: BaseModel, ignore_fields=None):
+def remove_nested_field_inplace(data: dict, path: list[str]) -> None:
+    """Remove a nested field in-place."""
+    if not path:
+        return
+
+    current = data
+    for key in path[:-1]:
+        if key not in current or not isinstance(current[key], dict):
+            raise KeyError(f"{path=} not found in {data=}.")
+        current = current[key]
+
+    # Remove the final key
+    current.pop(path[-1], None)
+
+
+default_ignore_fields = [
+    ["metadata", "loaded_at"],
+]
+
+
+def assert_config_equality(
+    config1: BaseModel,
+    config2: BaseModel,
+    ignore_fields: list[list[str]] = default_ignore_fields,
+):
     """
     Assert that two configurations are equal, ignoring specified fields.
 
@@ -74,12 +98,12 @@ def assert_config_equality(config1: BaseModel, config2: BaseModel, ignore_fields
     """
     ignore_fields = ignore_fields or []
 
-    dict1 = config1.model_dump()
-    dict2 = config2.model_dump()
+    dict1 = config1.model_dump(serialize_as_any=True)
+    dict2 = config2.model_dump(serialize_as_any=True)
 
     for field in ignore_fields:
-        dict1.pop(field, None)
-        dict2.pop(field, None)
+        remove_nested_field_inplace(dict1, field)
+        remove_nested_field_inplace(dict2, field)
 
     assert dict1 == dict2
 

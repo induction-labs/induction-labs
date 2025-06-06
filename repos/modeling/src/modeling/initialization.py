@@ -37,7 +37,8 @@ class Initializer:
         trainer = L.Trainer(
             max_epochs=1,
             accelerator="auto",
-            devices=1,
+            devices=exp_config.distributed.devices_per_node,
+            num_nodes=exp_config.distributed.num_nodes,
             logger=wandb_logger,
             precision="bf16-true" if torch.cuda.is_bf16_supported() else "16-mixed",
         )

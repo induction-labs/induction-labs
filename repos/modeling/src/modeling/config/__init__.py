@@ -193,6 +193,33 @@ class SerializedDatapackConfig(DatapackConfig[L.LightningDataModule]):
         )
 
 
+class RunConfig(BaseModel):
+    """
+    Configuration for a run.
+    This class is used to configure the run settings for an experiment.
+    """
+
+    num_epochs: int = 1
+    steps_per_epoch: int  # Number of steps per epoch
+    # save_interval: int = 1000  # How often to save checkpoints
+    seed: int = 42  # Random seed for reproducibility
+    sequence_length: int  # Default sequence length
+    batch_size: int  # Default batch size
+
+    @classmethod
+    def mock_data(cls) -> RunConfig:
+        """
+        Create a mock instance of RunConfig for testing purposes.
+        """
+        return cls(
+            num_epochs=1,
+            steps_per_epoch=100,
+            seed=42,
+            sequence_length=1024,
+            batch_size=4,
+        )
+
+
 class ExperimentConfig(BaseModel, Generic[_LITDataModule]):
     metadata: ExperimentMetadata
     # For now, include distributed config here.
@@ -202,8 +229,7 @@ class ExperimentConfig(BaseModel, Generic[_LITDataModule]):
     datapack_config: DatapackConfig[_LITDataModule]
 
     # These maybe should be moved to module_config, but seem standard enough to keep here
-    sequence_length: int
-    batch_size: int
+    run_config: RunConfig
 
     @model_validator(mode="after")
     def check_compatibility(self) -> Self:

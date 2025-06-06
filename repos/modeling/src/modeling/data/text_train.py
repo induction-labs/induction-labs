@@ -140,9 +140,9 @@ class TextPretrainDatapackConfig(DatapackConfig[TextPretrainDataModule]):
     ) -> TextPretrainDataModule:
         module_config = self.validate_module_compatibility(full_config.module_config)
         extra_args = TextPretrainDataModuleExtraArgs(
-            seq_length=full_config.sequence_length,
+            seq_length=full_config.run_config.sequence_length,
             tokenizer=module_config.get_tokenizer,
-            batch_size=full_config.batch_size,
+            batch_size=full_config.run_config.batch_size,
         )
         return TextPretrainDataModule(self, extra_args)
 
