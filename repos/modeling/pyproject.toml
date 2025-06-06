@@ -21,7 +21,10 @@ dependencies = [
   "lightning>=2.5.1.post0",
   "pydantic>=2.11.5",
   "tomli-w>=1.2.0",
+  "typer>=0.16.0",
 ]
+[project.scripts]
+mdl = "modeling.main:app"
 
 [dependency-groups]
 dev = ["ipython>=9.3.0", "pytest>=8.3.5"]

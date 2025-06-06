@@ -17,11 +17,13 @@ from transformers.models.qwen2_5_omni.modeling_qwen2_5_omni import (
 class LitQwen25O(L.LightningModule):
     def __init__(self, model_name: str = "Qwen/Qwen2.5-Omni-3B"):
         super().__init__()
+        # self.model_config =
         self.model = Qwen2_5OmniThinkerForConditionalGeneration.from_pretrained(
             model_name,
             torch_dtype="auto",
             device_map="auto",
         ).train()
+        # self.model.config.tokenizer_class
         processor = Qwen2_5OmniProcessor.from_pretrained(model_name)
         assert isinstance(processor, Qwen2_5OmniProcessor)
 
