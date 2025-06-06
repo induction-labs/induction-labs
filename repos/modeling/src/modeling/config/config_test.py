@@ -6,39 +6,21 @@ from pathlib import Path
 from tomllib import TOMLDecodeError
 from unittest.mock import patch
 
-import lightning as L
 import pytest
 from pydantic import BaseModel, ValidationError
 
 from modeling.config import (
-    DistributedConfig,
     ExperimentConfig,
-    ExperimentMetadata,
-    ModuleConfig,
-    build_experiment_config,
 )
+from modeling.config.serde import (
+    build_experiment_config,
+    serialize_experiment_config,
+)
+from modeling.experiments.text_pretrain.default import TextPretrainExperimentConfig
+from modeling.modules.text_pretrain.default import TextPretrainLIT
 
 
-# Mock Lightning module for testing
-class MockLightningModule(L.LightningModule):
-    def __init__(self, learning_rate: float = 0.001, batch_size: int = 32):
-        super().__init__()
-        self.learning_rate = learning_rate
-        self.batch_size = batch_size
-
-
-# Test ModuleConfig implementations
-class MockModuleConfig(ModuleConfig[MockLightningModule]):
-    learning_rate: float = 0.001
-    batch_size: int = 32
-    config_path: str = "modeling.config.config_test.MockModuleConfig"
-
-    def create_module(self) -> MockLightningModule:
-        return MockLightningModule(
-            learning_rate=self.learning_rate, batch_size=self.batch_size
-        )
-
-
+# from modeling.utils.
 @pytest.fixture
 def temp_toml_file():
     """Create a temporary TOML file for testing."""
@@ -53,15 +35,12 @@ def temp_toml_file():
 @pytest.fixture
 def basic_experiment_setup(temp_toml_file: Path):
     """Create a basic experiment TOML file."""
-    import tomli_w
 
-    mock_experiment_config = ExperimentConfig(
-        metadata=ExperimentMetadata.mock_data(),
-        distributed=DistributedConfig.mock_data(),
-        module_config=MockModuleConfig(),
+    mock_experiment_config = TextPretrainExperimentConfig
+    serialize_experiment_config(
+        mock_experiment_config,
+        output_path=temp_toml_file,
     )
-    toml_string = tomli_w.dumps(mock_experiment_config.model_dump())
-    temp_toml_file.write_text(toml_string)
 
     return (temp_toml_file, mock_experiment_config)
 
@@ -120,7 +99,7 @@ class TestBuildExperimentConfig:
         )
 
         module = config.module_config.create_module()
-        assert isinstance(module, MockLightningModule)
+        assert isinstance(module, TextPretrainLIT)
 
     def test_build_experiment_config_file_not_found(self):
         """Test error handling when TOML file doesn't exist."""

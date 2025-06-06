@@ -1,30 +1,18 @@
 from __future__ import annotations
 
-import tomllib
 from abc import ABC, abstractmethod
-from pathlib import Path
 from typing import Any, Generic, Self, TypeVar
 
 import lightning as L
 from pydantic import BaseModel, ConfigDict, model_validator
 
+from .wandb import WandbConfig
+
 # _T = TypeVar("_T")
 # _T_co = TypeVar("_T_co", covariaint=True)
 
-_LitModule = TypeVar("_LitModule", bound="L.LightningModule")
+# _LitModule = TypeVar("_LitModule", bound="L.LightningModule", covariant=True)
 _LITDataModule = TypeVar("_LITDataModule", bound="L.LightningDataModule")
-
-
-class WandbConfig(BaseModel):
-    project: str
-    name: str
-
-    @classmethod
-    def mock_data(cls) -> WandbConfig:
-        """
-        Create a mock instance of WandbConfig for testing purposes.
-        """
-        return cls(project="test-project", name="test-experiment")
 
 
 class ExperimentMetadata(BaseModel):
@@ -54,8 +42,23 @@ class DistributedConfig(BaseModel):
         return cls()
 
 
-class ModuleConfig(ABC, BaseModel, Generic[_LitModule]):
+class ModuleConfig(ABC, BaseModel):
     config_path: str
+
+    @model_validator(mode="after")
+    def check_config_path(self) -> Self:
+        """
+        Validate that the module and datapack configurations are compatible.
+        This method is called after the model is initialized to ensure compatibility.
+        """
+        assert self.config_path == (
+            self.__class__.__module__ + "." + self.__class__.__name__
+        ), (
+            f"ModuleConfig config_path {self.config_path} does not match expected path "
+            f"{self.__class__.__module__}.{self.__class__.__name__}."
+        )
+
+        return self
 
     @abstractmethod
     def validate_datapack_compatibility(
@@ -68,7 +71,7 @@ class ModuleConfig(ABC, BaseModel, Generic[_LitModule]):
         raise NotImplementedError("Subclasses must implement this method.")
 
     @abstractmethod
-    def create_module(self) -> _LitModule:
+    def create_module(self) -> L.LightningModule:
         """
         Create a Lightning module instance.
         This method should be implemented by subclasses to return an instance of the Lightning module.
@@ -76,7 +79,7 @@ class ModuleConfig(ABC, BaseModel, Generic[_LitModule]):
         raise NotImplementedError("Subclasses must implement this method.")
 
 
-class SerializedModuleConfig(ModuleConfig[L.LightningModule]):
+class SerializedModuleConfig(ModuleConfig):
     """
     Configuration for a serialized Lightning module.
     This class is used to load a Lightning module from a specified path.
@@ -84,6 +87,11 @@ class SerializedModuleConfig(ModuleConfig[L.LightningModule]):
 
     # Explicity allow extra config to go through, because this will be used to initialize the module
     model_config = ConfigDict(extra="allow")
+
+    def check_config_path(self) -> Self:
+        # SerializedModuleConfig does not need to check the config_path,
+        # as it is expected to be loaded from a path specified in the config.
+        return self
 
     def validate_datapack_compatibility(
         self, datapack_config: DatapackConfig[Any]
@@ -108,6 +116,21 @@ class SerializedModuleConfig(ModuleConfig[L.LightningModule]):
 class DatapackConfig(ABC, BaseModel, Generic[_LITDataModule]):
     config_path: str
 
+    @model_validator(mode="after")
+    def check_config_path(self) -> Self:
+        """
+        Validate that the module and datapack configurations are compatible.
+        This method is called after the model is initialized to ensure compatibility.
+        """
+        assert self.config_path == (
+            self.__class__.__module__ + "." + self.__class__.__name__
+        ), (
+            f"DatapackConfig config_path {self.config_path} does not match expected path "
+            f"{self.__class__.__module__}.{self.__class__.__name__}."
+        )
+
+        return self
+
     @abstractmethod
     def validate_module_compatibility(
         self, module_config: ModuleConfig[Any]
@@ -120,7 +143,7 @@ class DatapackConfig(ABC, BaseModel, Generic[_LITDataModule]):
 
     @abstractmethod
     def create_datapack(
-        self, full_config: ExperimentConfig[Any, _LITDataModule]
+        self, full_config: ExperimentConfig[_LITDataModule]
     ) -> _LITDataModule:
         """
         Create a Lightning data module instance.
@@ -138,6 +161,11 @@ class SerializedDatapackConfig(DatapackConfig[L.LightningDataModule]):
     # Explicity allow extra config to go through, because this will be used to initialize the module
     model_config = ConfigDict(extra="allow")
 
+    def check_config_path(self) -> Self:
+        # SerializedDatapackConfig does not need to check the config_path,
+        # as it is expected to be loaded from a path specified in the config.
+        return self
+
     def validate_module_compatibility(
         self, module_config: ModuleConfig[Any]
     ) -> SerializedModuleConfig:
@@ -150,7 +178,7 @@ class SerializedDatapackConfig(DatapackConfig[L.LightningDataModule]):
         return module_config
 
     def create_datapack(
-        self, full_config: ExperimentConfig[Any, _LITDataModule]
+        self, full_config: ExperimentConfig[_LITDataModule]
     ) -> L.LightningDataModule:
         """
         Create a Lightning data module instance by loading it from the specified path.
@@ -160,12 +188,12 @@ class SerializedDatapackConfig(DatapackConfig[L.LightningDataModule]):
         )
 
 
-class ExperimentConfig(BaseModel, Generic[_LitModule, _LITDataModule]):
+class ExperimentConfig(BaseModel, Generic[_LITDataModule]):
     metadata: ExperimentMetadata
     # For now, include distributed config here.
     distributed: DistributedConfig
 
-    module_config: ModuleConfig[_LitModule]
+    module_config: ModuleConfig
     datapack_config: DatapackConfig[_LITDataModule]
 
     # These maybe should be moved to module_config, but seem standard enough to keep here
@@ -183,58 +211,10 @@ class ExperimentConfig(BaseModel, Generic[_LitModule, _LITDataModule]):
         return self
 
 
-class SerializedExperimentConfig(
-    ExperimentConfig[L.LightningModule, L.LightningDataModule]
-):
+class SerializedExperimentConfig(ExperimentConfig[L.LightningDataModule]):
     metadata: ExperimentMetadata
     # For now, include distributed config here. Controlling GPU allocation maybe should be its own thing but this is fine for now.
     distributed: DistributedConfig
 
     module_config: SerializedModuleConfig
     datapack_config: SerializedDatapackConfig
-
-
-def build_experiment_config(experiment_config_toml: Path) -> ExperimentConfig[Any, Any]:
-    # We import this dynamically, this lets us patch over and override this import in tests.
-    from modeling.utils.dynamic_import import import_from_string
-
-    with open(experiment_config_toml, "rb") as f:
-        data = tomllib.load(f)
-    serialized_exp_config = SerializedExperimentConfig.model_validate(data)
-
-    serialized_module_config = serialized_exp_config.module_config
-    serialized_datapack_config = serialized_exp_config.datapack_config
-
-    module_config_path = serialized_module_config.config_path
-    module_config_cls = import_from_string(module_config_path)
-    assert issubclass(module_config_cls, ModuleConfig)
-    module_config = module_config_cls.model_validate(
-        serialized_module_config.model_dump()
-    )
-
-    datapack_config_path = serialized_datapack_config.config_path
-    datapack_config_cls = import_from_string(datapack_config_path)
-    assert issubclass(datapack_config_cls, DatapackConfig)
-    datapack_config = datapack_config_cls.model_validate(
-        serialized_datapack_config.model_dump()
-    )
-
-    return ExperimentConfig.model_validate(
-        {
-            **serialized_exp_config.model_dump(),
-            "module_config": module_config,
-            "datapack_config": datapack_config,
-        }
-    )
-
-
-def serialize_experiment_config(
-    experiment_config: ExperimentConfig[Any, Any], output_path: Path
-) -> None:
-    """
-    Serialize the ExperimentConfig to a TOML file.
-    """
-    import tomli_w
-
-    with open(output_path, "wb") as f:
-        tomli_w.dump(experiment_config.model_dump(serialize_as_any=True), f)

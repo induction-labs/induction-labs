@@ -7,18 +7,18 @@ from modeling.config import (
     WandbConfig,
 )
 from modeling.data.text_train import TextPretrainDatapackConfig
-from modeling.modules.text_pretrain.default import TextPretrainLITConfig
+from modeling.modules.text_pretrain.qwen_25o import Qwen25OLITConfig
 
 TextPretrainExperimentConfig = ExperimentConfig(
     metadata=ExperimentMetadata(
-        wandb=WandbConfig(project="testing", name="text_pretrain"),
+        wandb=WandbConfig(project="testing", name="qwen25o_text_pretrain"),
         output_dir="output/text_pretrain",
     ),
     distributed=DistributedConfig.mock_data(),
-    module_config=TextPretrainLITConfig(),
+    module_config=Qwen25OLITConfig(),
     datapack_config=TextPretrainDatapackConfig(),
     sequence_length=1024,  # Default sequence length
     batch_size=32,  # Default batch size
 )
 
-# mdl export modeling.experiments.text_pretrain.default.TextPretrainExperimentConfig
+# mdl export modeling.experiments.text_pretrain.default.Qwen25OLITConfig
