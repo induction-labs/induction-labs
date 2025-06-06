@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import lightning as L
-import torch
 from lightning.pytorch.loggers import WandbLogger
 from wandb.sdk.wandb_run import Run
 
@@ -43,7 +42,7 @@ class Initializer:
             strategy=exp_config.run.distributed.strategy,
             # Logging and checkpointing
             logger=wandb_logger,
-            precision="bf16-true" if torch.cuda.is_bf16_supported() else "16-mixed",
+            precision="bf16-true",
         )
         datapack = exp_config.datapack.create_datapack(exp_config)
         lit_module = exp_config.module.create_module()

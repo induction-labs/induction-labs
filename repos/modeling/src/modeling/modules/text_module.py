@@ -5,6 +5,7 @@ from abc import ABC, abstractmethod
 import lightning as L
 import torch
 from modeling.config import ModuleConfig
+from modeling.utils.elapsed_timer import elapsed_timer
 from transformers.configuration_utils import PretrainedConfig
 from transformers.modeling_utils import PreTrainedModel
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
@@ -21,17 +22,23 @@ class TextLIT(ABC, L.LightningModule):
 
     def training_step(self, inputs):
         # Forward pass through the model
-        outputs = self.model.forward(**inputs)
+        with elapsed_timer() as timer:
+            # Ensure inputs are in the correct format
+            outputs = self.model.forward(**inputs)
+            elapsed = timer()
         assert isinstance(outputs.loss, torch.Tensor), (
             f"Expected outputs.loss to be a Tensor, got {type(outputs.loss)}"
         )
         # TODO: Add more metrics and logging (steptime, tok/s, etc.)
+        metrics = {
+            "train/step_time": elapsed,
+            "train/tokens_per_second": inputs["input_ids"].numel() / elapsed,
+            "train/loss": outputs.loss,
+        }
 
-        self.log(
-            "train/loss",
-            outputs.loss,
+        self.log_dict(
+            metrics,
             logger=True,
-            # rank_zero_only=True
         )
         return outputs.loss
 

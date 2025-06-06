@@ -63,7 +63,7 @@ class TextPretrainDataModule(L.LightningDataModule):
             tokenize_function,
             batched=True,
             remove_columns=column_names,
-            num_proc=2,  # type: ignore  # noqa: PGH003
+            num_proc=self.config.num_workers,  # type: ignore  # noqa: PGH003
             load_from_cache_file=True,  # type: ignore  # noqa: PGH003
             desc="Running tokenizer on dataset",  # type: ignore  # noqa: PGH003
         )
@@ -122,6 +122,7 @@ class TextPretrainDatapackConfig(DatapackConfig[TextPretrainDataModule]):
 
     config_path: str = "modeling.data.text_train.TextPretrainDatapackConfig"
     dataset_name: str = "tatsu-lab/alpaca"
+    num_workers: int = 2
 
     def validate_module_compatibility(
         self, module_config: ModuleConfig[Any]

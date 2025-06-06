@@ -19,10 +19,10 @@ Qwen25OPretrainExperimentConfig = ExperimentConfig(
     datapack=TextPretrainDatapackConfig(),
     run=RunConfig(
         sequence_length=1024,  # Default sequence length
-        batch_size=16,
+        batch_size=1,
         steps_per_epoch=1000,  # Number of steps per epoch
         distributed=DistributedConfig(
-            devices_per_node=2,
+            devices_per_node=1,
         ),
     ),
 )
