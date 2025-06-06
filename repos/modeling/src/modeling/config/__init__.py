@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from datetime import UTC, datetime
 from typing import Any, Generic, Self, TypeVar
 
 import lightning as L
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from modeling.utils.git import get_git_commit_sha, get_git_commit_sha_short
+
+from .distributed import DistributedConfig
 from .wandb import WandbConfig
 
 # _T = TypeVar("_T")
@@ -29,17 +33,18 @@ class ExperimentMetadata(BaseModel):
             output_dir="/tmp/experiment_output",
         )
 
-    # start_time:
-    # commit_hash
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    loaded_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
+    def reset_loaded_at(self) -> None:
+        """
+        Reset the loaded_at timestamp to the current time.
+        This is called when the config is loaded from toml.
+        """
+        self.loaded_at = datetime.now(UTC)
 
-class DistributedConfig(BaseModel):
-    @classmethod
-    def mock_data(cls) -> DistributedConfig:
-        """
-        Create a mock instance of DistributedConfig for testing purposes.
-        """
-        return cls()
+    commit: str = Field(default_factory=get_git_commit_sha)
+    commit_short: str = Field(default_factory=get_git_commit_sha_short)
 
 
 class ModuleConfig(ABC, BaseModel):

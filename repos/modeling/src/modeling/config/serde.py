@@ -32,6 +32,9 @@ def build_experiment_config(experiment_config_toml: Path) -> ExperimentConfig[An
         serialized_datapack_config.model_dump()
     )
 
+    # Reset the loaded_at timestamp.
+    serialized_exp_config.metadata.reset_loaded_at()
+
     return ExperimentConfig.model_validate(
         {
             **serialized_exp_config.model_dump(),
