@@ -12,6 +12,11 @@ docker run --rm --device nvidia.com/gpu=all us-central1-docker.pkg.dev/induction
 ```
 
 For example, it might be located at `/lib/x86_64-linux-gnu/libcuda.so` or `/usr/local/nvidia/lib64/libcuda.so`.
+Also need to find `libnvidia-ml.so.1`:
+```bash
+find /usr -name "libnvidia-ml.so.1" 2>/dev/null
+```
+
 
 Then run
 ```sh
@@ -20,7 +25,7 @@ docker run --device nvidia.com/gpu=all -e LD_PRELOAD=/usr/local/nvidia/lib64/lib
 
 
 ```sh
-docker run --gpus all -it -e LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libcuda.so us-central1-docker.pkg.dev/induction-labs/induction-docker/modeling:latest /bin/bash
+docker run --gpus all -it -e LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libcuda.so:/usr/lib/x86_64-linux-gnu/libnvidia-ml.so.1 us-central1-docker.pkg.dev/induction-labs/induction-docker/modeling:latest /bin/bash
 ```
 
 

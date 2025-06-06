@@ -25,6 +25,14 @@ class TextLIT(ABC, L.LightningModule):
         assert isinstance(outputs.loss, torch.Tensor), (
             f"Expected outputs.loss to be a Tensor, got {type(outputs.loss)}"
         )
+        # TODO: Add more metrics and logging (steptime, tok/s, etc.)
+
+        self.log(
+            "train/loss",
+            outputs.loss,
+            logger=True,
+            # rank_zero_only=True
+        )
         return outputs.loss
 
     def configure_optimizers(self):

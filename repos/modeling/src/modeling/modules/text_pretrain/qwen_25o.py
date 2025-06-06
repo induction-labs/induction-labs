@@ -32,9 +32,10 @@ class Qwen25OLITConfig(TextPretrainLITConfig):
     Inherits from TextPretrainLITConfig and sets the model name.
     """
 
+    lr: float = 1e-3
     config_path: str = "modeling.modules.text_pretrain.qwen_25o.Qwen25OLITConfig"
-    model_name: str = "Qwen/Qwen-2.5-0"
-    tokenizer_name: str = "Qwen/Qwen-2.5-0"
+    model_name: str = "Qwen/Qwen2.5-Omni-3B"
+    tokenizer_name: str = "Qwen/Qwen2.5-Omni-3B"
 
     def create_module(self) -> Qwen25OLIT:
         return Qwen25OLIT(self)
