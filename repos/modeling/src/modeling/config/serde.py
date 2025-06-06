@@ -13,23 +13,26 @@ def build_experiment_config(experiment_config_toml: Path) -> ExperimentConfig[An
 
     with open(experiment_config_toml, "rb") as f:
         data = tomllib.load(f)
-    serialized_exp_config = SerializedExperimentConfig.model_validate(data)
+    try:
+        serialized_exp_config = SerializedExperimentConfig.model_validate(data)
+    except TypeError as e:
+        raise ValueError(
+            f"Failed to validate the experiment config from {experiment_config_toml}. "
+            f"{data=}"
+        ) from e
 
-    serialized_module_config = serialized_exp_config.module_config
-    serialized_datapack_config = serialized_exp_config.datapack_config
-
-    module_config_path = serialized_module_config.config_path
+    module_config_path = serialized_exp_config.module.config_path
     module_config_cls = import_from_string(module_config_path)
     assert issubclass(module_config_cls, ModuleConfig)
     module_config = module_config_cls.model_validate(
-        serialized_module_config.model_dump()
+        serialized_exp_config.module.model_dump(serialize_as_any=True)
     )
 
-    datapack_config_path = serialized_datapack_config.config_path
+    datapack_config_path = serialized_exp_config.datapack.config_path
     datapack_config_cls = import_from_string(datapack_config_path)
     assert issubclass(datapack_config_cls, DatapackConfig)
     datapack_config = datapack_config_cls.model_validate(
-        serialized_datapack_config.model_dump()
+        serialized_exp_config.datapack.model_dump(serialize_as_any=True)
     )
 
     # Reset the loaded_at timestamp.
@@ -38,8 +41,8 @@ def build_experiment_config(experiment_config_toml: Path) -> ExperimentConfig[An
     return ExperimentConfig.model_validate(
         {
             **serialized_exp_config.model_dump(),
-            "module_config": module_config,
-            "datapack_config": datapack_config,
+            "module": module_config,
+            "datapack": datapack_config,
         }
     )
 

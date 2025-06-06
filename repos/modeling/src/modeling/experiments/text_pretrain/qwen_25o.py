@@ -15,13 +15,13 @@ TextPretrainExperimentConfig = ExperimentConfig(
         wandb=WandbConfig(project="testing", name="qwen25o_text_pretrain"),
         output_dir="output/text_pretrain",
     ),
-    distributed=DistributedConfig.mock_data(),
-    module_config=Qwen25OLITConfig(),
-    datapack_config=TextPretrainDatapackConfig(),
-    run_config=RunConfig(
+    module=Qwen25OLITConfig(),
+    datapack=TextPretrainDatapackConfig(),
+    run=RunConfig(
         sequence_length=1024,  # Default sequence length
         batch_size=16,
         steps_per_epoch=1000,  # Number of steps per epoch
+        distributed=DistributedConfig.mock_data(),
     ),
 )
 

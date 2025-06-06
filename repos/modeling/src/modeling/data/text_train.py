@@ -138,11 +138,11 @@ class TextPretrainDatapackConfig(DatapackConfig[TextPretrainDataModule]):
     def create_datapack(
         self, full_config: ExperimentConfig[TextPretrainDataModule]
     ) -> TextPretrainDataModule:
-        module_config = self.validate_module_compatibility(full_config.module_config)
+        module_config = self.validate_module_compatibility(full_config.module)
         extra_args = TextPretrainDataModuleExtraArgs(
-            seq_length=full_config.run_config.sequence_length,
+            seq_length=full_config.run.sequence_length,
             tokenizer=module_config.get_tokenizer,
-            batch_size=full_config.run_config.batch_size,
+            batch_size=full_config.run.batch_size,
         )
         return TextPretrainDataModule(self, extra_args)
 

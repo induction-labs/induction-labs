@@ -5,11 +5,11 @@ from datetime import UTC, datetime
 from typing import Any, Generic, Self, TypeVar
 
 import lightning as L
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, computed_field, model_validator
 
 from modeling.utils.git import get_git_commit_sha, get_git_commit_sha_short
 
-from .distributed import DistributedConfig
+from .distributed import DistributedConfig, DistributedStrategy
 from .wandb import WandbConfig
 
 # _T = TypeVar("_T")
@@ -199,12 +199,41 @@ class RunConfig(BaseModel):
     This class is used to configure the run settings for an experiment.
     """
 
+    distributed: DistributedConfig
+
     num_epochs: int = 1
     steps_per_epoch: int  # Number of steps per epoch
     # save_interval: int = 1000  # How often to save checkpoints
     seed: int = 42  # Random seed for reproducibility
     sequence_length: int  # Default sequence length
     batch_size: int  # Default batch size
+
+    @computed_field
+    @property
+    def process_batch_size(self) -> int:
+        """
+        Calculate the effective batch size per process.
+        Torch is troll because batch size is handled differently depending on the distributed strategy.
+        https://pytorch-lightning.readthedocs.io/en/1.5.10/advanced/multi_gpu.html#batch-size
+        """
+        match self.distributed.strategy:
+            case DistributedStrategy.ddp:
+                # For DDP, the batch size is divided by the number of devices per node * num_nodes
+                assert (self.batch_size % (self.distributed.world_size)) == 0, (
+                    f"Batch size {self.batch_size=} must be divisible by "
+                    f"{self.distributed.world_size=} "
+                )
+
+                return self.batch_size // (self.distributed.world_size)
+            case _:
+                raise ValueError(
+                    f"Unsupported distributed strategy: {self.distributed.strategy}. "
+                )
+
+    @model_validator(mode="after")
+    def check_batch_size(self) -> Self:
+        _ = self.process_batch_size  # Trigger the property to validate batch size
+        return self
 
     @classmethod
     def mock_data(cls) -> RunConfig:
@@ -217,19 +246,19 @@ class RunConfig(BaseModel):
             seed=42,
             sequence_length=1024,
             batch_size=4,
+            distributed=DistributedConfig.mock_data(),
         )
 
 
 class ExperimentConfig(BaseModel, Generic[_LITDataModule]):
     metadata: ExperimentMetadata
     # For now, include distributed config here.
-    distributed: DistributedConfig
 
-    module_config: ModuleConfig
-    datapack_config: DatapackConfig[_LITDataModule]
+    module: ModuleConfig
+    datapack: DatapackConfig[_LITDataModule]
 
     # These maybe should be moved to module_config, but seem standard enough to keep here
-    run_config: RunConfig
+    run: RunConfig
 
     @model_validator(mode="after")
     def check_compatibility(self) -> Self:
@@ -237,15 +266,11 @@ class ExperimentConfig(BaseModel, Generic[_LITDataModule]):
         Validate that the module and datapack configurations are compatible.
         This method is called after the model is initialized to ensure compatibility.
         """
-        self.module_config.validate_datapack_compatibility(self.datapack_config)
-        self.datapack_config.validate_module_compatibility(self.module_config)
+        self.module.validate_datapack_compatibility(self.datapack)
+        self.datapack.validate_module_compatibility(self.module)
         return self
 
 
 class SerializedExperimentConfig(ExperimentConfig[L.LightningDataModule]):
-    metadata: ExperimentMetadata
-    # For now, include distributed config here. Controlling GPU allocation maybe should be its own thing but this is fine for now.
-    distributed: DistributedConfig
-
-    module_config: SerializedModuleConfig
-    datapack_config: SerializedDatapackConfig
+    module: SerializedModuleConfig
+    datapack: SerializedDatapackConfig

@@ -35,14 +35,17 @@ class Initializer:
         # https://lightning.ai/docs/pytorch/stable/api/lightning.pytorch.loggers.wandb.html#module-lightning.pytorch.loggers.wandb
 
         trainer = L.Trainer(
-            max_epochs=1,
+            max_epochs=exp_config.run.num_epochs,
             accelerator="auto",
-            devices=exp_config.distributed.devices_per_node,
-            num_nodes=exp_config.distributed.num_nodes,
+            # Distributed training configuration
+            devices=exp_config.run.distributed.devices_per_node,
+            num_nodes=exp_config.run.distributed.num_nodes,
+            strategy=exp_config.run.distributed.strategy,
+            # Logging and checkpointing
             logger=wandb_logger,
             precision="bf16-true" if torch.cuda.is_bf16_supported() else "16-mixed",
         )
-        datapack = exp_config.datapack_config.create_datapack(exp_config)
-        lit_module = exp_config.module_config.create_module()
+        datapack = exp_config.datapack.create_datapack(exp_config)
+        lit_module = exp_config.module.create_module()
 
         return trainer, datapack, lit_module
