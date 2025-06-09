@@ -63,7 +63,7 @@ class TextPretrainDataModule(L.LightningDataModule):
             tokenize_function,
             batched=True,
             remove_columns=column_names,
-            num_proc=self.config.num_workers,  # type: ignore  # noqa: PGH003
+            num_proc=1,  # type: ignore  # noqa: PGH003
             load_from_cache_file=True,  # type: ignore  # noqa: PGH003
             desc="Running tokenizer on dataset",  # type: ignore  # noqa: PGH003
         )

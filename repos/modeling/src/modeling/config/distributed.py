@@ -9,10 +9,10 @@ class DistributedStrategy(str, Enum):
     """
     Enum for distributed training strategies.
     We only support ddp for now
-    https://pytorch-lightning.readthedocs.io/en/1.5.10/advanced/multi_gpu.html#distributed-modes
+    https://pytorch-lightning.readthiedocs.io/en/1.5.10/advanced/multi_gpu.html#distributed-modes
     """
 
-    ddp = "ddp"
+    ddp = "ddp_find_unused_parameters_true"
 
 
 class DistributedConfig(BaseModel):

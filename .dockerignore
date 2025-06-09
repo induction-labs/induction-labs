@@ -86,3 +86,4 @@ MANIFEST
 # ML Training stuff
 **/outputs/
 **/secrets/
+**/.pytest_cache/

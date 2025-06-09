@@ -20,6 +20,12 @@ class TextLIT(ABC, L.LightningModule):
         super().__init__()
         self.config = config
 
+    def on_after_backward(self) -> None:
+        return super().on_after_backward()
+        for name, p in self.named_parameters():
+            if p.grad is None:
+                print(f"Parameter {name} has no gradient.")
+
     def training_step(self, inputs):
         # Forward pass through the model
         with elapsed_timer() as timer:
