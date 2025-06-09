@@ -5,7 +5,10 @@ from abc import ABC, abstractmethod
 import lightning as L
 import torch
 from modeling.config import ModuleConfig
+from modeling.types.attn_impl import AttentionImplementation
+from modeling.types.dtype import DType
 from modeling.utils.elapsed_timer import elapsed_timer
+from modeling.utils.get_attn_impl import check_attn_impl
 from transformers.configuration_utils import PretrainedConfig
 from transformers.modeling_utils import PreTrainedModel
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
@@ -18,6 +21,10 @@ class TextLIT(ABC, L.LightningModule):
     # @abstractmethod
     def __init__(self, config: TextLITConfig):
         super().__init__()
+        self.attn_impl = config.attn_impl
+        self._dtype = config.dtype.torch_dtype
+        check_attn_impl(self.attn_impl)
+        print(f"Using attention implementation: {self.attn_impl}, {self.dtype=}")
         self.config = config
 
     def on_after_backward(self) -> None:
@@ -59,6 +66,8 @@ class TextLITConfig(ModuleConfig):
     model_name: str
     tokenizer_name: str
     lr: float
+    attn_impl: AttentionImplementation = AttentionImplementation.SDPA
+    dtype: DType = DType.bf16
 
     @property
     @abstractmethod

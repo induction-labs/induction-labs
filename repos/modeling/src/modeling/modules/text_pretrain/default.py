@@ -21,7 +21,9 @@ class TextPretrainLIT(TextLIT):
             self.config.model_name, use_cache=False
         )
         model = AutoModelForCausalLM.from_config(
-            self.model_config, torch_dtype=self._dtype
+            self.model_config,
+            torch_dtype=self.dtype,
+            attn_implementation=self.attn_impl,
         )
         assert isinstance(model, PreTrainedModel)
         self.model = model.train()
@@ -46,4 +48,6 @@ class TextPretrainLITConfig(TextLITConfig):
         return datapack_config
 
     def create_module(self) -> TextPretrainLIT:
-        return TextPretrainLIT(self)
+        return TextPretrainLIT(
+            self,
+        )

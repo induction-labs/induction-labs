@@ -9,6 +9,7 @@ from modeling.config import (
 )
 from modeling.data.text_train import TextPretrainDatapackConfig
 from modeling.modules.text_pretrain.default import TextPretrainLITConfig
+from modeling.types.attn_impl import AttentionImplementation
 
 Qwen3PretrainExperimentConfig = ExperimentConfig(
     metadata=ExperimentMetadata(
@@ -18,6 +19,7 @@ Qwen3PretrainExperimentConfig = ExperimentConfig(
     module=TextPretrainLITConfig(
         model_name="Qwen/Qwen3-4B",
         tokenizer_name="Qwen/Qwen3-4B",
+        attn_impl=AttentionImplementation.FLASH_ATTENTION_2,
     ),
     datapack=TextPretrainDatapackConfig(),
     run=RunConfig(

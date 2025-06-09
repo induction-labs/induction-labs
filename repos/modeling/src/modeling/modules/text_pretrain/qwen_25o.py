@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from typing import Any
 
-import torch
 from modeling.config import DatapackConfig
 from modeling.data.text_train import TextPretrainDatapackConfig
 from modeling.modules.text_module import TextLIT, TextLITConfig
@@ -26,7 +25,8 @@ class Qwen25OLIT(TextLIT):
 
         self.model = Qwen2_5OmniThinkerForConditionalGeneration.from_pretrained(
             config.model_name,
-            torch_dtype=torch.bfloat16,
+            torch_dtype=self.dtype,
+            attn_implementation=self.attn_impl,
         ).train()
         self.model_config = self.model.config
 
