@@ -9,8 +9,9 @@ from pydantic import BaseModel, ConfigDict, Field, computed_field, model_validat
 
 from modeling.utils.git import get_git_commit_sha, get_git_commit_sha_short
 
-from .distributed import DistributedConfig, DistributedStrategy
+from .distributed import DistributedConfig
 from .wandb import WandbConfig
+from typing import Optional
 
 # _T = TypeVar("_T")
 # _T_co = TypeVar("_T_co", covariaint=True)
@@ -20,7 +21,7 @@ _LITDataModule = TypeVar("_LITDataModule", bound="L.LightningDataModule")
 
 
 class ExperimentMetadata(BaseModel):
-    wandb: WandbConfig
+    wandb: Optional[WandbConfig]
     output_dir: str
 
     @classmethod
@@ -216,19 +217,12 @@ class RunConfig(BaseModel):
         Torch is troll because batch size is handled differently depending on the distributed strategy.
         https://pytorch-lightning.readthedocs.io/en/1.5.10/advanced/multi_gpu.html#batch-size
         """
-        match self.distributed.strategy:
-            case DistributedStrategy.ddp:
-                # For DDP, the batch size is divided by the number of devices per node * num_nodes
-                assert (self.batch_size % (self.distributed.world_size)) == 0, (
-                    f"Batch size {self.batch_size=} must be divisible by "
-                    f"{self.distributed.world_size=} "
-                )
+        assert (self.batch_size % (self.distributed.world_size)) == 0, (
+            f"Batch size {self.batch_size=} must be divisible by "
+            f"{self.distributed.world_size=} "
+        )
 
-                return self.batch_size // (self.distributed.world_size)
-            case _:
-                raise ValueError(
-                    f"Unsupported distributed strategy: {self.distributed.strategy}. "
-                )
+        return self.batch_size // (self.distributed.world_size)
 
     @model_validator(mode="after")
     def check_batch_size(self) -> Self:

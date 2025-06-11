@@ -5,33 +5,31 @@ from modeling.config import (
     ExperimentConfig,
     ExperimentMetadata,
     RunConfig,
-    WandbConfig,
 )
 from modeling.data.text_train import TextPretrainDatapackConfig
 
 from modeling.modules.text_pretrain.qwen3 import Qwen3LITConfig
-from modeling.types.attn_impl import AttentionImplementation
 
-Qwen3PretrainExperimentConfig = ExperimentConfig(
+Qwen3_1BPretrainExperimentConfig = ExperimentConfig(
     metadata=ExperimentMetadata(
-        wandb=WandbConfig(project="testing", name="qwen3_4B_text_pretrain"),
+        # wandb=WandbConfig(project="testing", name="qwen3_0.6B_text_pretrain"),
+        wandb=None,
         output_dir="output/text_pretrain",
     ),
     module=Qwen3LITConfig(
-        model_name="Qwen/Qwen3-4B",
-        tokenizer_name="Qwen/Qwen3-4B",
-        attn_impl=AttentionImplementation.FLASH_ATTENTION_2,
+        model_name="Qwen/Qwen3-0.6B",
+        tokenizer_name="Qwen/Qwen3-0.6B",
     ),
     datapack=TextPretrainDatapackConfig(),
     run=RunConfig(
         sequence_length=1024,  # Default sequence length
-        batch_size=2,
+        batch_size=1,
         steps_per_epoch=1000,  # Number of steps per epoch
         distributed=DistributedConfig(
-            devices_per_node=2,
+            devices_per_node=1,
             num_nodes=1,
         ),
     ),
 )
 
-# mdl export modeling.experiments.text_pretrain.qwen3.Qwen3PretrainExperimentConfig
+# mdl export modeling.experiments.text_pretrain.qwen3_1B.Qwen3_1BPretrainExperimentConfig

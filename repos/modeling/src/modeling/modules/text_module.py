@@ -26,27 +26,32 @@ class TextLIT(ABC, L.LightningModule):
         check_attn_impl(self.attn_impl)
         print(f"Using attention implementation: {self.attn_impl}, {self.dtype=}")
         self.config = config
-
-    def on_after_backward(self) -> None:
-        return super().on_after_backward()
-        for name, p in self.named_parameters():
-            if p.grad is None:
-                print(f"Parameter {name} has no gradient.")
+        torch.cuda.reset_peak_memory_stats()
 
     def training_step(self, inputs):
         # Forward pass through the model
+
         with elapsed_timer() as timer:
-            # Ensure inputs are in the correct format
-            outputs = self.model.forward(**inputs)
+            # Note: You CANT call self.model.forward here because it fucking doesn't trigger the FSDP hooks so weights dont gather
+            outputs = self.model(**inputs)
             elapsed = timer()
+
         assert isinstance(outputs.loss, torch.Tensor), (
             f"Expected outputs.loss to be a Tensor, got {type(outputs.loss)}"
         )
         # TODO: Add more metrics and logging (steptime, tok/s, etc.)
+        torch.cuda.synchronize()
+        allocated_memory = torch.cuda.memory_allocated(
+            device=torch.cuda.current_device()
+        )
+        reserved_memory = torch.cuda.memory_reserved(device=torch.cuda.current_device())
+
         metrics = {
             "train/step_time": elapsed,
             "train/tokens_per_second": inputs["input_ids"].numel() / elapsed,
             "train/loss": outputs.loss,
+            "train/allocated_memory": allocated_memory / 1e9,  # in GB
+            "train/reserved_memory": reserved_memory / 1e9,  # in GB
         }
 
         self.log_dict(
@@ -57,7 +62,10 @@ class TextLIT(ABC, L.LightningModule):
 
     def configure_optimizers(self):
         optimizer = torch.optim.AdamW(
-            self.model.parameters(), lr=self.config.lr, fused=True
+            self.model.parameters(),
+            lr=self.config.lr,
+            # foreach=True,
+            fused=True,
         )
         return optimizer
 
