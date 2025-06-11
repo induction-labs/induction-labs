@@ -64,14 +64,13 @@ def run(
     if username is None:
         username = os.getenv("USER", "unknown_user")
 
-    filename_session_annotator = "jonathan"
     metadata = recording_metadata(
-        filename_session_annotator, video_segment_buffer_length
+        username, video_segment_buffer_length
     )
 
     filename_session_start_time = datetime.datetime.now().strftime("%Y-%m-%d_%H%M%S")
     random_str = "".join(random.choices(string.ascii_uppercase + string.digits, k=5))
-    file_path = f"action_capture/{filename_session_annotator}/{filename_session_start_time}_{random_str}/"
+    file_path = f"action_capture/{username}/{filename_session_start_time}_{random_str}/"
     tmp_file_path = "/tmp/" + file_path
     # Create the directory if it doesn't exist
     os.makedirs(tmp_file_path, exist_ok=True)

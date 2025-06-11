@@ -47,9 +47,9 @@ def replay(actions):
 
     for act in actions:
         # wait for the same interval as recorded
-        delay_ms = act.timestamp - prev_ts
-        if delay_ms > 0:
-            time.sleep(delay_ms / 1000.0)
+        delay_sec = act.timestamp - prev_ts
+        if delay_sec > 0:
+            time.sleep(delay_sec)
         prev_ts = act.timestamp
 
         a = act.action
@@ -79,7 +79,7 @@ def replay(actions):
             # Unknown action type
             print(f"Skipping unsupported action: {a}")
 
-log_path = "tmp/action_capture/jonathan/2025-06-11_104921_XH06E/action_capture_000000.jsonl"
+log_path = "/Users/jonathan/Documents/programming/induction/induction-labs/repos/actioncollector/tmp/action_capture_jonathan_2025-06-11_183317_MQXEH_action_capture_000000.jsonl"
 actions = load_actions(log_path)
 print(f"Loaded {len(actions)} actions — starting replay in 2 seconds...")
 time.sleep(2)
