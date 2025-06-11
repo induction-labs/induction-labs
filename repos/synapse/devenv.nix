@@ -1,10 +1,7 @@
 { pkgs, lib, config, inputs, ... }:
 
 {
-  packages = [ 
-    pkgs.git
-    pkgs.zlib
-  ];
+  packages = [ pkgs.git ];
 
   languages.python = {
     libraries = [

@@ -1,3 +1,6 @@
 [submodule "repos/vllm"]
 	path = repos/vllm
 	url = https://github.com/jeffrey-dot-li/vllm
+[submodule "repos/pynput"]
+	path = repos/pynput
+	url = git@github.com:induction-labs/pynput.git
