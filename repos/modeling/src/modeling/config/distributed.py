@@ -13,12 +13,12 @@ class DistributedStrategy(str, Enum):
     """
 
     ddp = "ddp_find_unused_parameters_true"
+    fsdp = "fsdp"
 
 
 class DistributedConfig(BaseModel):
     devices_per_node: int = 1
     num_nodes: int = 1
-    strategy: DistributedStrategy = DistributedStrategy.ddp
 
     @property
     def world_size(self) -> int:

@@ -92,6 +92,7 @@ jobs:
         cache-to: type=gha,mode=max
         secrets: |
           wandb_key=${{ secrets.WANDB_API_KEY }}
+          huggingface_key=${{ secrets.HUGGINGFACE_API_KEY }}
         buildx-args: --allow=fs.read=/home/runner/work/induction-labs/induction-labs
         # allow: |
         #   fs=/home/runner/work/induction-labs/induction-labs

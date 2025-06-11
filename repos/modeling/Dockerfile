@@ -38,15 +38,20 @@ ENV SETUPTOOLS_SCM_PRETEND_VERSION="0.0.0"
 ENV UV_LINK_MODE=copy
 # RUN uv sync --locked --no-group workspace --no-install-workspace
 RUN --mount=type=cache,target=/root/.cache/uv \
-  uv sync --frozen --no-install-workspace
+  uv sync --locked --no-install-workspace --group flash-attn
 
 # TODO: Make this build depend on vllm build, so we dont do this giant copy and have a huge layer.
 COPY repos/modeling/ /workspace/repos/modeling/
+
 RUN --mount=type=cache,target=/root/.cache/uv \
-  uv sync --frozen
+  uv sync --locked --group flash-attn
 
 RUN --mount=type=secret,id=wandb_key \
   wandb login $(cat /run/secrets/wandb_key)
+
+
+RUN --mount=type=secret,id=huggingface_key \
+  huggingface-cli login --token $(cat /run/secrets/huggingface_key)
 
 # COPY ../../ ../../
 # For now don't sync vllm :/

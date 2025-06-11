@@ -14,7 +14,8 @@ target "local" {
         "modeling:${COMMIT_SHA}",
     ]
     secret = [
-    "id=wandb_key,src=./secrets/wandb_key"
+    "id=wandb_key,src=./secrets/wandb_key",
+    "id=huggingface_key,src=./secrets/huggingface_key"
     ]
 }
 

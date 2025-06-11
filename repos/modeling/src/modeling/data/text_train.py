@@ -32,8 +32,8 @@ class TextPretrainDataModule(L.LightningDataModule):
         super().__init__()
         self.config = config
         self.extra_args = extra_args
-        self._temp_dir = tempfile.TemporaryDirectory()
-        self.temp_path = Path(self._temp_dir.name)
+        self._temp_dir = "/tmp/tmpstut1ibm"
+        self.temp_path = Path(self._temp_dir)
         self._finalizer = weakref.finalize(
             self, _cleanup_temp_dir, self._temp_dir, str(self.temp_path)
         )
@@ -95,6 +95,7 @@ class TextPretrainDataModule(L.LightningDataModule):
         )
         train_data = lm_datasets["train"]
         assert isinstance(train_data, datasets.Dataset)
+        print("Saving train data to disk at", self.temp_path / "train_data")
         train_data.save_to_disk(self.temp_path / "train_data")
 
     def train_dataloader(self) -> DataLoader:

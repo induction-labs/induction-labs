@@ -4,15 +4,13 @@ build-backend = "hatchling.build"
 
 [project]
 name = "actioncollector"
-dynamic = ["version"]
+version = "0.1.0"
 description = ''
 readme = "README.md"
 requires-python = ">=3.8"
 license = "MIT"
 keywords = []
-authors = [
-  { name = "U.N. Owen", email = "void@some.where" },
-]
+authors = [{ name = "U.N. Owen", email = "void@some.where" }]
 classifiers = [
   "Development Status :: 4 - Beta",
   "Programming Language :: Python",
@@ -42,13 +40,8 @@ Documentation = "https://github.com/U.N. Owen/actioncollector#readme"
 Issues = "https://github.com/U.N. Owen/actioncollector/issues"
 Source = "https://github.com/U.N. Owen/actioncollector"
 
-[tool.hatch.version]
-path = "src/actioncollector/__about__.py"
-
 [tool.hatch.envs.types]
-extra-dependencies = [
-  "mypy>=1.0.0",
-]
+extra-dependencies = ["mypy>=1.0.0"]
 [tool.hatch.envs.types.scripts]
 check = "mypy --install-types --non-interactive {args:src/actioncollector tests}"
 
@@ -56,12 +49,13 @@ check = "mypy --install-types --non-interactive {args:src/actioncollector tests}
 source_pkgs = ["actioncollector", "tests"]
 branch = true
 parallel = true
-omit = [
-  "src/actioncollector/__about__.py",
-]
+omit = ["src/actioncollector/__about__.py"]
 
 [tool.coverage.paths]
-actioncollector = ["src/actioncollector", "*/actioncollector/src/actioncollector"]
+actioncollector = [
+  "src/actioncollector",
+  "*/actioncollector/src/actioncollector",
+]
 tests = ["tests", "*/actioncollector/tests"]
 
 [tool.coverage.report]

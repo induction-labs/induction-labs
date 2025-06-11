@@ -25,6 +25,9 @@ def run(
         build_experiment_config,
     )
     from modeling.initialization import Initializer
+    import torch
+
+    torch.set_float32_matmul_precision("high")
 
     experiment_config = build_experiment_config(Path(config_path))
     # Here you would typically initialize and run your model training or evaluation
@@ -33,6 +36,7 @@ def run(
 
     # Initialize the experiment configuration
     trainer, datapack, lit_module = Initializer.init_experiment(experiment_config)
+
     trainer.fit(
         lit_module,
         datamodule=datapack,
@@ -65,7 +69,12 @@ def export(
     export_path = exp_module_path(config_path, file_extension=".toml")
     export_path.parent.mkdir(parents=True, exist_ok=True)
 
-    run_command = f"mdl run {export_path}"
+    run_command = (
+        f"torchrun --nproc_per_node={exp_config.run.distributed.devices_per_node}"
+        f" --nnodes {exp_config.run.distributed.num_nodes}"
+        " --node_rank 0"
+        f" src/modeling/main.py run {export_path}"
+    )
 
     serialize_experiment_config(exp_config, export_path, eof_comments=run_command)
     print("##################################")
