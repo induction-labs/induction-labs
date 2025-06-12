@@ -2,7 +2,6 @@
 
 {
   packages = [ 
-    pkgs.git
     pkgs.zlib
   ];
 
