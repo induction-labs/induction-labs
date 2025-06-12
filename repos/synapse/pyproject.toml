@@ -4,13 +4,34 @@ version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
 authors = [
-    { name = "Jonathan Li", email = "30177086+MonliH@users.noreply.github.com" }
+    { name = "Jonathan Li", email = "30177086+MonliH@users.noreply.github.com" },
 ]
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "gcsfs>=2025.3.0",
+    "numcodecs>=0.16.1",
+    "numpy>=2.3.0",
+    "tensorstore>=0.1.75",
+    "torch>=2.7.1",
+    "torchvision>=0.22.1",
+    "zarr>=3.0.8",
+]
 
 [project.scripts]
 synapse = "synapse:main"
+
+[tool.uv]
+default-groups = ["dev", "qwen-omni-utils"]
+
+
+[dependency-groups]
+dev = ["ipython>=9.3.0"]
+qwen-omni-utils = [
+    "requests>=2.32.3",
+    "av>=14.4.0",
+    # "librosa>=0.11.0",
+    "decord>=0.6.0",
+]
 
 [build-system]
 requires = ["hatchling"]

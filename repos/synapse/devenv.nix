@@ -1,7 +1,11 @@
-{ pkgs, lib, config, inputs, ... }:
-
 {
-  packages = [ pkgs.git ];
+  pkgs,
+  lib,
+  config,
+  inputs,
+  ...
+}: {
+  packages = [];
 
   languages.python = {
     libraries = [
