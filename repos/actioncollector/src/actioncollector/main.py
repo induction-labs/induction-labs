@@ -31,6 +31,7 @@ def start_screen_record(
         "-framerate", str(framerate),
         "-use_wallclock_as_timestamps", "1",
         "-capture_cursor", "1",
+        "-vsync", "vfr",
         "-i", f"{device_index}:none",
         "-c:v", "libx264",
         "-g", "15",
@@ -40,7 +41,7 @@ def start_screen_record(
         "-copyts", "-muxdelay", "0",
         "-f", "segment",
         "-segment_time", str(segment_time),
-        "-r", str(framerate),
+        # "-r", str(framerate),
         output_path,
     ]
     # open stdin so we can send 'q' to stop cleanly
@@ -71,7 +72,7 @@ def run(
     filename_session_start_time = datetime.datetime.now().strftime("%Y-%m-%d_%H%M%S")
     random_str = "".join(random.choices(string.ascii_uppercase + string.digits, k=5))
     file_path = f"action_capture/{username}/{filename_session_start_time}_{random_str}/"
-    tmp_file_path = "/tmp/" + file_path
+    tmp_file_path = "tmp/" + file_path
     # Create the directory if it doesn't exist
     os.makedirs(tmp_file_path, exist_ok=True)
 
@@ -152,11 +153,11 @@ def run(
     done_bar.close()
 
     # delete tmp files
-    for file in os.listdir(tmp_file_path):
-        file_path = os.path.join(tmp_file_path, file)
-        if os.path.isfile(file_path):
-            print(f"[warning] deleting file: {file_path}")
-            os.remove(file_path)
+    # for file in os.listdir(tmp_file_path):
+    #     file_path = os.path.join(tmp_file_path, file)
+    #     if os.path.isfile(file_path):
+    #         print(f"[warning] deleting file: {file_path}")
+    #         os.remove(file_path)
     
     print("[info] recording finished. All files uploaded to GCS. Exiting.")
 
