@@ -5,6 +5,7 @@ from collections.abc import Generator
 
 import torch
 from pydantic import BaseModel, model_validator
+from smart_open import open as smart_open
 from torchvision.transforms import InterpolationMode
 from torchvision.transforms import functional as F
 
@@ -72,8 +73,8 @@ def stream_video_to_tensors(
     import decord
 
     video_path = args.video_path
-    vr = decord.VideoReader(video_path)
-
+    with smart_open(video_path, "rb") as f:
+        vr = decord.VideoReader(f)
     total_frames, video_fps = len(vr), vr.get_avg_fps()
     first_frame: torch.Tensor = vr.next()
     height, width, _ = first_frame.shape

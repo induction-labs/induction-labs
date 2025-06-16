@@ -33,7 +33,7 @@ async def run(
     from .types import resolution_480p
 
     video_args = VideoProcessArgs(
-        video_path="test_data/video_003.mp4",
+        video_path="gs://induction-labs/jeffrey/test_data/test_video.mp4",
         max_frame_pixels=resolution_480p.pixels(),
         output_fps=2.0,
         output_path="jeffrey/test_vid5.zarr",
