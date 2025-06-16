@@ -4,32 +4,43 @@ import gcsfs
 import tensorstore as ts
 import torch
 from numcodecs.zarr3 import Zstd
-from zarr.storage import FsspecStore
-
+from synapse.elapsed_timer import elapsed_timer
 from synapse.qwen_omni_utils.video_process import fetch_video
-
-from .elapsed_timer import elapsed_timer
+from zarr.storage import FsspecStore
 
 fs = gcsfs.GCSFileSystem(project="induction-labs", asynchronous=False)  # Auth via ADC
 
-store = FsspecStore(fs, path="induction-labs/jeffrey/test_vid3.zarr")
+store = FsspecStore(fs, path="induction-labs/jeffrey/test_vid4.zarr")
 
 codec = Zstd(level=3)  # any numcodecs codec
 
+
 # ---- JSON spec -----------------------------------------------------------
 spec = {
-    "driver": "zarr",  #  "zarr" (v2) or "zarr3"
+    "driver": "zarr3",  #  "zarr" (v2) or "zarr3"
     "kvstore": {  #  Any TensorStore KvStore works here
         "driver": "gcs",  #  <- tells TensorStore to talk to GCS
         "bucket": "induction-labs",  #  GCS bucket name
-        "path": "jeffrey/frames/test3/",  # ends with "/" so keys nest
+        "path": "jeffrey/frames/test4/",  # ends with "/" so keys nest
     },
     # (Optional) array-level metadata; if omitted, supply them as kwargs
     "metadata": {  #  for the v2 driver
-        "compressor": {  #  zarr-v2 syntax
-            "id": "blosc",
-            "cname": "zstd",
-            "clevel": 3,
+        "codecs": [
+            {
+                "name": "blosc",
+                "configuration": {
+                    "cname": "zstd",
+                    "clevel": 3,
+                    "shuffle": "bitshuffle",
+                    "typesize": 1,
+                },
+            }
+        ],
+        "attributes": {
+            # "fps": 30,
+            # "source_camera": "GoPro-11",
+            # "preprocessing": "resize_224_bicubic",
+            # "sha256": "d2c7…",
         },
     },
 }
@@ -76,13 +87,15 @@ def size_repr(self):
 
 
 async def get_video_numpy():
+    smol_spec = {k: v for k, v in spec.items() if k not in ("metadata")}
     store = await ts.open(
-        spec,
+        smol_spec,
         open=True,  # just open - don't recreate
     )
 
     # ‼️  This is the whole-array read - it returns a NumPy ndarray
     video_np = await store.read()  # (T, H, W, C), dtype=uint8
+    print(store.spec())
     return video_np
 
 

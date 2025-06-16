@@ -41,6 +41,7 @@ class TextLIT(ABC, L.LightningModule):
         )
         # TODO: Add more metrics and logging (steptime, tok/s, etc.)
         torch.cuda.synchronize()
+
         allocated_memory = torch.cuda.memory_allocated(
             device=torch.cuda.current_device()
         )

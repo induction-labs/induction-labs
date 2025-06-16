@@ -9,13 +9,16 @@ import time
 import warnings
 from functools import lru_cache
 from io import BytesIO
+from typing import Optional
 
 import requests
 import torch
 import torchvision
 from packaging import version
 from PIL import Image
-from torchvision import io
+from torchvision import io, transforms
+from torchvision.transforms import InterpolationMode
+
 
 logger = logging.getLogger(__name__)
 
@@ -102,11 +105,14 @@ def to_rgb(pil_image: Image.Image) -> Image.Image:
 def fetch_image(
     ele: dict[str, str | Image.Image], size_factor: int = IMAGE_FACTOR
 ) -> Image.Image:
-    image = ele["image"] if "image" in ele else ele["image_url"]
+    if "image" in ele:
+        image = ele["image"]
+    else:
+        image = ele["image_url"]
     image_obj = None
     if isinstance(image, Image.Image):
         image_obj = image
-    elif image.startswith(("http://", "https://")):
+    elif image.startswith("http://") or image.startswith("https://"):
         response = requests.get(image, stream=True)
         image_obj = Image.open(BytesIO(response.content))
     elif image.startswith("file://"):
@@ -152,7 +158,7 @@ def fetch_image(
 def smart_nframes(
     ele: dict,
     total_frames: int,
-    video_fps: float,
+    video_fps: int | float,
 ) -> int:
     """calculate the number of frames for video used for model inputs.
 
@@ -190,7 +196,7 @@ def smart_nframes(
             )
         nframes = min(min(max(nframes, min_frames), max_frames), total_frames)
         nframes = floor_by_factor(nframes, FRAME_FACTOR)
-    if not (nframes >= FRAME_FACTOR and nframes <= total_frames):
+    if not (FRAME_FACTOR <= nframes and nframes <= total_frames):
         raise ValueError(
             f"nframes should in interval [{FRAME_FACTOR}, {total_frames}], but got {nframes}."
         )
@@ -215,8 +221,7 @@ def _read_video_torchvision(
     if version.parse(torchvision.__version__) < version.parse("0.19.0"):
         if "http://" in video_path or "https://" in video_path:
             warnings.warn(
-                "torchvision < 0.19.0 does not support http/https video path, please upgrade to 0.19.0.",
-                stacklevel=2,
+                "torchvision < 0.19.0 does not support http/https video path, please upgrade to 0.19.0."
             )
         if "file://" in video_path:
             video_path = video_path[7:]
@@ -224,7 +229,7 @@ def _read_video_torchvision(
     video, audio, info = io.read_video(
         video_path,
         start_pts=ele.get("video_start", 0.0),
-        end_pts=ele.get("video_end"),
+        end_pts=ele.get("video_end", None),
         pts_unit="sec",
         output_format="TCHW",
     )
@@ -273,7 +278,6 @@ def _read_video_decord(
     print(
         f"decord:  {video_path=}, {total_frames=}, {video_fps=}, time={time.time() - st:.3f}s"
     )
-
     nframes = smart_nframes(ele, total_frames=total_frames, video_fps=video_fps)
     idx = torch.linspace(0, total_frames - 1, nframes).round().long().tolist()
     video = vr.get_batch(idx).asnumpy()
@@ -300,3 +304,126 @@ def get_video_reader_backend() -> str:
         video_reader_backend = "torchvision"
     print(f"qwen-vl-utils using {video_reader_backend} to read video.", file=sys.stderr)
     return video_reader_backend
+
+
+def fetch_video(
+    ele: dict, image_factor: int = IMAGE_FACTOR, return_video_sample_fps: bool = False
+) -> torch.Tensor | list[Image.Image]:
+    if isinstance(ele["video"], str):
+        video_reader_backend = get_video_reader_backend()
+        try:
+            video, sample_fps = VIDEO_READER_BACKENDS[video_reader_backend](ele)
+        except Exception as e:
+            logger.warning(
+                f"video_reader_backend {video_reader_backend} error, use torchvision as default, msg: {e}"
+            )
+            video, sample_fps = VIDEO_READER_BACKENDS["torchvision"](ele)
+
+        nframes, _, height, width = video.shape
+        min_pixels = ele.get("min_pixels", VIDEO_MIN_PIXELS)
+        total_pixels = ele.get("total_pixels", VIDEO_TOTAL_PIXELS)
+        print(nframes)
+        max_pixels = max(
+            min(VIDEO_MAX_PIXELS, total_pixels / nframes * FRAME_FACTOR),
+            int(min_pixels * 1.05),
+        )
+        max_pixels_supposed = ele.get("max_pixels", max_pixels)
+        if max_pixels_supposed > max_pixels:
+            logger.warning(
+                f"The given max_pixels[{max_pixels_supposed}] exceeds limit[{max_pixels}]."
+            )
+        max_pixels = min(max_pixels_supposed, max_pixels)
+        if "resized_height" in ele and "resized_width" in ele:
+            resized_height, resized_width = smart_resize(
+                ele["resized_height"],
+                ele["resized_width"],
+                factor=image_factor,
+            )
+        else:
+            resized_height, resized_width = smart_resize(
+                height,
+                width,
+                factor=image_factor,
+                min_pixels=min_pixels,
+                max_pixels=max_pixels,
+            )
+        print(
+            f"smart_resize: {height=} {width=} -> {resized_height=} {resized_width=}, "
+        )
+        video = transforms.functional.resize(
+            video,
+            [resized_height, resized_width],
+            interpolation=InterpolationMode.BICUBIC,
+            antialias=True,
+        ).float()
+        if return_video_sample_fps:
+            return video, sample_fps
+        return video
+    else:
+        assert isinstance(ele["video"], (list, tuple))
+        process_info = ele.copy()
+        process_info.pop("type", None)
+        process_info.pop("video", None)
+        images = [
+            fetch_image(
+                {"image": video_element, **process_info}, size_factor=image_factor
+            )
+            for video_element in ele["video"]
+        ]
+        nframes = ceil_by_factor(len(images), FRAME_FACTOR)
+        if len(images) < nframes:
+            images.extend([images[-1]] * (nframes - len(images)))
+        if return_video_sample_fps:
+            return images, process_info.pop("fps", 2.0)
+        return images
+
+
+def extract_vision_info(conversations: list[dict] | list[list[dict]]) -> list[dict]:
+    vision_infos = []
+    if isinstance(conversations[0], dict):
+        conversations = [conversations]
+    for conversation in conversations:
+        for message in conversation:
+            if isinstance(message["content"], list):
+                for ele in message["content"]:
+                    if (
+                        "image" in ele
+                        or "image_url" in ele
+                        or "video" in ele
+                        or ele["type"] in ("image", "image_url", "video")
+                    ):
+                        vision_infos.append(ele)
+    return vision_infos
+
+
+def process_vision_info(
+    conversations: list[dict] | list[list[dict]],
+    return_video_kwargs: bool = False,
+) -> tuple[
+    list[Image.Image] | None,
+    list[torch.Tensor | list[Image.Image]] | None,
+    Optional[dict],
+]:
+    vision_infos = extract_vision_info(conversations)
+    ## Read images or videos
+    image_inputs = []
+    video_inputs = []
+    video_sample_fps_list = []
+    for vision_info in vision_infos:
+        if "image" in vision_info or "image_url" in vision_info:
+            image_inputs.append(fetch_image(vision_info))
+        elif "video" in vision_info:
+            video_input, video_sample_fps = fetch_video(
+                vision_info, return_video_sample_fps=True
+            )
+            video_sample_fps_list.append(video_sample_fps)
+            video_inputs.append(video_input)
+        else:
+            raise ValueError("image, image_url or video should in content.")
+    if len(image_inputs) == 0:
+        image_inputs = None
+    if len(video_inputs) == 0:
+        video_inputs = None
+    if return_video_kwargs:
+        return image_inputs, video_inputs, {"fps": video_sample_fps_list}
+    return image_inputs, video_inputs

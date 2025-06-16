@@ -23,6 +23,7 @@
     kmod # for lsmod
     strace
     vim
+    ffmpeg-full
   ];
 
   # https://devenv.sh/languages/
