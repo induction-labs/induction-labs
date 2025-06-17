@@ -79,7 +79,7 @@ def replay(actions):
             # Unknown action type
             print(f"Skipping unsupported action: {a}")
 
-log_path = "/Users/jonathan/Documents/programming/induction/induction-labs/repos/actioncollector/tmp/action_capture_jonathan_2025-06-11_183317_MQXEH_action_capture_000000.jsonl"
+log_path = "/Users/jonathan/Documents/programming/induction/induction-labs/repos/actioncollector/src/actioncollector/playground/output_actions.jsonl"
 actions = load_actions(log_path)
 print(f"Loaded {len(actions)} actions — starting replay in 2 seconds...")
 time.sleep(2)

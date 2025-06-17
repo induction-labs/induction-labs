@@ -9,20 +9,20 @@ def upload_to_gcs_and_delete(from_path: str, to_path: str):
     
     # print(f"Uploading {from_path} to {to_path}...")
 
-    parsed = urlparse(to_path)
-    if parsed.scheme != 'gs' or not parsed.netloc:
-        raise ValueError(f"Invalid GCS URI: {to_path}")
+    # parsed = urlparse(to_path)
+    # if parsed.scheme != 'gs' or not parsed.netloc:
+    #     raise ValueError(f"Invalid GCS URI: {to_path}")
 
-    bucket_name = parsed.netloc
-    blob_name = parsed.path.lstrip('/')
+    # bucket_name = parsed.netloc
+    # blob_name = parsed.path.lstrip('/')
 
-    client = storage.Client()
-    bucket = client.bucket(bucket_name)
-    blob = bucket.blob(blob_name)
+    # client = storage.Client()
+    # bucket = client.bucket(bucket_name)
+    # blob = bucket.blob(blob_name)
 
-    blob.upload_from_filename(from_path)
+    # blob.upload_from_filename(from_path)
 
-    os.remove(from_path)
+    # os.remove(from_path)
 
     # print(f"Uploaded {from_path} → gs://{bucket_name}/{blob_name} and deleted local file.")
 

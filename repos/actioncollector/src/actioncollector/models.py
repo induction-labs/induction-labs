@@ -41,5 +41,5 @@ class Action(BaseModel):
     timestamp: float
 
     @staticmethod
-    def from_action_type(action: actionType) -> Self:
-        return Action(action=action, timestamp=time.time_ns()*1e-9)
+    def from_action_type(action: actionType, timestamp: float=None) -> Self:
+        return Action(action=action, timestamp=time.time_ns()*1e-9 if timestamp is None else timestamp)

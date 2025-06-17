@@ -2,7 +2,6 @@
 
 {
   packages = [ 
-    pkgs.git
     pkgs.zlib
   ];
 
@@ -11,6 +10,8 @@
       # pkgs.cmake
     ];
     enable = true;
+    package = pkgs.python312Full;
+
     uv = {
       enable = true;
     };
