@@ -3449,6 +3449,7 @@ dependencies = [
     { name = "torchvision", version = "0.22.1", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "platform_machine == 'aarch64' and sys_platform == 'linux'" },
     { name = "torchvision", version = "0.22.1", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'linux'" },
     { name = "torchvision", version = "0.22.1+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "platform_machine != 'aarch64' and sys_platform == 'linux'" },
+    { name = "tqdm" },
     { name = "typer" },
     { name = "zarr" },
 ]
@@ -3473,6 +3474,7 @@ requires-dist = [
     { name = "tensorstore", specifier = ">=0.1.75" },
     { name = "torch", specifier = ">=2.7.1" },
     { name = "torchvision", specifier = ">=0.22.1" },
+    { name = "tqdm", specifier = ">=4.67.1" },
     { name = "typer", specifier = ">=0.16.0" },
     { name = "zarr", specifier = ">=3.0.8" },
 ]

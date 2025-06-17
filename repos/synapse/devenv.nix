@@ -6,6 +6,7 @@
   ...
 }: {
   packages = [];
+  env.DECORD_REWIND_RETRY_MAX = "64";
 
   languages.python = {
     libraries = [

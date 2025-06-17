@@ -6,6 +6,8 @@ from synapse.qwen_omni_utils.video import StreamVideoArgs, stream_video_to_tenso
 from synapse.utils.logging import configure_logging
 
 # from zarr import Array
+from tqdm import tqdm
+
 from .types import VideoProcessArgs
 from .zarr_utils import (
     ZarrArrayAttributes,
@@ -20,7 +22,7 @@ async def process_video(
     args: VideoProcessArgs,
 ):
     logger.debug(f"Processing video with args: {args}")
-    with elapsed_timer() as timer:
+    with elapsed_timer("process_video") as timer:
         # root = get_zarr_root(fs, args.output_path)
         stream_args = StreamVideoArgs(
             output_fps=args.output_fps,
@@ -53,12 +55,19 @@ async def process_video(
         # logger.debug(f"Created Zarr array with attributes: {zarr_array.attrs}")
 
         # Process and append frames to the Zarr array
-        for i, frames in enumerate(video_frames):
+        for i, frames in enumerate(
+            tqdm(
+                video_frames,
+                desc="Processing video frames",
+                total=stream_metadata.total_num_chunks,
+            )
+        ):
             logger.debug(f"Processing chunk {i + 1}/{stream_metadata.total_num_chunks}")
             chunk_start = i * stream_metadata.frames_per_chunk
-            await append_batch(zarr_array, frames, chunk_start)
+            with elapsed_timer("append_batch"):
+                await append_batch(zarr_array, frames, chunk_start)
             logger.debug(f"Appended chunk {i + 1} to Zarr array")
         logger.info(
-            f"Processed {stream_metadata.total_num_chunks} chunks in {timer():.2f} seconds"
+            f"Processed {stream_metadata.total_num_chunks} chunks in {timer.elapsed:.2f} seconds"
         )
         return stream_metadata, zarr_array
