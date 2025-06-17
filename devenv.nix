@@ -10,9 +10,14 @@
   packages = with pkgs; [
   ];
 
+  git-hooks.hooks = {
+    ruff.enable = true;
+    ruff-format.enable = true;
+    alejandra.enable = true;
+  };
+
   languages.python = {
     libraries = [
-      # pkgs.cmake
     ];
     enable = true;
     uv = {
