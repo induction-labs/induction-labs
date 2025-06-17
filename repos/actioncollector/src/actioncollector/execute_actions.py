@@ -1,14 +1,20 @@
+from __future__ import annotations
+
 import json
 import time
-import sys
-from actioncollector.models import Action, MouseMove, MouseButton, Scroll, KeyButton
-from pynput.mouse import Controller as MouseController, Button as MouseButtonEnum
-from pynput.keyboard import Controller as KeyboardController, Key as KeyboardKey
+
+from pynput.keyboard import Controller as KeyboardController
+from pynput.keyboard import Key as KeyboardKey
+from pynput.mouse import Button as MouseButtonEnum
+from pynput.mouse import Controller as MouseController
+
+from actioncollector.models import Action, KeyButton, MouseButton, MouseMove, Scroll
+
 
 def load_actions(path):
     """Read actions.log and parse each line into an Action, preserving order."""
     actions = []
-    with open(path, "r") as f:
+    with open(path) as f:
         for line in f:
             data = json.loads(line)
             # Pydantic model parsing
@@ -16,12 +22,14 @@ def load_actions(path):
             actions.append(action)
     return actions
 
+
 def get_mouse_button(button_name: str):
     """Map string to pynput.mouse.Button."""
     try:
         return getattr(MouseButtonEnum, button_name)
     except AttributeError:
         raise ValueError(f"Unknown mouse button: {button_name}")
+
 
 def get_keyboard_key(key_str: str):
     """Map string to pynput.keyboard.Key or leave as character."""
@@ -31,6 +39,7 @@ def get_keyboard_key(key_str: str):
     except AttributeError:
         # fallback to literal character
         return key_str
+
 
 def replay(actions):
     mouse = MouseController()
@@ -78,6 +87,7 @@ def replay(actions):
         else:
             # Unknown action type
             print(f"Skipping unsupported action: {a}")
+
 
 log_path = "/Users/jonathan/Documents/programming/induction/induction-labs/repos/actioncollector/src/actioncollector/playground/output_actions.jsonl"
 actions = load_actions(log_path)

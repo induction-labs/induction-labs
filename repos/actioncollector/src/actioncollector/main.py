@@ -1,18 +1,21 @@
-import subprocess
-from tqdm import tqdm
-from typing import Optional
+from __future__ import annotations
+
+import datetime
 import os
 import random
-import string
-import datetime
 import re
-from actioncollector.utils import upload_to_gcs_and_delete, recording_metadata
-from actioncollector.record_actions import ActionRecorder
+import string
+import subprocess
 from concurrent.futures import ThreadPoolExecutor
 
 import typer
+from tqdm import tqdm
+
+from actioncollector.record_actions import ActionRecorder
+from actioncollector.utils import recording_metadata, upload_to_gcs_and_delete
 
 app = typer.Typer()
+
 
 def start_screen_record(
     output_path: str, segment_time: int = 30, framerate: int = 30, device_index: int = 1
@@ -27,20 +30,35 @@ def start_screen_record(
 
     cmd = [
         "ffmpeg",
-        "-f", "avfoundation",
-        "-framerate", str(framerate),
-        "-use_wallclock_as_timestamps", "1",
-        "-capture_cursor", "1",
-        "-vsync", "vfr",
-        "-i", f"{device_index}:none",
-        "-c:v", "libx264",
-        "-g", "15",
-        "-c:a", "aac",
-        "-preset", "veryfast",
-        "-crf", "17",
-        "-copyts", "-muxdelay", "0",
-        "-f", "segment",
-        "-segment_time", str(segment_time),
+        "-f",
+        "avfoundation",
+        "-framerate",
+        str(framerate),
+        "-use_wallclock_as_timestamps",
+        "1",
+        "-capture_cursor",
+        "1",
+        "-vsync",
+        "vfr",
+        "-i",
+        f"{device_index}:none",
+        "-c:v",
+        "libx264",
+        "-g",
+        "15",
+        "-c:a",
+        "aac",
+        "-preset",
+        "veryfast",
+        "-crf",
+        "17",
+        "-copyts",
+        "-muxdelay",
+        "0",
+        "-f",
+        "segment",
+        "-segment_time",
+        str(segment_time),
         # "-r", str(framerate),
         output_path,
     ]
@@ -58,16 +76,14 @@ def on_segment_finished(filename: str, gs_file_path: str, callback=None):
 
 @app.command()
 def run(
-    username: Optional[str] = None,
+    username: str | None = None,
     output_bucket: str = "induction-labs",
     video_segment_buffer_length: float = 30,
 ):
     if username is None:
         username = os.getenv("USER", "unknown_user")
 
-    metadata = recording_metadata(
-        username, video_segment_buffer_length
-    )
+    metadata = recording_metadata(username, video_segment_buffer_length)
 
     filename_session_start_time = datetime.datetime.now().strftime("%Y-%m-%d_%H%M%S")
     random_str = "".join(random.choices(string.ascii_uppercase + string.digits, k=5))
@@ -138,6 +154,7 @@ def run(
     action_recorder.stop()
 
     print("[info] saving last segment…")
+
     def log_final_done():
         done_bar.update(1)
         print("[info] all segments done.")
@@ -153,12 +170,12 @@ def run(
     done_bar.close()
 
     # delete tmp files
-    # for file in os.listdir(tmp_file_path):
-    #     file_path = os.path.join(tmp_file_path, file)
-    #     if os.path.isfile(file_path):
-    #         print(f"[warning] deleting file: {file_path}")
-    #         os.remove(file_path)
-    
+    for file in os.listdir(tmp_file_path):
+        file_path = os.path.join(tmp_file_path, file)
+        if os.path.isfile(file_path):
+            print(f"[warning] deleting file: {file_path}")
+            os.remove(file_path)
+
     print("[info] recording finished. All files uploaded to GCS. Exiting.")
 
 

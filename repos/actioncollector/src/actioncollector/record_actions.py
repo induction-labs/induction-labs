@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
-import json
-from pynput import mouse, keyboard
-import threading
-from queue import Queue
-from concurrent.futures import ThreadPoolExecutor
+from __future__ import annotations
 
-from actioncollector.models import Action, MouseMove, MouseButton, Scroll, KeyButton
+import json
+import threading
+from concurrent.futures import ThreadPoolExecutor
+from queue import Queue
+
+from pynput import keyboard, mouse
+
+from actioncollector.models import Action, KeyButton, MouseButton, MouseMove, Scroll
 from actioncollector.utils import upload_to_gcs_and_delete
 
 

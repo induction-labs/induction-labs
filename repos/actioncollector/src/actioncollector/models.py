@@ -1,5 +1,8 @@
-from typing import Literal, Union, Optional, Self
+from __future__ import annotations
+
 import time
+from typing import Literal, Self, Union
+
 from pydantic import BaseModel, Field
 
 
@@ -36,10 +39,14 @@ class KeyButton(BaseModel):
 
 actionType = Union[MouseMove, MouseButton, Scroll, KeyButton]
 
+
 class Action(BaseModel):
     action: actionType = Field(discriminator="action")
     timestamp: float
 
     @staticmethod
-    def from_action_type(action: actionType, timestamp: float=None) -> Self:
-        return Action(action=action, timestamp=time.time_ns()*1e-9 if timestamp is None else timestamp)
+    def from_action_type(action: actionType, timestamp: float = None) -> Self:
+        return Action(
+            action=action,
+            timestamp=time.time_ns() * 1e-9 if timestamp is None else timestamp,
+        )
