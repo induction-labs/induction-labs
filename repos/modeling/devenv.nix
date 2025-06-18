@@ -6,7 +6,7 @@
   ...
 }: {
   # https://devenv.sh/basics/
-  env.GREET = "devenv";
+  # env.GREET = "devenv";
   env.UV = "1";
   # If you turn this off, recompile with uv cache clean first.
   env.VLLM_USE_PRECOMPILED = "1";
@@ -51,8 +51,6 @@
   '';
 
   enterShell = ''
-    hello
-    git --version
     # We need to set this manually otherwise triton tries to call `ldconfig` which is UB in nix.
     export TRITON_LIBCUDA_PATH="$LD_LIBRARY_PATH";
   '';

@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 import tensorstore as ts
+from tqdm import tqdm
+
 from synapse.elapsed_timer import elapsed_timer
 from synapse.qwen_omni_utils.video import StreamVideoArgs, stream_video_to_tensors
 from synapse.utils.logging import configure_logging
-
-# from zarr import Array
-from tqdm import tqdm
 
 from .types import VideoProcessArgs
 from .zarr_utils import (
@@ -21,7 +20,7 @@ logger = configure_logging(__name__)
 async def process_video(
     args: VideoProcessArgs,
 ):
-    logger.debug(f"Processing video with args: {args}")
+    logger.debug("Processing video with args: %r", args)
     with elapsed_timer("process_video") as timer:
         # root = get_zarr_root(fs, args.output_path)
         stream_args = StreamVideoArgs(
@@ -49,6 +48,9 @@ async def process_video(
                 ),  # Start with 0 frames
                 dtype=ts.uint8,
                 path=args.output_path,
+                metadata={
+                    "stream": stream_metadata.model_dump(),
+                },
             ),
         )
         # assert isinstance(zarr_array, Array)
@@ -62,12 +64,16 @@ async def process_video(
                 total=stream_metadata.total_num_chunks,
             )
         ):
-            logger.debug(f"Processing chunk {i + 1}/{stream_metadata.total_num_chunks}")
+            logger.debug(
+                "Processing chunk %d/%d", i + 1, stream_metadata.total_num_chunks
+            )
             chunk_start = i * stream_metadata.frames_per_chunk
             with elapsed_timer("append_batch"):
                 await append_batch(zarr_array, frames, chunk_start)
-            logger.debug(f"Appended chunk {i + 1} to Zarr array")
+            logger.debug("Appended chunk %d to Zarr array", i + 1)
         logger.info(
-            f"Processed {stream_metadata.total_num_chunks} chunks in {timer.elapsed:.2f} seconds"
+            "Processed %d chunks in %.2f seconds",
+            stream_metadata.total_num_chunks,
+            timer.elapsed,
         )
         return stream_metadata, zarr_array

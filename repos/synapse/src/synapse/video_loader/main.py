@@ -4,6 +4,7 @@ import asyncio
 from functools import wraps
 
 import typer
+
 from synapse.elapsed_timer import elapsed_timer
 
 

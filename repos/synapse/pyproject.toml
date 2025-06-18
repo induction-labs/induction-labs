@@ -34,7 +34,7 @@ qwen-omni-utils = [
     "requests>=2.32.3",
     "av>=14.4.0",
     # "librosa>=0.11.0",
-    "decord>=0.6.0",
+    "decord>=0.6.0; sys_platform == 'linux' and platform_machine == 'x86_64'",
 ]
 
 [build-system]

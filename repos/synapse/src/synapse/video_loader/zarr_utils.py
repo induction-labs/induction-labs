@@ -34,6 +34,7 @@ class ZarrArrayAttributes(BaseModel):
     chunk_shape: tuple[int, ...]
     dtype: Any
     path: str
+    metadata: dict | None = None
 
     def __str__(self):
         return f"ZarrArrayAttributes(shape={self.shape}, chunk_shape={self.chunk_shape}, dtype={self.dtype})"
@@ -70,7 +71,7 @@ async def create_zarr_array(atr: ZarrArrayAttributes):
     """
     Create a Zarr array with the specified parameters if it does not already exist.
     """
-    spec = get_tensorstore_spec(path=atr.path, attributes=None)
+    spec = get_tensorstore_spec(path=atr.path, attributes=atr.metadata)
     store = await ts.open(
         spec,
         dtype=ts.uint8,  # required if not in metadata

@@ -4,9 +4,10 @@ import gcsfs
 import tensorstore as ts
 import torch
 from numcodecs.zarr3 import Zstd
+from zarr.storage import FsspecStore
+
 from synapse.elapsed_timer import elapsed_timer
 from synapse.qwen_omni_utils.video_process import fetch_video
-from zarr.storage import FsspecStore
 
 fs = gcsfs.GCSFileSystem(project="induction-labs", asynchronous=False)  # Auth via ADC
 

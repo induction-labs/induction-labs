@@ -3462,7 +3462,7 @@ dev = [
 ]
 qwen-omni-utils = [
     { name = "av" },
-    { name = "decord" },
+    { name = "decord", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "requests" },
 ]
 
@@ -3485,7 +3485,7 @@ requires-dist = [
 dev = [{ name = "ipython", specifier = ">=9.3.0" }]
 qwen-omni-utils = [
     { name = "av", specifier = ">=14.4.0" },
-    { name = "decord", specifier = ">=0.6.0" },
+    { name = "decord", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'", specifier = ">=0.6.0" },
     { name = "requests", specifier = ">=2.32.3" },
 ]
 
