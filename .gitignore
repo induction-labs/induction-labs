@@ -174,7 +174,8 @@ cython_debug/
 .idea/
 
 # VSCode
-.vscode/
+.vscode/*
+!.vscode/extensions.json
 
 # DS Store
 .DS_Store

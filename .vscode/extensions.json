@@ -1,0 +1,12 @@
+{
+  "recommendations": [
+    "kamadorueda.alejandra",
+    "ms-azuretools.vscode-docker",
+    "tamasfe.even-better-toml",
+    "jannchie.ruff-ignore-explainer",
+    "hashicorp.hcl",
+    "ms-toolsai.jupyter",
+    "ms-kubernetes-tools.vscode-kubernetes-tools",
+    "charliermarsh.ruff"
+  ]
+}
