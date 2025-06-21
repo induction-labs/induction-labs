@@ -2812,6 +2812,15 @@ wheels = [
 ]
 
 [[package]]
+name = "redis"
+version = "6.2.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/ea/9a/0551e01ba52b944f97480721656578c8a7c46b51b99d66814f85fe3a4f3e/redis-6.2.0.tar.gz", hash = "sha256:e821f129b75dde6cb99dd35e5c76e8c49512a5a0d8dfdc560b2fbd44b85ca977", size = 4639129, upload_time = "2025-05-28T05:01:18.91Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/13/67/e60968d3b0e077495a8fee89cf3f2373db98e528288a48f1ee44967f6e8c/redis-6.2.0-py3-none-any.whl", hash = "sha256:c8ddf316ee0aab65f04a11229e94a64b2618451dab7a67cb2f77eb799d872d5e", size = 278659, upload_time = "2025-05-28T05:01:16.955Z" },
+]
+
+[[package]]
 name = "referencing"
 version = "0.36.2"
 source = { registry = "https://pypi.org/simple" }
@@ -3441,9 +3450,13 @@ version = "0.1.0"
 source = { editable = "repos/synapse" }
 dependencies = [
     { name = "gcsfs" },
+    { name = "google-cloud-storage" },
     { name = "numcodecs" },
     { name = "numpy" },
+    { name = "pandas" },
+    { name = "pyarrow" },
     { name = "pydantic" },
+    { name = "redis" },
     { name = "smart-open" },
     { name = "tensorstore" },
     { name = "torch", version = "2.7.1", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'linux'" },
@@ -3469,9 +3482,13 @@ qwen-omni-utils = [
 [package.metadata]
 requires-dist = [
     { name = "gcsfs", specifier = ">=2025.3.0" },
+    { name = "google-cloud-storage", specifier = ">=3.1.0" },
     { name = "numcodecs", specifier = ">=0.16.1" },
     { name = "numpy", specifier = ">=2.3.0" },
+    { name = "pandas", specifier = ">=2.3.0" },
+    { name = "pyarrow", specifier = ">=20.0.0" },
     { name = "pydantic", specifier = ">=2.11.5" },
+    { name = "redis", specifier = ">=6.2.0" },
     { name = "smart-open", extras = ["gcp"], specifier = ">=7.1.0" },
     { name = "tensorstore", specifier = ">=0.1.75" },
     { name = "torch", specifier = ">=2.7.1" },

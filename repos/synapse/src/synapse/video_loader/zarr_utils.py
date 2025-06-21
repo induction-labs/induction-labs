@@ -14,7 +14,7 @@ context = ts.Context(
         # 2 GB read-back cache in RAM
         "cache_pool": {"total_bytes_limit": 2_000_000_000},
         # Optional: raise GCS concurrency if you hit throughput limits
-        "gcs_request_concurrency": {"limit": 32},
+        "gcs_request_concurrency": {"limit": 16},
     }
 )
 
@@ -42,6 +42,12 @@ class ZarrArrayAttributes(BaseModel):
 
 def get_tensorstore_spec(path: str, attributes: dict | None = None) -> dict:
     # ---- JSON spec -----------------------------------------------------------
+    assert path.startswith("gs://induction-labs/"), (
+        f"Path must start with 'gs://induction-labs/', got {path}"
+    )
+
+    # Get rid of gs://induction-labs/
+    path = path[len("gs://induction-labs/") :]
     return {
         "driver": "zarr3",  #  "zarr" (v2) or "zarr3"
         "kvstore": {  #  Any TensorStore KvStore works here

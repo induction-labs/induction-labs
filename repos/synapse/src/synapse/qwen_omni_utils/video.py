@@ -4,7 +4,7 @@ import math
 from collections.abc import Generator
 
 import torch
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel
 from smart_open import open as smart_open
 from torchvision.transforms import InterpolationMode
 from torchvision.transforms import functional as F
@@ -37,16 +37,16 @@ class StreamMetadata(BaseModel):
     frames_per_chunk: int
 
     @property
-    def fps_ratio(self) -> int:
+    def fps_ratio(self) -> float:
         return int(self.input_video.fps / self.output_video.fps)
 
-    @model_validator(mode="after")
-    def validate_fps_ratio(self) -> StreamMetadata:
-        assert self.input_video.fps % self.output_video.fps == 0, (
-            f"input_video.fps[{self.input_video.fps}] should be divisible by "
-            f"output_video.fps[{self.output_video.fps}]"
-        )
-        return self
+    # @model_validator(mode="after")
+    # def validate_fps_ratio(self) -> StreamMetadata:
+    #     assert self.input_video.fps % self.output_video.fps == 0, (
+    #         f"input_video.fps[{self.input_video.fps}] should be divisible by "
+    #         f"output_video.fps[{self.output_video.fps}]"
+    #     )
+    #     return self
 
     @property
     def total_num_chunks(self) -> int:
@@ -55,6 +55,7 @@ class StreamMetadata(BaseModel):
 
 def stream_video_to_tensors(
     args: StreamVideoArgs,
+    tmp_video_path: str,
 ) -> tuple[StreamMetadata, Generator[torch.Tensor, None, None]]:
     """read video using decord.VideoReader
 
@@ -72,9 +73,12 @@ def stream_video_to_tensors(
     )
     import decord
 
-    video_path = args.video_path
-    with smart_open(video_path, "rb") as f:
-        vr = decord.VideoReader(f)
+    with smart_open(args.video_path, "rb") as src, open(tmp_video_path, "wb") as dst:
+        for chunk in iter(lambda: src.read(1 << 20), b""):
+            dst.write(chunk)
+        dst.flush()
+    vr = decord.VideoReader(tmp_video_path, ctx=decord.cpu(0))
+
     total_frames, video_fps = len(vr), vr.get_avg_fps()
     first_frame: torch.Tensor = vr.next()
     height, width, _ = first_frame.shape
@@ -122,10 +126,15 @@ def stream_video_to_tensors(
             f"last_input_frame[{input_range_end}] should be less than "
             f"input_video.total_frames[{stream_metadata.input_video.total_frames}]"
         )
-        idx = torch.arange(
-            input_range_start,
-            input_range_end,
-            stream_metadata.fps_ratio,
+        idx = (
+            torch.arange(
+                input_range_start,
+                input_range_end,
+                stream_metadata.fps_ratio,
+            )
+            .round()
+            .long()
+            .tolist()
         )
         video = vr.get_batch(idx).asnumpy()
         video = torch.tensor(video).permute(0, 3, 1, 2)
@@ -142,23 +151,3 @@ def stream_video_to_tensors(
             yield process_chunk(i)
 
     return stream_metadata, video_generator()
-    # #
-    # idx = torch.linspace(0, clipped_total_frames, output_nframes).long().tolist()
-    # video = vr.get_batch(idx).asnumpy()
-    # video = torch.tensor(video).permute(0, 3, 1, 2)  # Convert to TCHW format
-    # _, _, height, width = video.shape
-    # resized_height, resized_width = smart_resize(
-    #     height,
-    #     width,
-    #     factor=IMAGE_FACTOR,
-    #     min_pixels=0,
-    #     max_pixels=args.max_pixels,
-    # )
-
-    # video = F.resize(
-    #     video,
-    #     [resized_height, resized_width],
-    #     interpolation=InterpolationMode.BICUBIC,
-    #     antialias=True,
-    # )
-    # return video
