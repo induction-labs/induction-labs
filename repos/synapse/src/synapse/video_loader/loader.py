@@ -35,7 +35,6 @@ async def process_video(
             stream_metadata, video_frames = stream_video_to_tensors(
                 stream_args, tmp.name
             )
-
             # Create the Zarr array if it does not exist
             zarr_array = await create_zarr_array(
                 ZarrArrayAttributes(
@@ -72,7 +71,7 @@ async def process_video(
                 logger.debug(
                     "Processing chunk %d/%d", i + 1, stream_metadata.total_num_chunks
                 )
-                chunk_start = i * stream_metadata.frames_per_chunk
+                chunk_start = i * stream_metadata.output_frames_per_chunk
                 with elapsed_timer("append_batch"):
                     await append_batch(zarr_array, frames, chunk_start)
                 logger.debug("Appended chunk %d to Zarr array", i + 1)

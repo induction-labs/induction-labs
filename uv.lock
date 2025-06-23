@@ -4120,6 +4120,7 @@ dependencies = [
     { name = "torchvision", version = "0.22.1+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "platform_machine != 'aarch64' and sys_platform == 'linux'" },
     { name = "tqdm" },
     { name = "typer" },
+    { name = "video-reader-rs" },
     { name = "zarr" },
 ]
 
@@ -4149,6 +4150,7 @@ requires-dist = [
     { name = "torchvision", specifier = ">=0.22.1" },
     { name = "tqdm", specifier = ">=4.67.1" },
     { name = "typer", specifier = ">=0.16.0" },
+    { name = "video-reader-rs", git = "https://github.com/gcanat/video_reader-rs" },
     { name = "zarr", specifier = ">=3.0.8" },
 ]
 
@@ -4577,6 +4579,11 @@ sdist = { url = "https://files.pythonhosted.org/packages/15/22/9ee70a2574a4f4599
 wheels = [
     { url = "https://files.pythonhosted.org/packages/a7/c2/fe1e52489ae3122415c51f387e221dd0773709bad6c6cdaa599e8a2c5185/urllib3-2.5.0-py3-none-any.whl", hash = "sha256:e6b01673c0fa6a13e374b50871808eb3bf7046c4b125b216f6bf1cc604cff0dc", size = 129795, upload_time = "2025-06-18T14:07:40.39Z" },
 ]
+
+[[package]]
+name = "video-reader-rs"
+version = "0.2.9"
+source = { git = "https://github.com/gcanat/video_reader-rs#da2c7c905bdf324a9dca332060e410188f9eca39" }
 
 [[package]]
 name = "virtualenv"
