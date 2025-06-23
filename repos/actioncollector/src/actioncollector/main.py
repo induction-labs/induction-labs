@@ -68,6 +68,52 @@ def start_screen_record(
     )
 
 
+def ffmpeg_list_video_devices():
+    """
+    Returns a list of tuples (index, device_name) for all video devices
+    as enumerated by ffmpeg's AVFoundation input.
+    """
+    # Run ffmpeg to list devices; ffmpeg writes device lists to stderr
+    result = subprocess.run(
+        ["ffmpeg", "-f", "avfoundation", "-list_devices", "true", "-i", ""],
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    lines = result.stderr.splitlines()
+
+    devices = []
+    start_index = None
+
+    # Locate the start of the video device list
+    for i, line in enumerate(lines):
+        if "AVFoundation video devices" in line:
+            start_index = i
+            break
+
+    if start_index is None:
+        raise RuntimeError(
+            "Could not find 'AVFoundation video devices' in ffmpeg output"
+        )
+
+    # Parse lines until the audio devices section
+    for line in lines[start_index + 1 :]:
+        if "AVFoundation audio devices" in line:
+            break
+        match = re.match(r".*\[(\d+)\]\s*(.+)", line)
+        if match:
+            idx = int(match.group(1))
+            name = match.group(2).strip()
+            devices.append((idx, name))
+
+    return devices
+
+
+def get_default_device(devices: list[tuple[int, str]]) -> int:
+    for idx, name in devices:
+        if "Capture screen" in name:
+            return idx
+
+
 def on_segment_finished(filename: str, gs_file_path: str, callback=None):
     upload_to_gcs_and_delete(filename, gs_file_path + filename.split("/")[-1])
     if callback:
@@ -110,10 +156,18 @@ def run(
 
     executor = ThreadPoolExecutor(max_workers=5)
 
+    devices = ffmpeg_list_video_devices()
+    device_id = get_default_device(devices)
+    print("[info] available video devices:")
+    for idx, name in devices:
+        print(f"  [{idx}] {name}")
+    print("[info] using device index:", device_id, "which is", devices[device_id][1])
+
     print("[info] starting screen recording…")
     ffmpeg_proc = start_screen_record(
         tmp_file_path + "screen_capture_%06d.mp4",
         segment_time=video_segment_buffer_length,
+        device_index=device_id,
     )
     print("[info] recording screen now.")
     pat = re.compile(r"\[segment @ [^\]]+\] Opening '([^']+)' for writing")

@@ -4,3 +4,6 @@
 [submodule "repos/pynput"]
 	path = repos/pynput
 	url = git@github.com:induction-labs/pynput.git
+[submodule "repos/osworld"]
+	path = repos/osworld
+	url = git@github.com:xlang-ai/OSWorld.git
