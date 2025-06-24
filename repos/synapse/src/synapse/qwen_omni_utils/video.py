@@ -3,11 +3,11 @@ from __future__ import annotations
 import math
 from collections.abc import Generator
 
+import numpy as np
 import torch
 from pydantic import BaseModel
 from smart_open import open as smart_open
-from torchvision.transforms import InterpolationMode
-from torchvision.transforms import functional as F
+from video_reader import PyVideoReader
 
 from synapse.video_loader.types import VideoResolution
 
@@ -34,23 +34,33 @@ class VideoMetadata(BaseModel):
 class StreamMetadata(BaseModel):
     input_video: VideoMetadata
     output_video: VideoMetadata
-    frames_per_chunk: int
+    output_frames_per_chunk: int
 
     @property
     def fps_ratio(self) -> float:
-        return int(self.input_video.fps / self.output_video.fps)
+        return self.input_video.fps / self.output_video.fps
 
-    # @model_validator(mode="after")
-    # def validate_fps_ratio(self) -> StreamMetadata:
-    #     assert self.input_video.fps % self.output_video.fps == 0, (
-    #         f"input_video.fps[{self.input_video.fps}] should be divisible by "
-    #         f"output_video.fps[{self.output_video.fps}]"
-    #     )
-    #     return self
+    @property
+    def input_frames_per_chunk(self) -> float:
+        """Number of frames in the input video per chunk."""
+        return self.output_frames_per_chunk * self.fps_ratio
+
+    @property
+    def chunk_duration(self) -> float:
+        """Duration of each chunk in seconds."""
+        return self.output_frames_per_chunk / self.output_video.fps
 
     @property
     def total_num_chunks(self) -> int:
-        return math.ceil(self.output_video.total_frames / self.frames_per_chunk)
+        return math.ceil(self.output_video.total_frames / self.output_frames_per_chunk)
+
+
+class VideoReaderMetadata(BaseModel):
+    width: int
+    height: int
+    duration: float
+    fps: float
+    frame_count: int
 
 
 def stream_video_to_tensors(
@@ -71,34 +81,41 @@ def stream_video_to_tensors(
     assert get_video_reader_backend() == "decord", (
         "fetch_video_decord should only be used when decord is available."
     )
-    import decord
+    # import decord
 
     with smart_open(args.video_path, "rb") as src, open(tmp_video_path, "wb") as dst:
         for chunk in iter(lambda: src.read(1 << 20), b""):
             dst.write(chunk)
         dst.flush()
-    vr = decord.VideoReader(tmp_video_path, ctx=decord.cpu(0))
+    vr = PyVideoReader(tmp_video_path)
+    reader_metadata = VideoReaderMetadata(**vr.get_info())
 
-    total_frames, video_fps = len(vr), vr.get_avg_fps()
-    first_frame: torch.Tensor = vr.next()
-    height, width, _ = first_frame.shape
     input_video_metadata = VideoMetadata(
-        fps=video_fps,
-        total_frames=total_frames,
-        resolution=VideoResolution(height=height, width=width),
+        fps=reader_metadata.fps,
+        total_frames=reader_metadata.frame_count,
+        resolution=VideoResolution(
+            height=reader_metadata.height,
+            width=reader_metadata.width,
+        ),
     )
 
     # This can be odd as well, shouldn't matter. We can clip to even number of frames if needed later.
     output_nframes = math.floor(args.output_fps * input_video_metadata.duration)
-    # clipped_total_frames = output_nframes * fps_ratio
-    # assert clipped_total_frames <= total_frames
 
     resized_height, resized_width = smart_resize(
-        height,
-        width,
+        input_video_metadata.resolution.height,
+        input_video_metadata.resolution.width,
         factor=IMAGE_FACTOR,
         min_pixels=0,
         max_pixels=args.max_pixels,
+    )
+
+    shorter, longer = sorted([resized_height, resized_width])
+    vr = PyVideoReader(
+        tmp_video_path,
+        filter=f"scale={resized_width}:{resized_height}:flags=bicubic+full_chroma_int+accurate_rnd",
+        resize_shorter_side=shorter,
+        resize_longer_side=longer,
     )
     output_video_metadata = VideoMetadata(
         fps=args.output_fps,
@@ -109,23 +126,17 @@ def stream_video_to_tensors(
     stream_metadata = StreamMetadata(
         input_video=input_video_metadata,
         output_video=output_video_metadata,
-        frames_per_chunk=args.frames_per_chunk,
+        output_frames_per_chunk=args.frames_per_chunk,
     )
 
     def process_chunk(index: int):
-        input_range_start = (
-            index * stream_metadata.frames_per_chunk * stream_metadata.fps_ratio
-        )
+        chunk_duration_start = index * stream_metadata.chunk_duration
+        chunk_duration_end = (index + 1) * stream_metadata.chunk_duration
+        input_range_start = chunk_duration_start * stream_metadata.input_video.fps
         # last input frame non-inclusive
-        input_range_end = (
-            input_range_start
-            + stream_metadata.frames_per_chunk * stream_metadata.fps_ratio
-        )
+        input_range_end = chunk_duration_end * stream_metadata.input_video.fps
         input_range_end = min(input_range_end, stream_metadata.input_video.total_frames)
-        assert input_range_end <= stream_metadata.input_video.total_frames, (
-            f"last_input_frame[{input_range_end}] should be less than "
-            f"input_video.total_frames[{stream_metadata.input_video.total_frames}]"
-        )
+
         idx = (
             torch.arange(
                 input_range_start,
@@ -134,15 +145,34 @@ def stream_video_to_tensors(
             )
             .round()
             .long()
-            .tolist()
+            .numpy()
         )
-        video = vr.get_batch(idx).asnumpy()
+        # TODO: Fix there can be fucking off by one errors if fps_ratio is barely smaller than an integer.
+        assert len(idx) <= stream_metadata.output_frames_per_chunk + 1, (
+            f"idx[{idx}] should have length less than or equal to "
+            f"output_frames_per_chunk[{stream_metadata.output_frames_per_chunk}]"
+        )
+        idx = idx[0 : stream_metadata.output_frames_per_chunk]
+
+        assert np.all(idx < stream_metadata.input_video.total_frames), (
+            f"idx[{idx}] should be less than "
+            f"input_video.total_frames[{stream_metadata.input_video.total_frames}]"
+        )
+
+        # Important! Need to set `with_fallback=True` to avoid random EOF errors.
+        video = vr.get_batch(idx, True)
+        assert isinstance(video, np.ndarray), (
+            f"video should be a numpy array, got {type(video)}"
+        )
         video = torch.tensor(video).permute(0, 3, 1, 2)
-        video = F.resize(
-            video,
-            [resized_height, resized_width],
-            interpolation=InterpolationMode.BICUBIC,
-            antialias=True,
+        assert video.shape[1:] == (
+            3,
+            stream_metadata.output_video.resolution.height,
+            stream_metadata.output_video.resolution.width,
+        ), (
+            f"video shape should be (T, C, H, W), got {video.shape[1:]} "
+            f"for chunk {index} with resolution "
+            f"{stream_metadata.output_video.resolution}"
         )
         return video
 

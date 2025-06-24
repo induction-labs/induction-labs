@@ -40,10 +40,10 @@ async def test():
 
     video_args = VideoProcessArgs(
         # video_path="gs://induction-labs/jeffrey/test_data/test_video.mp4",
-        video_path="gs://induction-labs/youtube/-_-4RGKdhsc/output.mp4",
+        video_path="gs://induction-labs/youtube/CGvIVbISOxY/output.mp4",
         max_frame_pixels=resolution_480p.pixels(),
         output_fps=4.0,
-        output_path="gs://induction-labs/jeffrey/test_vid7.zarr",
+        output_path="gs://induction-labs/jeffrey/test_vid16.zarr",
         frames_per_chunk=128,
     )
     with elapsed_timer("main") as timer:
@@ -101,7 +101,7 @@ async def run(
                 max_frame_pixels=resolution_480p.pixels(),
                 output_fps=4.0,
                 output_path="gs://" + output_path.as_posix(),
-                frames_per_chunk=64,
+                frames_per_chunk=128,
             )
             with elapsed_timer("main") as timer:
                 await process_video(video_args)
