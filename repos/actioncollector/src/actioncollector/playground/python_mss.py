@@ -1,17 +1,18 @@
 # legacy screenshotter that uses mss to grab screenshots
-from multiprocessing import Process, Queue
-import numpy as np
-import gzip
+from __future__ import annotations
 
 import concurrent.futures
+import time
+from multiprocessing import Process, Queue
+
+import mss
+import numpy as np
 
 executor = concurrent.futures.ThreadPoolExecutor(max_workers=10)
 
+
 def write_npz(filename, frames, timestamps):
     np.savez_compressed(filename, frames=frames, timestamps=timestamps)
-
-import mss
-import time
 
 
 def grab(queue: Queue, fps: int = 10):
@@ -44,7 +45,6 @@ BUFFER_SIZE = 128
 
 
 def save(queue: Queue) -> None:
-    np_buffer = []
     timestamps = []
 
     idx = 0
@@ -56,7 +56,6 @@ def save(queue: Queue) -> None:
         img = queue.get()
         if img is None:
             break
-        
 
         frame, timestamp = img
 
@@ -65,7 +64,7 @@ def save(queue: Queue) -> None:
         if frame_shape is None:
             frame_shape = array.shape
             buffer = np.empty((BUFFER_SIZE, *frame_shape), dtype=np.uint8)
-        
+
         buffer[idx] = array
         timestamps.append(timestamp)
         idx += 1
@@ -92,7 +91,7 @@ def save(queue: Queue) -> None:
 
 if __name__ == "__main__":
     # The screenshots queue
-    queue: Queue = Queue(maxsize=BUFFER_SIZE*3)
+    queue: Queue = Queue(maxsize=BUFFER_SIZE * 3)
 
     # 2 processes: one for grabbing and one for saving PNG files
     p1 = Process(target=grab, args=(queue,))

@@ -9,6 +9,7 @@ from queue import Queue
 from pynput import keyboard, mouse
 
 from actioncollector.models import Action, KeyButton, MouseButton, MouseMove, Scroll
+from actioncollector.password_filter import filter_actions_file, load_passwords
 from actioncollector.utils import upload_to_gcs_and_delete
 
 
@@ -20,6 +21,7 @@ class ActionRecorder:
         thread_pool: ThreadPoolExecutor,
         chunk_size: int = 2500,
         uploaded_callback=None,
+        passwords_file: str = ".passwords",
     ):
         self.event_queue: Queue[Action] = Queue()
 
@@ -35,6 +37,11 @@ class ActionRecorder:
         self.gs_file_path = gs_file_path
 
         self.uploaded_callback = uploaded_callback
+
+        # Load passwords for filtering
+        self.passwords = load_passwords(passwords_file)
+        if self.passwords:
+            print(f"[info] loaded {len(self.passwords)} passwords for filtering")
 
     def on_move(self, x, y):
         action = Action.from_action_type(MouseMove(x=int(x), y=int(y)))
@@ -69,10 +76,27 @@ class ActionRecorder:
 
     def finished_writing_file(self, filename: str):
         def process_finished_file(filename: str):
-            # This is where you can add any post-processing logic
-            upload_to_gcs_and_delete(
-                filename, self.gs_file_path + filename.split("/")[-1]
+            # Filter passwords before uploading
+            filtered_filename = filename.replace(".jsonl", "_filtered.jsonl")
+
+            was_filtered = filter_actions_file(
+                filename, filtered_filename, self.passwords
             )
+
+            if was_filtered:
+                print(f"[info] filtered passwords from {filename.split('/')[-1]}")
+
+            # Upload the filtered file and delete both original and filtered
+            upload_to_gcs_and_delete(
+                filtered_filename, self.gs_file_path + filename.split("/")[-1]
+            )
+
+            # Clean up original file if it still exists
+            import os
+
+            if os.path.exists(filename):
+                os.remove(filename)
+
             if self.uploaded_callback:
                 self.uploaded_callback()
 
