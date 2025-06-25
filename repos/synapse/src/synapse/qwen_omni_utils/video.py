@@ -9,50 +9,15 @@ from pydantic import BaseModel
 from smart_open import open as smart_open
 from video_reader import PyVideoReader
 
-from synapse.video_loader.types import VideoResolution
+from synapse.video_loader.typess import (
+    StreamMetadata,
+    StreamVideoArgs,
+    VideoMetadata,
+    VideoResolution,
+)
 
 from .video_process import IMAGE_FACTOR, get_video_reader_backend, smart_resize
-
-
-class StreamVideoArgs(BaseModel):
-    output_fps: float
-    video_path: str
-    max_pixels: int
-    frames_per_chunk: int
-
-
-class VideoMetadata(BaseModel):
-    fps: float
-    total_frames: int
-    resolution: VideoResolution
-
-    @property
-    def duration(self) -> float:
-        return self.total_frames / self.fps
-
-
-class StreamMetadata(BaseModel):
-    input_video: VideoMetadata
-    output_video: VideoMetadata
-    output_frames_per_chunk: int
-
-    @property
-    def fps_ratio(self) -> float:
-        return self.input_video.fps / self.output_video.fps
-
-    @property
-    def input_frames_per_chunk(self) -> float:
-        """Number of frames in the input video per chunk."""
-        return self.output_frames_per_chunk * self.fps_ratio
-
-    @property
-    def chunk_duration(self) -> float:
-        """Duration of each chunk in seconds."""
-        return self.output_frames_per_chunk / self.output_video.fps
-
-    @property
-    def total_num_chunks(self) -> int:
-        return math.ceil(self.output_video.total_frames / self.output_frames_per_chunk)
+import av
 
 
 class VideoReaderMetadata(BaseModel):
