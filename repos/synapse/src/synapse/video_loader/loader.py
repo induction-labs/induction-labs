@@ -9,7 +9,7 @@ from synapse.elapsed_timer import elapsed_timer
 from synapse.qwen_omni_utils.video import StreamVideoArgs, stream_video_to_tensors
 from synapse.utils.logging import configure_logging
 
-from .types import VideoProcessArgs
+from .typess import VideoProcessArgs
 from .zarr_utils import (
     ZarrArrayAttributes,
     append_batch,
@@ -41,14 +41,14 @@ async def process_video(
                     chunk_shape=(
                         args.frames_per_chunk,
                         3,
-                        stream_metadata.output_video.resolution.width,
                         stream_metadata.output_video.resolution.height,
+                        stream_metadata.output_video.resolution.width,
                     ),
                     shape=(
-                        0,
+                        stream_metadata.output_video.total_frames,
                         3,
-                        stream_metadata.output_video.resolution.width,
                         stream_metadata.output_video.resolution.height,
+                        stream_metadata.output_video.resolution.width,
                     ),  # Start with 0 frames
                     dtype=ts.uint8,
                     path=args.output_path,
@@ -57,11 +57,19 @@ async def process_video(
                     },
                 ),
             )
-            # assert isinstance(zarr_array, Array)
-            # logger.debug(f"Created Zarr array with attributes: {zarr_array.attrs}")
+            timestamps_array = await create_zarr_array(
+                ZarrArrayAttributes(
+                    chunk_shape=(stream_metadata.output_video.total_frames,),
+                    shape=(
+                        stream_metadata.output_video.total_frames,
+                    ),  # Start with 0 timestamps
+                    dtype=ts.float64,
+                    path=args.output_path + "/timestamps",
+                ),
+            )
 
             # Process and append frames to the Zarr array
-            for i, frames in enumerate(
+            for i, (frames, timestamps) in enumerate(
                 tqdm(
                     video_frames,
                     desc="Processing video frames",
@@ -73,7 +81,15 @@ async def process_video(
                 )
                 chunk_start = i * stream_metadata.output_frames_per_chunk
                 with elapsed_timer("append_batch"):
-                    await append_batch(zarr_array, frames, chunk_start)
+                    from asyncio import gather
+
+                    await gather(
+                        append_batch(zarr_array, frames, chunk_start),
+                        append_batch(timestamps_array, timestamps, chunk_start),
+                    )
+                    del frames, timestamps
+                    # await append_batch(timestamps_array, timestamps, chunk_start)
+                    # await append_batch(zarr_array, frames, chunk_start)
                 logger.debug("Appended chunk %d to Zarr array", i + 1)
             logger.info(
                 "Processed %d chunks in %.2f seconds",

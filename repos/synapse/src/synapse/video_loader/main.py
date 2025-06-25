@@ -36,14 +36,21 @@ app = AsyncTyper()
 @app.async_command()
 async def test():
     from .loader import VideoProcessArgs, process_video
-    from .types import resolution_480p
+    from .typess import resolution_480p
+
+    output_processor = "gs://induction-labs/jeffrey/test_vid23.zarr"
+    # First remove the output file if it exists
+    fs = gcsfs.GCSFileSystem()
+    if fs.exists(output_processor):
+        print(f"Removing existing output file: {output_processor}")
+        fs.rm(output_processor, recursive=True)
 
     video_args = VideoProcessArgs(
         # video_path="gs://induction-labs/jeffrey/test_data/test_video.mp4",
         video_path="gs://induction-labs/youtube/CGvIVbISOxY/output.mp4",
         max_frame_pixels=resolution_480p.pixels(),
         output_fps=4.0,
-        output_path="gs://induction-labs/jeffrey/test_vid16.zarr",
+        output_path=output_processor,
         frames_per_chunk=128,
     )
     with elapsed_timer("main") as timer:
@@ -52,7 +59,7 @@ async def test():
 
 
 INPUT_PREFIX = Path("induction-labs/youtube/")
-OUTPUT_PREFIX = Path("induction-labs/youtube-output/")
+OUTPUT_PREFIX = Path("induction-labs/youtube-output-2/")
 fs = gcsfs.GCSFileSystem()
 
 
@@ -79,7 +86,7 @@ async def run(
         try:
             print(f"Processing video: {video_data.video_id}")
             from .loader import VideoProcessArgs, process_video
-            from .types import resolution_480p
+            from .typess import resolution_480p
 
             input_path = INPUT_PREFIX / video_data.video_id / "output.mp4"
             output_path = OUTPUT_PREFIX / f"{video_data.video_id}.zarr"
