@@ -9,7 +9,10 @@ from queue import Queue
 from pynput import keyboard, mouse
 
 from actioncollector.models import Action, KeyButton, MouseButton, MouseMove, Scroll
-from actioncollector.password_filter import filter_actions_file, load_passwords
+from actioncollector.password_filter import (
+    filter_actions_file,
+    load_passwords_lowercase,
+)
 from actioncollector.utils import upload_to_gcs_and_delete
 
 
@@ -39,7 +42,7 @@ class ActionRecorder:
         self.uploaded_callback = uploaded_callback
 
         # Load passwords for filtering
-        self.passwords = load_passwords(passwords_file)
+        self.passwords = load_passwords_lowercase(passwords_file)
         if self.passwords:
             print(f"[info] loaded {len(self.passwords)} passwords for filtering")
 

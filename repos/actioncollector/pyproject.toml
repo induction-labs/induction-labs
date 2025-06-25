@@ -36,6 +36,7 @@ dependencies = [
     "pynput",
     "tqdm>=4.67.1",
     "typer>=0.16.0",
+    "gooey"
 ]
 
 [project.urls]
@@ -70,6 +71,12 @@ exclude_lines = [
 
 [tool.uv.sources]
 pynput = { workspace = true }
+gooey = { git = "ssh://git@github.com/induction-labs/gooey.git", branch = "pypi_release_2"}
+
+[dependency-groups]
+dev = [
+    "pyinstaller>=6.14.1",
+]
 
 [project.scripts]
 collect = "actioncollector.main:app"

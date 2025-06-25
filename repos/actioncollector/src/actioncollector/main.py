@@ -6,13 +6,29 @@ import random
 import re
 import string
 import subprocess
+import sys
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
 import typer
 from tqdm import tqdm
 
 from actioncollector.record_actions import ActionRecorder
 from actioncollector.utils import recording_metadata, upload_to_gcs_and_delete
+
+
+def get_bundled_executable(name: str) -> str:
+    """Get path to bundled executable, fallback to system version"""
+    if getattr(sys, "frozen", False):
+        # Running as PyInstaller bundle
+        bundle_dir = Path(sys._MEIPASS)
+        bundled_path = bundle_dir / name
+        if bundled_path.exists():
+            return str(bundled_path)
+
+    # Fallback to system version
+    return "bin/" + name
+
 
 app = typer.Typer()
 
@@ -28,8 +44,9 @@ def start_screen_record(
     # -segment_time 10 -f segment \
     # -r 30 tmp/video_%03d.mp4
 
+    ffmpeg_path = get_bundled_executable("ffmpeg")
     cmd = [
-        "ffmpeg",
+        ffmpeg_path,
         "-f",
         "avfoundation",
         "-framerate",
@@ -74,8 +91,9 @@ def ffmpeg_list_video_devices():
     as enumerated by ffmpeg's AVFoundation input.
     """
     # Run ffmpeg to list devices; ffmpeg writes device lists to stderr
+    ffmpeg_path = get_bundled_executable("ffmpeg")
     result = subprocess.run(
-        ["ffmpeg", "-f", "avfoundation", "-list_devices", "true", "-i", ""],
+        [ffmpeg_path, "-f", "avfoundation", "-list_devices", "true", "-i", ""],
         stderr=subprocess.PIPE,
         text=True,
     )
@@ -123,7 +141,7 @@ def on_segment_finished(filename: str, gs_file_path: str, callback=None):
 @app.command()
 def run(
     username: str | None = None,
-    output_bucket: str = "induction-labs",
+    output_bucket: str = "induction-labs-data-ext",
     video_segment_buffer_length: float = 30,
 ):
     if username is None:
@@ -134,7 +152,7 @@ def run(
     filename_session_start_time = datetime.datetime.now().strftime("%Y-%m-%d_%H%M%S")
     random_str = "".join(random.choices(string.ascii_uppercase + string.digits, k=5))
     file_path = f"action_capture/{username}/{filename_session_start_time}_{random_str}/"
-    tmp_file_path = "tmp/" + file_path
+    tmp_file_path = "/tmp/" + file_path
     # Create the directory if it doesn't exist
     os.makedirs(tmp_file_path, exist_ok=True)
 
@@ -224,11 +242,11 @@ def run(
     done_bar.close()
 
     # delete tmp files
-    for file in os.listdir(tmp_file_path):
-        file_path = os.path.join(tmp_file_path, file)
-        if os.path.isfile(file_path):
-            print(f"[warning] deleting file: {file_path}")
-            os.remove(file_path)
+    # for file in os.listdir(tmp_file_path):
+    #     file_path = os.path.join(tmp_file_path, file)
+    #     if os.path.isfile(file_path):
+    #         print(f"[warning] deleting file: {file_path}")
+    #         os.remove(file_path)
 
     print("[info] recording finished. All files uploaded to GCS. Exiting.")
 

@@ -13,7 +13,7 @@ package = true
 [tool.uv.workspace]
 members = ["repos/*"]
 # We need to exclude vllm as a workspace dep because it is dynamically versioned :/
-exclude = ["repos/vllm", "repos/osworld", "repos/pynput", "*.ipynb"]
+exclude = ["repos/vllm"]
 
 [dependency-groups]
 dev = ["pre-commit>=4.2.0", "ruff>=0.11.8"]
@@ -45,6 +45,9 @@ ignore = [
 
 [tool.ruff.lint.isort]
 required-imports = ["from __future__ import annotations"]
+
+[tool.ruff]
+extend-exclude = ["repos/osworld", "repos/pynput", "*.ipynb"]
 
 [project.scripts]
 collect = "actioncollector.main:app"

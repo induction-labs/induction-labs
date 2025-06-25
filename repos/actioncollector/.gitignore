@@ -1,2 +1,29 @@
 tmp/
 .passwords
+resources/
+
+# Service account credentials (replace with your actual credentials)
+service-account-key.json
+
+# PyInstaller build artifacts
+build/
+dist/
+*.spec
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+
+# FFmpeg binary
+bin/
+
+# DMG files
+*.dmg
+
+# macOS
+.DS_Store

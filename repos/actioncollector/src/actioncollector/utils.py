@@ -2,16 +2,44 @@ from __future__ import annotations
 
 import datetime
 import os
+import sys
+from pathlib import Path
 from urllib.parse import urlparse
 
 from google.cloud import storage
 
 
+def get_bundled_credentials_path() -> str:
+    """Get path to bundled service account credentials"""
+    if getattr(sys, "frozen", False):
+        # Running as PyInstaller bundle
+        bundle_dir = Path(sys._MEIPASS)
+        credentials_path = bundle_dir / "credentials" / "service-account-key.json"
+        if credentials_path.exists():
+            return str(credentials_path)
+
+    # Fallback to local file for development
+    return "service-account-key.json"
+
+
+def get_gcs_client():
+    """Get authenticated Google Cloud Storage client using bundled credentials"""
+    credentials_path = get_bundled_credentials_path()
+
+    if not os.path.exists(credentials_path):
+        raise FileNotFoundError(
+            f"Service account credentials not found at: {credentials_path}"
+        )
+
+    # Set the credentials environment variable
+    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = credentials_path
+
+    return storage.Client()
+
+
 def upload_to_gcs_and_delete(from_path: str, to_path: str):
     if not os.path.isfile(from_path):
         raise FileNotFoundError(f"Local file not found: {from_path}")
-
-    # print(f"Uploading {from_path} to {to_path}...")
 
     parsed = urlparse(to_path)
     if parsed.scheme != "gs" or not parsed.netloc:
@@ -20,7 +48,7 @@ def upload_to_gcs_and_delete(from_path: str, to_path: str):
     bucket_name = parsed.netloc
     blob_name = parsed.path.lstrip("/")
 
-    client = storage.Client()
+    client = get_gcs_client()
     bucket = client.bucket(bucket_name)
     blob = bucket.blob(blob_name)
 
