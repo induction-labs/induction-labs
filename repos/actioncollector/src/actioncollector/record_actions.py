@@ -9,7 +9,10 @@ from queue import Queue
 from pynput import keyboard, mouse
 
 from actioncollector.models import Action, KeyButton, MouseButton, MouseMove, Scroll
-from actioncollector.password_filter import filter_actions_file, load_passwords
+from actioncollector.password_filter import (
+    filter_actions_file,
+    load_passwords_lowercase,
+)
 from actioncollector.utils import upload_to_gcs_and_delete
 
 
@@ -39,7 +42,7 @@ class ActionRecorder:
         self.uploaded_callback = uploaded_callback
 
         # Load passwords for filtering
-        self.passwords = load_passwords(passwords_file)
+        self.passwords = load_passwords_lowercase(passwords_file)
         if self.passwords:
             print(f"[info] loaded {len(self.passwords)} passwords for filtering")
 
@@ -145,10 +148,15 @@ class ActionRecorder:
         self.writer_thread = writer
 
     def stop(self):
+        assert self.keyboard_listener is not None
+        assert self.mouse_listener is not None
+        assert self.writer_thread is not None
+        print("[info] stopping listeners...")
         self.keyboard_listener.stop()
         self.mouse_listener.stop()
 
         print("[info] stopping writer thread...")
+        # @MonliH: why do we need to put None in the queue?
         self.event_queue.put(None)
         self.writer_thread.join()
         print("[done] all actions recorded.")
