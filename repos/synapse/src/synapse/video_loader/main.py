@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime
+from fractions import Fraction
 from functools import wraps
 from pathlib import Path
 
@@ -49,7 +50,7 @@ async def test():
         # video_path="gs://induction-labs/jeffrey/test_data/test_video.mp4",
         video_path="gs://induction-labs/youtube/CGvIVbISOxY/output.mp4",
         max_frame_pixels=resolution_480p.pixels(),
-        output_fps=4.0,
+        output_fps=Fraction(4),
         output_path=output_processor,
         frames_per_chunk=128,
     )
@@ -106,7 +107,7 @@ async def run(
             video_args = VideoProcessArgs(
                 video_path="gs://" + input_path.as_posix(),
                 max_frame_pixels=resolution_480p.pixels(),
-                output_fps=4.0,
+                output_fps=Fraction(4),
                 output_path="gs://" + output_path.as_posix(),
                 frames_per_chunk=128,
             )

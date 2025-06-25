@@ -63,7 +63,7 @@ async def process_video(
                     shape=(
                         stream_metadata.output_video.total_frames,
                     ),  # Start with 0 timestamps
-                    dtype=ts.float64,
+                    dtype=ts.uint64,
                     path=args.output_path + "/timestamps",
                 ),
             )

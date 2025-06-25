@@ -81,11 +81,10 @@ def stream_video_to_tensors(
     assert metadata_video_stream.time_base is not None, "Video time_base is None"
     assert metadata_video_stream.average_rate is not None, "Video average_rate is None"
     assert metadata_video_stream.frames is not None, "Video frames count is None"
-    time_base = metadata_video_stream.time_base
-    time_start = metadata_video_stream.start_time or 0
+    duration_s = metadata_video_stream.duration * metadata_video_stream.time_base
 
     input_video_metadata = VideoMetadata(
-        fps=float(metadata_video_stream.average_rate),
+        fps=metadata_video_stream.average_rate,
         total_frames=metadata_video_stream.frames,
         resolution=VideoResolution(
             height=metadata_video_stream.height,
@@ -95,7 +94,6 @@ def stream_video_to_tensors(
     metadata_container.close()
 
     # This can be odd as well, shouldn't matter. We can clip to even number of frames if needed later.
-    output_nframes = math.floor(args.output_fps * input_video_metadata.duration)
 
     resized_height, resized_width = smart_resize(
         input_video_metadata.resolution.height,
@@ -106,40 +104,36 @@ def stream_video_to_tensors(
     )
 
     container = av.open(tmp_video_path)
+
+    output_nframes = math.floor(args.output_fps * duration_s)
+
     output_video_metadata = VideoMetadata(
         fps=args.output_fps,
         total_frames=output_nframes,
         resolution=VideoResolution(height=resized_height, width=resized_width),
     )
+    start_pts = metadata_video_stream.start_time or 0
 
     stream_metadata = StreamMetadata(
-        time_base=time_base,
-        start_time=time_start,
-        end_time=time_start + input_video_metadata.duration,
+        time_base=metadata_video_stream.time_base,
+        start_pts=start_pts,
+        end_pts=start_pts + metadata_video_stream.duration,
         input_video=input_video_metadata,
         output_video=output_video_metadata,
         output_frames_per_chunk=args.frames_per_chunk,
     )
+    print(f"Stream metadata: {stream_metadata.model_dump_json(indent=2)}")
 
     def process_chunk(index: int):
-        chunk_duration_start = (
-            index * stream_metadata.chunk_duration + stream_metadata.start_time
+        first_frame_index = index * stream_metadata.output_frames_per_chunk
+        last_frame_index = min(
+            first_frame_index + stream_metadata.output_frames_per_chunk,
+            stream_metadata.output_video.total_frames,
         )
-        chunk_duration_end = min(
-            chunk_duration_start + stream_metadata.chunk_duration,
-            stream_metadata.end_time,
-        )
-        output_timesteps = torch.arange(
-            chunk_duration_start,
-            chunk_duration_end,
-            step=1 / stream_metadata.output_video.fps,
-        ).numpy()
-        # TODO: Fix there can be fucking off by one errors if fps_ratio is barely smaller than an integer.
-        output_timesteps = output_timesteps[0 : stream_metadata.output_frames_per_chunk]
 
         # Use pyav to extract frames at specific indices
         frames: list[np.ndarray] = []
-        frame_timestamps: list[float] = []
+        frame_pts: list[int] = []
         video_stream = container.streams.video[0]
         assert video_stream.time_base is not None, (
             "Video stream time_base cannot be None"
@@ -158,30 +152,30 @@ def stream_video_to_tensors(
         filter_graph.configure()
 
         # Get the first frame's timestamp to use as offset
-        video_start_time = video_stream.start_time or 0
 
-        for output_timestamp in output_timesteps:
-            # Seek to the exact timestamp
-            timestamp = int(output_timestamp / video_stream.time_base)
-            container.seek(timestamp, stream=video_stream)
+        for frame_index in range(first_frame_index, last_frame_index):
+            output_frame_pts = (
+                frame_index * stream_metadata.output_pts_per_frame
+                + stream_metadata.start_pts
+            )
+            assert output_frame_pts <= stream_metadata.end_pts, (
+                f"{output_frame_pts=}, {stream_metadata=}"
+            )
+            # Seek to nearest keyframe before
+            container.seek(output_frame_pts, stream=video_stream)
 
             # Read frames until we get the one we want
             frame_found = False
             for packet in container.demux(video_stream):
                 for frame in packet.decode():
-                    assert video_stream.time_base is not None
                     # Calculate frame timestamp relative to video start
-                    frame_time = (frame.pts - video_start_time) * video_stream.time_base
-                    if (
-                        frame_time
-                        >= output_timestamp - video_start_time * video_stream.time_base
-                    ):
+                    if frame.pts >= output_frame_pts:
                         # Apply filtering for resizing
                         buffer_src.push(frame)
                         filtered_frame = buffer_sink.pull()
                         frame_array = filtered_frame.to_ndarray(format="rgb24")
                         frames.append(frame_array)
-                        frame_timestamps.append(float(frame_time))
+                        frame_pts.append(frame.pts)
                         frame_found = True
                         break
                 if frame_found:
@@ -201,7 +195,7 @@ def stream_video_to_tensors(
             f"for chunk {index} with resolution "
             f"{stream_metadata.output_video.resolution}"
         )
-        return video, torch.tensor(frame_timestamps, dtype=torch.float32)
+        return video, torch.tensor(frame_pts, dtype=torch.uint64)
 
     def video_generator() -> Generator[tuple[torch.Tensor, torch.Tensor], None, None]:
         try:

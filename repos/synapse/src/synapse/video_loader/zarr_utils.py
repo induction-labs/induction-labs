@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 import tensorstore as ts
@@ -8,6 +9,8 @@ import zarr
 from fsspec.asyn import AsyncFileSystem
 from pydantic import BaseModel
 from zarr.storage import FsspecStore
+
+logger = logging.getLogger(__name__)
 
 context = ts.Context(
     {
@@ -126,11 +129,14 @@ async def append_batch(z: Any, batch: torch.Tensor, chunk_start: int):
     # assert batch.shape[1:] == z.shape[1:], (
     #     f"Batch shape must match the Zarr array shape (C, H, W), {batch.shape=}, {z.shape=}"
     # )
-    T = batch.shape[0]
+    T, rest = batch.shape[0], batch.shape[1:]
     # 2b) Grow the array by T along axis 0
-    assert z.shape[0] >= chunk_start + T, (
-        f"Zarr array must have enough space to append {T} frames at index {chunk_start}, "
-        f"current shape is {z.shape[0]} frames."
-    )
-    # await z.resize(exclusive_max=[chunk_start + T, 3, H, W])
+    if z.shape[0] < chunk_start + T:
+        logger.warning(
+            "Zarr array shape %s is smaller than chunk_start + T (%d + %d), resizing to accommodate",
+            z.shape,
+            chunk_start,
+            T,
+        )
+        await z.resize(exclusive_max=[chunk_start + T, *rest])
     await z[chunk_start : chunk_start + T].write(batch.cpu().numpy())
