@@ -22,26 +22,29 @@ dependencies = [
     "torchvision>=0.22.1",
     "tqdm>=4.67.1",
     "typer>=0.16.0",
-    "video-reader-rs",
+    # "video-reader-rs",
     "zarr>=3.0.8",
+    "opencv-python>=4.11.0.86",
+    "matplotlib>=3.10.3",
+    "av>=14.4.0",
 ]
 
 [project.scripts]
 synapse = "synapse:main"
 
 [tool.uv]
-default-groups = ["dev", "qwen-omni-utils"]
+default-groups = ["dev"]
 
-[tool.uv.sources]
-video-reader-rs = { git = "https://github.com/gcanat/video_reader-rs" }
+# [tool.uv.sources]
+# video-reader-rs = { git = "https://github.com/gcanat/video_reader-rs" }
 
 [dependency-groups]
-dev = ["ipython>=9.3.0"]
-qwen-omni-utils = [
-    "requests>=2.32.3",
-    "av>=14.4.0",
-    # "librosa>=0.11.0",
-    "decord>=0.6.0; sys_platform == 'linux' and platform_machine == 'x86_64'",
+dev = [
+    "ipykernel>=6.29.5",
+    "ipynb>=0.5.1",
+    "ipython>=9.3.0",
+    "jupyter>=1.1.1",
+    "pyzmq>=27.0.0",
 ]
 
 [build-system]

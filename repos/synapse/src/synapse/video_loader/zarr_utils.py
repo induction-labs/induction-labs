@@ -40,6 +40,33 @@ class ZarrArrayAttributes(BaseModel):
         return f"ZarrArrayAttributes(shape={self.shape}, chunk_shape={self.chunk_shape}, dtype={self.dtype})"
 
 
+def get_kvstore_config(path: str) -> dict:
+    """
+    Get the appropriate kvstore configuration based on the path.
+
+    Args:
+        path: Path to the zarr file (local or cloud storage)
+
+    Returns:
+        Dict containing the kvstore configuration for tensorstore
+    """
+    if path.startswith("gs://"):
+        # Parse GCS path: gs://bucket/path/to/file
+        parts = path[5:].split("/", 1)  # Remove 'gs://' and split on first '/'
+        bucket = parts[0]
+        gcs_path = parts[1] if len(parts) > 1 else ""
+        return {"driver": "gcs", "bucket": bucket, "path": gcs_path}
+    elif path.startswith("s3://"):
+        # Parse S3 path: s3://bucket/path/to/file
+        parts = path[5:].split("/", 1)  # Remove 's3://' and split on first '/'
+        bucket = parts[0]
+        s3_path = parts[1] if len(parts) > 1 else ""
+        return {"driver": "s3", "bucket": bucket, "path": s3_path}
+    else:
+        # Local file path
+        return {"driver": "file", "path": path}
+
+
 def get_tensorstore_spec(path: str, attributes: dict | None = None) -> dict:
     # ---- JSON spec -----------------------------------------------------------
     assert path.startswith("gs://induction-labs/"), (
@@ -80,7 +107,7 @@ async def create_zarr_array(atr: ZarrArrayAttributes):
     spec = get_tensorstore_spec(path=atr.path, attributes=atr.metadata)
     store = await ts.open(
         spec,
-        dtype=ts.uint8,  # required if not in metadata
+        dtype=atr.dtype,  # required if not in metadata
         shape=atr.shape,  # idem
         chunk_layout=ts.ChunkLayout(chunk_shape=atr.chunk_shape),
         create=True,  # create if missing
@@ -95,12 +122,15 @@ async def append_batch(z: Any, batch: torch.Tensor, chunk_start: int):
     """
     batch: Tensor of shape (T, 3, H, W), dtype=uint8
     """
-    assert batch.ndim == 4, "Batch must be a 4D tensor (T, C, H, W)"
+    # assert batch.ndim == 4, "Batch must be a 4D tensor (T, C, H, W)"
     # assert batch.shape[1:] == z.shape[1:], (
     #     f"Batch shape must match the Zarr array shape (C, H, W), {batch.shape=}, {z.shape=}"
     # )
-    T, _, H, W = batch.shape
-    # start = z.shape[0]
+    T = batch.shape[0]
     # 2b) Grow the array by T along axis 0
-    await z.resize(exclusive_max=[chunk_start + T, 3, H, W])
+    assert z.shape[0] >= chunk_start + T, (
+        f"Zarr array must have enough space to append {T} frames at index {chunk_start}, "
+        f"current shape is {z.shape[0]} frames."
+    )
+    # await z.resize(exclusive_max=[chunk_start + T, 3, H, W])
     await z[chunk_start : chunk_start + T].write(batch.cpu().numpy())
