@@ -23,19 +23,19 @@ classifiers = [
   "Programming Language :: Python :: Implementation :: PyPy",
 ]
 dependencies = [
-    "av>=14.4.0",
-    "gcsfs>=2025.3.0",
-    "google-cloud-storage>=3.1.0",
-    "ipykernel>=6.29.5",
-    "matplotlib>=3.10.3",
-    "mss>=10.0.0",
-    "opencv-python>=4.11.0.86",
-    "pandas>=2.3.0",
-    "pillow>=11.2.1",
-    "pydantic>=2.11.5",
-    "pynput",
-    "tqdm>=4.67.1",
-    "typer>=0.16.0",
+  "av>=14.4.0",
+  "gcsfs>=2025.3.0",
+  "google-cloud-storage>=3.1.0",
+  "ipykernel>=6.29.5",
+  "matplotlib>=3.10.3",
+  "mss>=10.0.0",
+  "opencv-python>=4.11.0.86",
+  "pandas>=2.3.0",
+  "pillow>=11.2.1",
+  "pydantic>=2.11.5",
+  "pynput",
+  "tqdm>=4.67.1",
+  "typer>=0.16.0",
 ]
 
 [project.urls]
@@ -62,14 +62,10 @@ actioncollector = [
 tests = ["tests", "*/actioncollector/tests"]
 
 [tool.coverage.report]
-exclude_lines = [
-  "no cov",
-  "if __name__ == .__main__.:",
-  "if TYPE_CHECKING:",
-]
+exclude_lines = ["no cov", "if __name__ == .__main__.:", "if TYPE_CHECKING:"]
 
 [tool.uv.sources]
-pynput = { workspace = true }
+pynput = { path = "../pynput" }
 
 [project.scripts]
 collect = "actioncollector.main:app"
