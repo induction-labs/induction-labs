@@ -48,7 +48,8 @@ async def test():
 
     video_args = VideoProcessArgs(
         # video_path="gs://induction-labs/jeffrey/test_data/test_video.mp4",
-        video_path="gs://induction-labs/youtube/CGvIVbISOxY/output.mp4",
+        # video_path="gs://induction-labs/youtube/CGvIVbISOxY/output.mp4", # short video
+        video_path="gs://induction-labs/youtube/X5T3gN09oEg/output.mp4",  # Long one
         max_frame_pixels=resolution_480p.pixels(),
         output_fps=Fraction(4),
         output_path=output_processor,

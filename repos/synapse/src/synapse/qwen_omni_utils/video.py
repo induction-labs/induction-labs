@@ -104,6 +104,7 @@ def stream_video_to_tensors(
     )
 
     container = av.open(tmp_video_path)
+    video_stream = container.streams.video[0]
 
     output_nframes = math.floor(args.output_fps * duration_s)
 
@@ -124,35 +125,22 @@ def stream_video_to_tensors(
     )
     print(f"Stream metadata: {stream_metadata.model_dump_json(indent=2)}")
 
-    def process_chunk(index: int):
+    def process_chunk(
+        index: int,
+        frame_iter: Generator[av.VideoFrame, None, None],
+        buffer_src: av.filter.Buffer,
+        buffer_sink: av.filter.Buffersink,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         first_frame_index = index * stream_metadata.output_frames_per_chunk
         last_frame_index = min(
             first_frame_index + stream_metadata.output_frames_per_chunk,
             stream_metadata.output_video.total_frames,
         )
 
-        # Use pyav to extract frames at specific indices
         frames: list[np.ndarray] = []
         frame_pts: list[int] = []
-        video_stream = container.streams.video[0]
-        assert video_stream.time_base is not None, (
-            "Video stream time_base cannot be None"
-        )
 
-        # Create a filter graph for resizing on demand
-        filter_graph = av.filter.Graph()  # type: ignore  # noqa: PGH003
-        buffer_src = filter_graph.add_buffer(template=video_stream)
-        buffer_sink = filter_graph.add("buffersink")
-        scale_filter = filter_graph.add(
-            "scale",
-            f"{resized_width}:{resized_height}:flags=bicubic+full_chroma_int+accurate_rnd",
-        )
-        buffer_src.link_to(scale_filter)
-        scale_filter.link_to(buffer_sink)
-        filter_graph.configure()
-
-        # Get the first frame's timestamp to use as offset
-
+        # Process each output frame for this chunk
         for frame_index in range(first_frame_index, last_frame_index):
             output_frame_pts = (
                 frame_index * stream_metadata.output_pts_per_frame
@@ -161,25 +149,39 @@ def stream_video_to_tensors(
             assert output_frame_pts <= stream_metadata.end_pts, (
                 f"{output_frame_pts=}, {stream_metadata=}"
             )
-            # Seek to nearest keyframe before
-            container.seek(output_frame_pts, stream=video_stream)
 
-            # Read frames until we get the one we want
+            # Advance through frames until we find one with pts >= output_frame_pts
             frame_found = False
-            for packet in container.demux(video_stream):
-                for frame in packet.decode():
-                    # Calculate frame timestamp relative to video start
-                    if frame.pts >= output_frame_pts:
-                        # Apply filtering for resizing
-                        buffer_src.push(frame)
+
+            # Check if current_frame already meets our criteria
+
+            # Advance to the next suitable frame
+            try:
+                while True:
+                    current_frame = next(frame_iter)
+                    if current_frame.pts >= output_frame_pts:
+                        buffer_src.push(current_frame)
                         filtered_frame = buffer_sink.pull()
                         frame_array = filtered_frame.to_ndarray(format="rgb24")
                         frames.append(frame_array)
-                        frame_pts.append(frame.pts)
+                        frame_pts.append(current_frame.pts)
                         frame_found = True
                         break
-                if frame_found:
-                    break
+            except StopIteration:
+                # End of stream reached
+                print(
+                    f"End of stream reached while processing chunk {index}, "
+                    f"frame index {frame_index}. No more frames available."
+                )
+                break
+
+            if not frame_found:
+                print(
+                    f"Could not find a suitable frame for chunk {index}, "
+                    f"frame index {frame_index}. Stopping processing."
+                )
+                # If we couldn't find a suitable frame, we've reached the end
+                break
 
         video = np.stack(frames, axis=0)
         assert isinstance(video, np.ndarray), (
@@ -198,9 +200,28 @@ def stream_video_to_tensors(
         return video, torch.tensor(frame_pts, dtype=torch.uint64)
 
     def video_generator() -> Generator[tuple[torch.Tensor, torch.Tensor], None, None]:
+        nonlocal container, video_stream, stream_metadata, resized_width, resized_height
         try:
+            frame_iter = (
+                frame
+                for packet in container.demux(video_stream)
+                for frame in packet.decode()
+                if frame.pts is not None
+            )
+            # Create filter graph for resizing (shared across chunks)
+            filter_graph = av.filter.Graph()  # type: ignore  # noqa: PGH003
+            buffer_src = filter_graph.add_buffer(template=video_stream)
+            buffer_sink = filter_graph.add("buffersink")
+            scale_filter = filter_graph.add(
+                "scale",
+                f"{resized_width}:{resized_height}:flags=bicubic+full_chroma_int+accurate_rnd",
+            )
+            buffer_src.link_to(scale_filter)
+            scale_filter.link_to(buffer_sink)
+            filter_graph.configure()
+
             for i in range(stream_metadata.total_num_chunks):
-                yield process_chunk(i)
+                yield process_chunk(i, frame_iter, buffer_src, buffer_sink)
         finally:
             container.close()
 
