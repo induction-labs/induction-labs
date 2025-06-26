@@ -8,10 +8,10 @@ from collections.abc import Generator
 import av
 import numpy as np
 import torch
-from pydantic import BaseModel
 from smart_open import open as smart_open
 
 from synapse.video_loader.typess import (
+    FramesMetadata,
     StreamMetadata,
     StreamVideoArgs,
     VideoMetadata,
@@ -21,12 +21,35 @@ from synapse.video_loader.typess import (
 from .video_utils import IMAGE_FACTOR, smart_resize
 
 
-class VideoReaderMetadata(BaseModel):
-    width: int
-    height: int
-    duration: float
-    fps: float
-    frame_count: int
+def get_video_metadata(video_path: str) -> VideoMetadata:
+    """Get metadata from a video file using PyAV."""
+    container = av.open(video_path)
+    video_stream = container.streams.video[0]
+
+    if video_stream.duration is None:
+        raise ValueError("Video duration is None")
+
+    if video_stream.average_rate is None:
+        raise ValueError("Video average rate (fps) is None")
+
+    if video_stream.frames is None:
+        raise ValueError("Video frames count is None")
+    if video_stream.time_base is None:
+        raise ValueError("Video time base is None")
+
+    metadata = VideoMetadata(
+        fps=video_stream.average_rate,
+        total_frames=video_stream.frames,
+        resolution=VideoResolution(
+            height=video_stream.height,
+            width=video_stream.width,
+        ),
+        start_pts=video_stream.start_time or 0,
+        duration=video_stream.duration,
+        time_base=video_stream.time_base,
+    )
+    container.close()
+    return metadata
 
 
 def stream_video_to_tensors(
@@ -72,26 +95,7 @@ def stream_video_to_tensors(
         )
 
     # Use pyav for metadata extraction
-    metadata_container = av.open(tmp_video_path)
-    metadata_video_stream = metadata_container.streams.video[0]
-
-    assert metadata_video_stream.width is not None, "Video width is None"
-    assert metadata_video_stream.height is not None, "Video height is None"
-    assert metadata_video_stream.duration is not None, "Video duration is None"
-    assert metadata_video_stream.time_base is not None, "Video time_base is None"
-    assert metadata_video_stream.average_rate is not None, "Video average_rate is None"
-    assert metadata_video_stream.frames is not None, "Video frames count is None"
-    duration_s = metadata_video_stream.duration * metadata_video_stream.time_base
-
-    input_video_metadata = VideoMetadata(
-        fps=metadata_video_stream.average_rate,
-        total_frames=metadata_video_stream.frames,
-        resolution=VideoResolution(
-            height=metadata_video_stream.height,
-            width=metadata_video_stream.width,
-        ),
-    )
-    metadata_container.close()
+    input_video_metadata = get_video_metadata(tmp_video_path)
 
     # This can be odd as well, shouldn't matter. We can clip to even number of frames if needed later.
 
@@ -106,19 +110,15 @@ def stream_video_to_tensors(
     container = av.open(tmp_video_path)
     video_stream = container.streams.video[0]
 
-    output_nframes = math.floor(args.output_fps * duration_s)
+    output_nframes = math.floor(args.output_fps * input_video_metadata.duration_seconds)
 
-    output_video_metadata = VideoMetadata(
+    output_video_metadata = FramesMetadata(
         fps=args.output_fps,
         total_frames=output_nframes,
         resolution=VideoResolution(height=resized_height, width=resized_width),
     )
-    start_pts = metadata_video_stream.start_time or 0
 
     stream_metadata = StreamMetadata(
-        time_base=metadata_video_stream.time_base,
-        start_pts=start_pts,
-        end_pts=start_pts + metadata_video_stream.duration,
         input_video=input_video_metadata,
         output_video=output_video_metadata,
         output_frames_per_chunk=args.frames_per_chunk,
@@ -144,9 +144,9 @@ def stream_video_to_tensors(
         for frame_index in range(first_frame_index, last_frame_index):
             output_frame_pts = (
                 frame_index * stream_metadata.output_pts_per_frame
-                + stream_metadata.start_pts
+                + stream_metadata.input_video.start_pts
             )
-            assert output_frame_pts <= stream_metadata.end_pts, (
+            assert output_frame_pts <= stream_metadata.input_video.end_pts, (
                 f"{output_frame_pts=}, {stream_metadata=}"
             )
 
