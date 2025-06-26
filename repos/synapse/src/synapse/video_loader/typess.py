@@ -58,11 +58,11 @@ class StreamMetadata(BaseModel):
 
     @property
     def output_pts_per_frame(self) -> int:
-        pts_per_chunk = 1 / (self.time_base * self.output_video.fps)
-        assert pts_per_chunk.denominator == 1, (
+        pts_per_frame = 1 / (self.time_base * self.output_video.fps)
+        assert pts_per_frame.denominator == 1, (
             f"{self.output_video.fps=}, f{self.time_base=}"
         )
-        return pts_per_chunk.numerator
+        return pts_per_frame.numerator
 
     @property
     def total_num_chunks(self) -> int:

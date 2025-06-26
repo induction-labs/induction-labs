@@ -53,3 +53,5 @@ ENTRYPOINT [ "devenv", "shell" ]
 # CMD ["pytest"]
 
 CMD uv run python -m synapse.video_loader.main run 
+
+# docker run us-central1-docker.pkg.dev/induction-labs/induction-docker/synapse:latest "uv run python -m synapse.video_loader.main test"

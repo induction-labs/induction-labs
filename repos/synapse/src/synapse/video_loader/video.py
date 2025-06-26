@@ -18,7 +18,7 @@ from synapse.video_loader.typess import (
     VideoResolution,
 )
 
-from .video_process import IMAGE_FACTOR, smart_resize
+from .video_utils import IMAGE_FACTOR, smart_resize
 
 
 class VideoReaderMetadata(BaseModel):
@@ -128,8 +128,8 @@ def stream_video_to_tensors(
     def process_chunk(
         index: int,
         frame_iter: Generator[av.VideoFrame, None, None],
-        buffer_src: av.filter.Buffer,
-        buffer_sink: av.filter.Buffersink,
+        buffer_src: av.filter.Buffer,  # type: ignore[name-defined]
+        buffer_sink: av.filter.Buffersink,  # type: ignore[name-defined]
     ) -> tuple[torch.Tensor, torch.Tensor]:
         first_frame_index = index * stream_metadata.output_frames_per_chunk
         last_frame_index = min(
@@ -202,12 +202,13 @@ def stream_video_to_tensors(
     def video_generator() -> Generator[tuple[torch.Tensor, torch.Tensor], None, None]:
         nonlocal container, video_stream, stream_metadata, resized_width, resized_height
         try:
-            frame_iter = (
+            frame_iter: Generator[av.VideoFrame, None, None] = (
                 frame
                 for packet in container.demux(video_stream)
                 for frame in packet.decode()
                 if frame.pts is not None
-            )
+            )  # type: ignore[name-defined]
+
             # Create filter graph for resizing (shared across chunks)
             filter_graph = av.filter.Graph()  # type: ignore  # noqa: PGH003
             buffer_src = filter_graph.add_buffer(template=video_stream)

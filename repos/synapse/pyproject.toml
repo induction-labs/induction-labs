@@ -22,7 +22,6 @@ dependencies = [
     "torchvision>=0.22.1",
     "tqdm>=4.67.1",
     "typer>=0.16.0",
-    # "video-reader-rs",
     "zarr>=3.0.8",
     "opencv-python>=4.11.0.86",
     "matplotlib>=3.10.3",

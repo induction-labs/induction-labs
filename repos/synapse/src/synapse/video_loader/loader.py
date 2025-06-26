@@ -6,8 +6,8 @@ import tensorstore as ts
 from tqdm import tqdm
 
 from synapse.elapsed_timer import elapsed_timer
-from synapse.qwen_omni_utils.video import StreamVideoArgs, stream_video_to_tensors
 from synapse.utils.logging import configure_logging
+from synapse.video_loader.video import StreamVideoArgs, stream_video_to_tensors
 
 from .typess import VideoProcessArgs
 from .zarr_utils import (
