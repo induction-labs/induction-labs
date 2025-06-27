@@ -1,0 +1,20 @@
+[project]
+name = "synth"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Jonathan Li", email = "li.jonathan42@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "imageio[ffmpeg]>=2.37.0",
+    "pillow>=11.2.1",
+]
+
+[project.scripts]
+synth = "synth:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
