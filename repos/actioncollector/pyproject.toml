@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "actioncollector"
-version = "0.1.0"
+version = "0.1.1"
 description = ''
 readme = "README.md"
 requires-python = ">=3.8"
@@ -69,10 +69,14 @@ exclude_lines = ["no cov", "if __name__ == .__main__.:", "if TYPE_CHECKING:"]
 [tool.uv.sources]
 pynput = { workspace = true }
 gooey = { git = "ssh://git@github.com/induction-labs/gooey.git", branch = "pypi_release_2" }
+# gooey = { path = "../../../Gooey", editable = true }
 synapse = { workspace = true }
 
 [dependency-groups]
-dev = ["ipykernel>=6.29.5", "pyinstaller>=6.14.1"]
+dev = [
+  "ipykernel>=6.29.5",
+  "pyinstaller>=6.14.1",
+]
 
 [project.scripts]
 collect = "actioncollector.main:app"

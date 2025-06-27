@@ -33,7 +33,7 @@ def get_bundled_assets_path() -> str:
     """Get path to bundled service account credentials"""
     if getattr(sys, "frozen", False):
         # Running as PyInstaller bundle
-        bundle_dir = Path(sys._MEIPASS)
+        bundle_dir = Path(sys._MEIPASS)  # type: ignore[attr-defined]
         credentials_path = bundle_dir / "assets"
         if credentials_path.exists():
             return str(credentials_path)
@@ -50,7 +50,7 @@ if __name__ == "__main__":
 
     assets_path = get_bundled_assets_path()
 
-    @Gooey(program_name="Action Collector", image_dir=assets_path)
+    @Gooey(program_name="Action Collector", image_dir=assets_path, requires_shell=False)
     def main():
         config = load_config()
         parser = GooeyParser(description="Action Collector")
