@@ -23,6 +23,7 @@ dependencies = [
   "tomli-w>=1.2.0",
   "typer>=0.16.0",
   "einops>=0.8.1",
+  "synapse",
 ]
 [project.scripts]
 mdl = "modeling.main:app"
@@ -58,7 +59,7 @@ torch = [{ index = "torch_12.8", marker = "sys_platform == 'linux'" }]
 triton = [{ index = "torch_general" }]
 torchvision = [{ index = "torch_12.8", marker = "sys_platform == 'linux'" }]
 torchaudio = [{ index = "torch_12.8", marker = "sys_platform == 'linux'" }]
-# vllm = { path = "../vllm" }
+synapse = { workspace = true }
 
 [[tool.uv.index]]
 name = "torch_general"

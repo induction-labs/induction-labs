@@ -33,7 +33,7 @@ class Cubic:
         """Return the coefficients as a numpy array."""
         return np.array([self.m, self.n, self.a])
 
-    def __call__(self, x):
+    def __call__(self, x: float):
         """Evaluate the cubic at x (scalar or array)."""
         c3, c2, c1, _ = self.coeffs()
         return ((c3 * x + c2) * x + c1) * x  # Horner form
@@ -90,6 +90,7 @@ def create_cubic_from_path(path: np.ndarray) -> Cubic:
     return Cubic(m, n, a)
 
 
+# TODO: Rewrite this to use pandas df
 def get_all_action_logs(bucket_path: str):
     """Process files from GCS bucket."""
     fs = gcsfs.GCSFileSystem()
@@ -100,12 +101,19 @@ def get_all_action_logs(bucket_path: str):
     try:
         files = fs.glob(f"{bucket_path}/action_capture_*.jsonl")
     except Exception as e:
-        print(f"Error listing files from {bucket_path}: {e}")
-        return
+        raise RuntimeError(
+            f"Failed to list files in bucket {bucket_path}. Ensure the bucket exists and you have the necessary permissions."
+        ) from e
 
-    all_actions = []
+    all_actions: list[Action] = []
 
+    assert isinstance(files, list) and len(files) > 0, (
+        f"No action capture files found in bucket {bucket_path}. "
+        "Ensure the bucket contains files matching 'action_capture_*.jsonl'."
+        f"{files=}"
+    )
     for file_path in files:
+        assert isinstance(file_path, str), f"{file_path=} is not a string"
         filename = file_path.split("/")[-1]
 
         try:
@@ -160,7 +168,9 @@ def process_continuous_actions(
     timestamps: np.ndarray,
     actions: list[Action],
     original_screen_size: tuple[int, int],
-    action_factory: Callable[[float, float], Action] = lambda x, y: MouseMove(x=x, y=y),
+    action_factory: Callable[[float, float], MouseMove] = lambda x, y: MouseMove(
+        x=x, y=y
+    ),
 ) -> tuple[list[Cubic], list[Cubic]]:
     timestamps = timestamps[1:]
 
@@ -386,6 +396,36 @@ def plot_timestamp_comparison(
     plt.show()
 
 
+ACTION_DELAY = 0.05  # seconds, delay to add to mouse move actions
+FILL_GAP_STEP = 0.01  # seconds, step size for filling gaps in mouse move actions
+
+
+def fill_mouse_move_actions(
+    actions: list[Action],
+    step: float = FILL_GAP_STEP,
+) -> list[Action]:
+    """
+    Fill gaps in mouse move actions with linear interpolation.
+    """
+    mouse_move_actions = [
+        action for action in actions if isinstance(action.action, MouseMove)
+    ]
+    for action in mouse_move_actions:
+        action.timestamp += ACTION_DELAY
+    filled_actions = fill_gaps(mouse_move_actions, step=step)
+
+    return filled_actions
+
+
+def convert_cubic_to_np(cubics: list[Cubic]) -> np.ndarray:
+    """
+    Convert a list of Cubic objects to a numpy array of shape (n, 3),
+    where each row is [m, n, a] for the cubic.
+    """
+
+    return np.array([[cubic.m, cubic.n, cubic.a] for cubic in cubics])
+
+
 if __name__ == "__main__":
     # Generate the comparison plot
     logs = get_all_action_logs(
@@ -396,13 +436,7 @@ if __name__ == "__main__":
     timestamps += np.random.uniform(-0.05, 0.05, size=timestamps.shape)
 
     # steps to get
-    mouse_move_actions = [
-        action for action in logs if isinstance(action.action, MouseMove)
-    ]
-    for action in mouse_move_actions:
-        action.timestamp += 0.05
-
-    filled_actions = fill_gaps(mouse_move_actions, step=0.01)
+    filled_actions = fill_mouse_move_actions(logs, step=0.01)
     screen_size = (1440, 900)
     mouse_x_cubic, mouse_y_cubic = process_continuous_actions(
         timestamps, filled_actions, screen_size
