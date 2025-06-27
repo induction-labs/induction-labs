@@ -22,7 +22,7 @@ class ActionRecorder:
         output_dir_template: str,
         gs_file_path: str,
         thread_pool: ThreadPoolExecutor,
-        chunk_size: int = 2500,
+        chunk_size: int = 10000,
         uploaded_callback=None,
         passwords_file: str = ".passwords",
     ):

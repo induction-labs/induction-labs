@@ -26,6 +26,7 @@ dependencies = [
     "opencv-python>=4.11.0.86",
     "matplotlib>=3.10.3",
     "av>=14.4.0",
+    "actioncollector",
 ]
 
 [project.scripts]
@@ -33,6 +34,9 @@ synapse = "synapse:main"
 
 [tool.uv]
 default-groups = ["dev"]
+
+[tool.uv.sources]
+actioncollector = { workspace = true }
 
 # [tool.uv.sources]
 # video-reader-rs = { git = "https://github.com/gcanat/video_reader-rs" }

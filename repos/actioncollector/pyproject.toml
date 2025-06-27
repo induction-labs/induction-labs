@@ -71,6 +71,7 @@ gooey = { git = "ssh://git@github.com/induction-labs/gooey.git", branch = "pypi_
 
 [dependency-groups]
 dev = [
+    "ipykernel>=6.29.5",
     "pyinstaller>=6.14.1",
 ]
 

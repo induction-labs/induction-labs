@@ -9,8 +9,8 @@ from pydantic import BaseModel, Field
 # Mouse action models
 class MouseMove(BaseModel):
     action: Literal["mouse_move"] = "mouse_move"
-    x: int
-    y: int
+    x: Union[int, float]  # noqa: UP007
+    y: Union[int, float]  # noqa: UP007
 
 
 class MouseButton(BaseModel):
@@ -37,7 +37,7 @@ class KeyButton(BaseModel):
     is_down: bool
 
 
-actionType = Union[MouseMove, MouseButton, Scroll, KeyButton]
+actionType = Union[MouseMove, MouseButton, Scroll, KeyButton]  # noqa: UP007
 
 
 class Action(BaseModel):
@@ -45,7 +45,7 @@ class Action(BaseModel):
     timestamp: float
 
     @staticmethod
-    def from_action_type(action: actionType, timestamp: float = None) -> Self:
+    def from_action_type(action: actionType, timestamp: float | None = None) -> Self:
         return Action(
             action=action,
             timestamp=time.time_ns() * 1e-9 if timestamp is None else timestamp,

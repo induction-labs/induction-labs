@@ -61,6 +61,7 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "ipykernel" },
     { name = "pyinstaller" },
 ]
 
@@ -83,7 +84,10 @@ requires-dist = [
 ]
 
 [package.metadata.requires-dev]
-dev = [{ name = "pyinstaller", specifier = ">=6.14.1" }]
+dev = [
+    { name = "ipykernel", specifier = ">=6.29.5" },
+    { name = "pyinstaller", specifier = ">=6.14.1" },
+]
 
 [[package]]
 name = "aiohappyeyeballs"
@@ -4737,6 +4741,7 @@ name = "synapse"
 version = "0.1.0"
 source = { editable = "repos/synapse" }
 dependencies = [
+    { name = "actioncollector" },
     { name = "av" },
     { name = "gcsfs" },
     { name = "google-cloud-storage" },
@@ -4771,6 +4776,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "actioncollector", editable = "repos/actioncollector" },
     { name = "av", specifier = ">=14.4.0" },
     { name = "gcsfs", specifier = ">=2025.3.0" },
     { name = "google-cloud-storage", specifier = ">=3.1.0" },
