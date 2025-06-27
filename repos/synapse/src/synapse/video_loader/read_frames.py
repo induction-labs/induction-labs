@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from fractions import Fraction
+
 import numpy as np
 import tensorstore as ts
 
@@ -66,6 +68,59 @@ async def fetch_metadata_from_zarr(zarr_path: str) -> StreamMetadata:
         ) from e
 
 
+type PTSArray = np.ndarray[tuple[int], np.dtype[np.integer]]
+type TimestampsArray = np.ndarray[tuple[int], np.dtype[np.floating]]
+
+
+async def get_frame_pts_array(
+    zarr_path: str,
+) -> PTSArray:
+    """
+    Get the timestamps array from a tensorstore zarr file.
+
+    Args:
+        zarr_path: Path to the tensorstore zarr file (supports local paths, gs://, and s3://)
+
+    Returns:
+        Numpy array of timestamps
+    """
+    timestamps_path = zarr_path + "/timestamps"
+    timestamps_kvstore_config = get_kvstore_config(timestamps_path)
+
+    pts_zarr = await ts.open({"driver": "zarr3", "kvstore": timestamps_kvstore_config})
+
+    pts_array: np.ndarray = await pts_zarr.read()
+    assert pts_array.ndim == 1, (
+        f"Expected 1D array for timestamps, got {pts_array.ndim}D array with shape {pts_array.shape}"
+    )
+    assert pts_array.dtype == np.uint64, (
+        f"Expected timestamps to be in uint64 format, got {pts_array.dtype}"
+    )
+    return pts_array
+
+
+def convert_pts_array_to_timestamps(
+    pts_array: PTSArray, time_base: Fraction
+) -> TimestampsArray:
+    """
+    Convert a PTS array to timestamps.
+
+    Args:
+        pts_array: PTS array (1D numpy array of int64)
+        time_base: Time base in seconds
+
+    Returns:
+        Timestamps array (1D numpy array of float64)
+    """
+
+    timestamps = pts_array * time_base.numerator / time_base.denominator
+
+    assert timestamps.ndim == 1, (
+        f"Expected 1D array for timestamps, got {timestamps.ndim}D array with shape {timestamps.shape}"
+    )
+    return timestamps  # type: ignore[name-defined]
+
+
 async def get_frame_at_timestamp(zarr_path: str, timestamp: float) -> np.ndarray:
     """
     Get the frame at a specific timestamp from a tensorstore zarr file.
@@ -87,13 +142,8 @@ async def get_frame_at_timestamp(zarr_path: str, timestamp: float) -> np.ndarray
         f"Timestamp {timestamp_pts} is out of bounds for the stream: "
         f"start={stream_metadata.input_video.start_pts}, end={stream_metadata.input_video.end_pts}"
     )
-    timestamps_path = zarr_path + "/timestamps"
-    timestamps_kvstore_config = get_kvstore_config(timestamps_path)
 
-    timestamps_array = await ts.open(
-        {"driver": "zarr3", "kvstore": timestamps_kvstore_config}
-    )
-    stream_pts = await timestamps_array.read()
+    stream_pts = await get_frame_pts_array(zarr_path)
 
     # Find the closest timestamp
     # print(timestamps)
