@@ -280,7 +280,7 @@ async def create_samples(num_samples: int, path_template: str):
 if __name__ == "__main__":
     asyncio.run(
         create_samples(
-            1000,
+            100,
             "gs://induction-labs/jonathan/synth/cursor_follow_v0/sample_{i}.zarr",
         )
     )
