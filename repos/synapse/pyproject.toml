@@ -27,6 +27,7 @@ dependencies = [
     "matplotlib>=3.10.3",
     "av>=14.4.0",
     "actioncollector",
+    "pytest>=8.4.1",
 ]
 
 [project.scripts]

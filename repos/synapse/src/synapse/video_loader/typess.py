@@ -13,30 +13,43 @@ class StreamVideoArgs(BaseModel):
     frames_per_chunk: int
 
 
-class VideoMetadata(BaseModel):
+class FramesMetadata(BaseModel):
     fps: Fraction
     total_frames: int
     resolution: VideoResolution
 
 
-class StreamMetadata(BaseModel):
-    time_base: Fraction
+class VideoMetadata(FramesMetadata):
+    # TODO: These fields were added after, need to make this backward compatible when reading from StreamMetadata
     start_pts: int
-    end_pts: int
+    duration: int
+    time_base: Fraction
 
+    @property
+    def end_pts(self) -> int:
+        """End PTS of the video."""
+        return self.start_pts + self.duration
+
+    @property
+    def duration_seconds(self) -> Fraction:
+        """Duration of the video in seconds."""
+        return self.duration * self.time_base
+
+
+class StreamMetadata(BaseModel):
     input_video: VideoMetadata
-    output_video: VideoMetadata
+    output_video: FramesMetadata
     output_frames_per_chunk: int
 
     @property
     def start_time(self) -> Fraction:
         """Start time of the video in seconds."""
-        return self.start_pts * self.time_base
+        return self.input_video.start_pts * self.input_video.time_base
 
     @property
     def end_time(self) -> Fraction:
         """End time of the video in seconds."""
-        return self.end_pts * self.time_base
+        return self.input_video.end_pts * self.input_video.time_base
 
     @property
     def fps_ratio(self) -> Fraction:
@@ -58,9 +71,9 @@ class StreamMetadata(BaseModel):
 
     @property
     def output_pts_per_frame(self) -> int:
-        pts_per_frame = 1 / (self.time_base * self.output_video.fps)
+        pts_per_frame = 1 / (self.input_video.time_base * self.output_video.fps)
         assert pts_per_frame.denominator == 1, (
-            f"{self.output_video.fps=}, f{self.time_base=}"
+            f"{self.output_video.fps=}, f{self.input_video.time_base=}"
         )
         return pts_per_frame.numerator
 

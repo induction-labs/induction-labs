@@ -79,13 +79,13 @@ async def get_frame_at_timestamp(zarr_path: str, timestamp: float) -> np.ndarray
     """
     # Read the timestamp array to find the closest frame
     stream_metadata = await fetch_metadata_from_zarr(zarr_path)
-    timestamp_pts = int(timestamp / stream_metadata.time_base)
+    timestamp_pts = int(timestamp / stream_metadata.input_video.time_base)
     assert (
-        timestamp_pts >= stream_metadata.start_pts
-        and timestamp_pts <= stream_metadata.end_pts
+        timestamp_pts >= stream_metadata.input_video.start_pts
+        and timestamp_pts <= stream_metadata.input_video.end_pts
     ), (
         f"Timestamp {timestamp_pts} is out of bounds for the stream: "
-        f"start={stream_metadata.start_pts}, end={stream_metadata.end_pts}"
+        f"start={stream_metadata.input_video.start_pts}, end={stream_metadata.input_video.end_pts}"
     )
     timestamps_path = zarr_path + "/timestamps"
     timestamps_kvstore_config = get_kvstore_config(timestamps_path)
@@ -99,7 +99,7 @@ async def get_frame_at_timestamp(zarr_path: str, timestamp: float) -> np.ndarray
     # print(timestamps)
     closest_idx = int(np.argmin(np.abs(stream_pts - timestamp_pts)))
     print(
-        f"Closest index for timestamp {timestamp} with {timestamp_pts=} is {closest_idx}, value: {stream_pts[closest_idx]} ({float(stream_pts[closest_idx] * stream_metadata.time_base)}s)"
+        f"Closest index for timestamp {timestamp} with {timestamp_pts=} is {closest_idx}, value: {stream_pts[closest_idx]} ({float(stream_pts[closest_idx] * stream_metadata.input_video.time_base)}s)"
     )
 
     # Get the frame at that index
