@@ -1,13 +1,16 @@
 from __future__ import annotations
 
-import tempfile
-
 import tensorstore as ts
 from tqdm import tqdm
 
 from synapse.elapsed_timer import elapsed_timer
 from synapse.utils.logging import configure_logging
-from synapse.video_loader.video import StreamVideoArgs, stream_video_to_tensors
+from synapse.video_loader.video import (
+    StreamVideoArgs,
+    configure_video_folder_stream,
+    configure_video_stream,
+    process_stream_tensors,
+)
 
 from .typess import VideoProcessArgs
 from .zarr_utils import (
@@ -31,47 +34,57 @@ async def process_video(
             max_pixels=args.max_frame_pixels,
             frames_per_chunk=args.frames_per_chunk,
         )
-        with tempfile.NamedTemporaryFile(suffix=".mp4") as tmp:
-            stream_metadata, video_frames = stream_video_to_tensors(
-                stream_args, tmp.name
-            )
-            # Create the Zarr array if it does not exist
-            zarr_array = await create_zarr_array(
-                ZarrArrayAttributes(
-                    chunk_shape=(
-                        args.frames_per_chunk,
-                        3,
-                        stream_metadata.output_video.resolution.height,
-                        stream_metadata.output_video.resolution.width,
-                    ),
-                    shape=(
-                        stream_metadata.output_video.total_frames,
-                        3,
-                        stream_metadata.output_video.resolution.height,
-                        stream_metadata.output_video.resolution.width,
-                    ),  # Start with 0 frames
-                    dtype=ts.uint8,
-                    path=args.output_path,
-                    metadata={
-                        "stream": stream_metadata.model_dump(),
-                    },
-                ),
-            )
-            timestamps_array = await create_zarr_array(
-                ZarrArrayAttributes(
-                    chunk_shape=(stream_metadata.output_video.total_frames,),
-                    shape=(
-                        stream_metadata.output_video.total_frames,
-                    ),  # Start with 0 timestamps
-                    dtype=ts.uint64,
-                    path=args.output_path + "/timestamps",
-                ),
-            )
+        configure_fn = (
+            configure_video_folder_stream
+            if args.video_path.endswith("/")
+            else configure_video_stream
+        )
+        stream_metadata, video_format, stream_context = await configure_fn(
+            stream_args,
+        )
 
-            # Process and append frames to the Zarr array
+        # Create the Zarr array if it does not exist
+        zarr_array = await create_zarr_array(
+            ZarrArrayAttributes(
+                chunk_shape=(
+                    args.frames_per_chunk,
+                    3,
+                    stream_metadata.output_video.resolution.height,
+                    stream_metadata.output_video.resolution.width,
+                ),
+                shape=(
+                    stream_metadata.output_video.total_frames,
+                    3,
+                    stream_metadata.output_video.resolution.height,
+                    stream_metadata.output_video.resolution.width,
+                ),  # Start with 0 frames
+                dtype=ts.uint8,
+                path=args.output_path,
+                metadata={
+                    "stream": stream_metadata.model_dump(),
+                },
+            ),
+        )
+        timestamps_array = await create_zarr_array(
+            ZarrArrayAttributes(
+                chunk_shape=(stream_metadata.output_video.total_frames,),
+                shape=(
+                    stream_metadata.output_video.total_frames,
+                ),  # Start with 0 timestamps
+                dtype=ts.uint64,
+                path=args.output_path + "/timestamps",
+            ),
+        )
+
+        # Process and append frames to the Zarr array
+        with stream_context() as stream_generator:
             for i, (frames, timestamps) in enumerate(
                 tqdm(
-                    video_frames,
+                    process_stream_tensors(
+                        stream_generator,
+                        video_format,
+                        stream_metadata,
+                    ),
                     desc="Processing video frames",
                     total=stream_metadata.total_num_chunks,
                 )
@@ -96,4 +109,4 @@ async def process_video(
                 stream_metadata.total_num_chunks,
                 timer.elapsed,
             )
-            return stream_metadata, zarr_array
+        return stream_metadata, zarr_array
