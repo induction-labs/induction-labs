@@ -8,7 +8,7 @@ from dataclasses import dataclass
 import gcsfs
 import matplotlib.pyplot as plt
 import numpy as np
-from actioncollector.models import Action, MouseMove
+from synapse.actions.models import Action, MouseMove
 
 
 @dataclass

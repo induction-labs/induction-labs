@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import time
-from typing import Literal, Self, Union
+from typing import Literal, Union
 
 from pydantic import BaseModel, Field
 
@@ -45,7 +45,7 @@ class Action(BaseModel):
     timestamp: float
 
     @staticmethod
-    def from_action_type(action: actionType, timestamp: float | None = None) -> Self:
+    def from_action_type(action: actionType, timestamp: float | None = None) -> Action:
         return Action(
             action=action,
             timestamp=time.time_ns() * 1e-9 if timestamp is None else timestamp,

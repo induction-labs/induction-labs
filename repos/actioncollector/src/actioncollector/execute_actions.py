@@ -7,8 +7,7 @@ from pynput.keyboard import Controller as KeyboardController
 from pynput.keyboard import Key as KeyboardKey
 from pynput.mouse import Button as MouseButtonEnum
 from pynput.mouse import Controller as MouseController
-
-from actioncollector.models import Action, KeyButton, MouseButton, MouseMove, Scroll
+from synapse.actions.models import Action, KeyButton, MouseButton, MouseMove, Scroll
 
 
 def load_actions(path):
@@ -27,8 +26,8 @@ def get_mouse_button(button_name: str):
     """Map string to pynput.mouse.Button."""
     try:
         return getattr(MouseButtonEnum, button_name)
-    except AttributeError:
-        raise ValueError(f"Unknown mouse button: {button_name}")
+    except AttributeError as e:
+        raise ValueError(f"Unknown mouse button: {button_name}") from e
 
 
 def get_keyboard_key(key_str: str):

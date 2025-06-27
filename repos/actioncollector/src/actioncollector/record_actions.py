@@ -7,8 +7,8 @@ from concurrent.futures import ThreadPoolExecutor
 from queue import Queue
 
 from pynput import keyboard, mouse
+from synapse.actions.models import Action, KeyButton, MouseButton, MouseMove, Scroll
 
-from actioncollector.models import Action, KeyButton, MouseButton, MouseMove, Scroll
 from actioncollector.password_filter import (
     filter_actions_file,
     load_passwords_lowercase,

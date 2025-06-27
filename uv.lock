@@ -56,6 +56,7 @@ dependencies = [
     { name = "pillow" },
     { name = "pydantic" },
     { name = "pynput" },
+    { name = "synapse" },
     { name = "tqdm" },
     { name = "typer" },
 ]
@@ -80,6 +81,7 @@ requires-dist = [
     { name = "pillow", specifier = ">=11.2.1" },
     { name = "pydantic", specifier = ">=2.11.5" },
     { name = "pynput", editable = "repos/pynput" },
+    { name = "synapse", editable = "repos/synapse" },
     { name = "tqdm", specifier = ">=4.67.1" },
     { name = "typer", specifier = ">=0.16.0" },
 ]
@@ -4757,7 +4759,6 @@ name = "synapse"
 version = "0.1.0"
 source = { editable = "repos/synapse" }
 dependencies = [
-    { name = "actioncollector" },
     { name = "av" },
     { name = "gcsfs" },
     { name = "google-cloud-storage" },
@@ -4793,7 +4794,6 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "actioncollector", editable = "repos/actioncollector" },
     { name = "av", specifier = ">=14.4.0" },
     { name = "gcsfs", specifier = ">=2025.3.0" },
     { name = "google-cloud-storage", specifier = ">=3.1.0" },
