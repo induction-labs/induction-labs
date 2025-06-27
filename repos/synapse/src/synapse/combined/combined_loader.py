@@ -54,14 +54,15 @@ async def combined_loader(args: CombinedLoaderArgs):
     stream_metadata = await fetch_metadata_from_zarr(args.frames_zarr_path)
     actions = get_all_action_logs(args.action_logs_dir)
     range_start, range_end = args.frame_range
-    assert range_end <= stream_metadata.output_video.total_frames, (
+    # We need `range_end + 1` because we need an action for the last frame
+    assert range_end + 1 <= stream_metadata.output_video.total_frames, (
         f"Frame range {args.frame_range} exceeds total frames {stream_metadata.output_video.total_frames}."
     )
     frame_pts = await get_frame_pts_array(args.frames_zarr_path)
     assert len(frame_pts) == stream_metadata.output_video.total_frames, (
         f"Frame PTS array length {len(frame_pts)} does not match total frames {stream_metadata.output_video.total_frames}."
     )
-    frame_pts = frame_pts[range_start:range_end]
+    frame_pts = frame_pts[range_start : range_end + 1]
     frame_timestamps = convert_pts_array_to_timestamps(
         frame_pts, stream_metadata.input_video.time_base
     )
@@ -83,7 +84,7 @@ async def combined_loader(args: CombinedLoaderArgs):
     frames = await fetch_frames_from_zarr(
         args.frames_zarr_path, (range_start, range_end)
     )
-    assert len(frames) == len(mouse_movements) + 1 == range_end - range_start, (
+    assert len(frames) == len(mouse_movements) == range_end - range_start, (
         f"Number of frames {len(frames)=} does not match number of mouse movements {len(mouse_movements) + 1=} "
         f"for range {args.frame_range=}."
     )

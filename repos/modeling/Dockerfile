@@ -42,6 +42,8 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 # TODO: Make this build depend on vllm build, so we dont do this giant copy and have a huge layer.
 COPY repos/modeling/ /workspace/repos/modeling/
+COPY repos/synapse/ /workspace/repos/synapse/
+
 
 RUN --mount=type=cache,target=/root/.cache/uv \
   uv sync --locked --group flash-attn
