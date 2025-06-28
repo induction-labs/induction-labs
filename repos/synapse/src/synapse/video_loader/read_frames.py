@@ -99,6 +99,43 @@ async def get_frame_pts_array(
     return pts_array
 
 
+async def get_frame_cursor_array(
+    zarr_path: str,
+) -> tuple[np.ndarray, int]:
+    """
+    Get the timestamps array from a tensorstore zarr file.
+
+    Args:
+        zarr_path: Path to the tensorstore zarr file (supports local paths, gs://, and s3://)
+
+    Returns:
+        Numpy array of timestamps
+    """
+    timestamps_path = zarr_path + "/cursor_action"
+    timestamps_kvstore_config = get_kvstore_config(timestamps_path)
+
+    pts_zarr = await ts.open({"driver": "zarr3", "kvstore": timestamps_kvstore_config})
+    full_spec = pts_zarr.spec()
+    frames_per_action = full_spec.to_json()["metadata"]["attributes"][
+        "frames_per_action_step"
+    ]
+    assert isinstance(frames_per_action, int), (
+        f"Expected frames_per_action_step to be an integer, got {type(frames_per_action)}"
+    )
+
+    pts_array: np.ndarray = await pts_zarr.read()
+    assert pts_array.ndim == 3, (
+        f"Expected 1D array for timestamps, got {pts_array.ndim}D array with shape {pts_array.shape}"
+    )
+    assert pts_array.shape[1] == 2 and pts_array.shape[2] == 3, (
+        f"Expected cursor action array to have shape (N, 2, 3), got {pts_array.shape}"
+    )
+    assert pts_array.dtype == np.float32, (
+        f"Expected timestamps to be in uint64 format, got {pts_array.dtype}"
+    )
+    return pts_array, frames_per_action
+
+
 def convert_pts_array_to_timestamps(
     pts_array: PTSArray, time_base: Fraction
 ) -> TimestampsArray:
