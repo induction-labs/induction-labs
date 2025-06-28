@@ -1,18 +1,10 @@
 from __future__ import annotations
 
-import numpy as np
 from pydantic import BaseModel, field_validator
-from synapse.actions.mouse_movements import (
-    convert_cubic_to_np,
-    fill_mouse_move_actions,
-    get_all_action_logs,
-    process_continuous_actions,
-)
 from synapse.video_loader.read_frames import (
-    convert_pts_array_to_timestamps,
     fetch_frames_from_zarr,
     fetch_metadata_from_zarr,
-    get_frame_pts_array,
+    get_frame_cursor_array,
 )
 
 
@@ -21,18 +13,28 @@ class CombinedLoaderArgs(BaseModel):
     Arguments for the CombinedLoader.
     """
 
+    frames_per_action: int = 2
     frames_zarr_path: str
-    frame_range: tuple[int, int]
-    action_logs_dir: str
+    actions_range: tuple[int, int]
 
-    @field_validator("frame_range")
-    @classmethod
-    def validate_frame_range(cls, value: tuple[int, int]) -> tuple[int, int]:
+    @property
+    def frame_range(self) -> tuple[int, int]:
         """
-        Validate that the frame range is a tuple of two integers.
+        Get the real frame range based on frames_per_action.
+        """
+        return (
+            self.actions_range[0] * self.frames_per_action,
+            self.actions_range[1] * self.frames_per_action,
+        )
+
+    @field_validator("actions_range")
+    @classmethod
+    def validate_actions_range(cls, value: tuple[int, int]) -> tuple[int, int]:
+        """
+        Validate that the actions range is a tuple of two integers.
         """
         if not isinstance(value, tuple) or len(value) != 2:
-            raise ValueError("frame_range must be a tuple of two integers.")
+            raise ValueError("actions_range must be a tuple of two integers.")
         start, end = value
         assert 0 <= start <= end, (
             f"Invalid frame range: {value}. Start must be less than or equal to end."
@@ -49,43 +51,48 @@ async def combined_loader(args: CombinedLoaderArgs):
         args: CombinedLoaderArgs containing the zarr path, frame range, and action logs directory.
 
     Returns:
-        A dictionary containing frames and metadata.
+        frames: Numpy array of shape (seq, frames_per_action, 3, H, W) containing the frames.
+        mouse_movements: Numpy array of shape (seq, [x, y], [m, n, a]) containing the mouse movements.
+        stream_metadata: StreamMetadata object containing metadata
     """
     stream_metadata = await fetch_metadata_from_zarr(args.frames_zarr_path)
-    actions = get_all_action_logs(args.action_logs_dir)
-    range_start, range_end = args.frame_range
-    # We need `range_end + 1` because we need an action for the last frame
-    assert range_end + 1 <= stream_metadata.output_video.total_frames, (
-        f"Frame range {args.frame_range} exceeds total frames {stream_metadata.output_video.total_frames}."
+    # actions = get_all_action_logs(args.action_logs_dir)
+    frames_start, frames_end = args.frame_range
+    actions_start, actions_end = args.actions_range
+
+    # We need `frames_end + 1` because we need an action for the last frame
+    assert frames_end <= stream_metadata.output_video.total_frames, (
+        f"Frame range {args.actions_range} exceeds total frames {stream_metadata.output_video.total_frames}."
     )
-    frame_pts = await get_frame_pts_array(args.frames_zarr_path)
-    assert len(frame_pts) == stream_metadata.output_video.total_frames, (
-        f"Frame PTS array length {len(frame_pts)} does not match total frames {stream_metadata.output_video.total_frames}."
+    actions_array, frames_per_action = await get_frame_cursor_array(
+        args.frames_zarr_path,
     )
-    frame_pts = frame_pts[range_start : range_end + 1]
-    frame_timestamps = convert_pts_array_to_timestamps(
-        frame_pts, stream_metadata.input_video.time_base
+    assert frames_per_action == args.frames_per_action, (
+        f"Expected frames_per_action {args.frames_per_action}, got {frames_per_action}."
     )
-    screen_size = (
-        stream_metadata.input_video.resolution.width,
-        stream_metadata.input_video.resolution.height,
+    actions_array = actions_array[actions_start:actions_end]
+    assert (
+        len(actions_array)
+        == stream_metadata.output_video.total_frames // frames_per_action
+    ), (
+        f"Actions array length {len(actions_array)} does not match expected length "
+        f"{stream_metadata.output_video.total_frames // frames_per_action}."
     )
-    filled_actions = fill_mouse_move_actions(actions)
-    mouse_x_cubic, mouse_y_cubic = process_continuous_actions(
-        frame_timestamps, filled_actions, screen_size
-    )
-    mouse_x_cubic_np, mouse_y_cubic_np = (
-        convert_cubic_to_np(mouse_x_cubic),
-        convert_cubic_to_np(mouse_y_cubic),
-    )
-    mouse_movements = np.stack(
-        [mouse_x_cubic_np, mouse_y_cubic_np], axis=1
-    )  # Shape: (n, [x, y], [m, n, a]) for x and y cubic coefficients
     frames = await fetch_frames_from_zarr(
-        args.frames_zarr_path, (range_start, range_end)
+        args.frames_zarr_path, (frames_start, frames_end)
+    )  # [seq * frames_per_action, 3, H, W]
+    assert frames.shape[0] == (actions_end - actions_start) * args.frames_per_action, (
+        f"Expected frames shape to be {(actions_end - actions_start) * args.frames_per_action, 3, stream_metadata.output_video.resolution.height, stream_metadata.output_video.resolution.width}, "
+        f"got {frames.shape}."
     )
-    assert len(frames) == len(mouse_movements) == range_end - range_start, (
-        f"Number of frames {len(frames)=} does not match number of mouse movements {len(mouse_movements) + 1=} "
-        f"for range {args.frame_range=}."
+    frames = frames.reshape(
+        actions_end - actions_start,
+        args.frames_per_action,
+        3,
+        stream_metadata.output_video.resolution.height,
+        stream_metadata.output_video.resolution.width,
     )
-    return frames, mouse_movements, stream_metadata
+    assert len(frames) == len(actions_array), (
+        f"Expected frames length {len(actions_array)}, got {len(frames)}."
+    )
+    return frames, actions_array, stream_metadata

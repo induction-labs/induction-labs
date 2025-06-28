@@ -9,6 +9,7 @@ authors = [
 requires-python = ">=3.12"
 dependencies = [
     "imageio[ffmpeg]>=2.37.0",
+    "numpy>=2.2.6",
     "pillow>=11.2.1",
     "synapse",
     "tqdm>=4.67.1",
@@ -27,5 +28,4 @@ build-backend = "hatchling.build"
 [dependency-groups]
 dev = [
     "ipykernel>=6.29.5",
-    "pyobjc>=11.1",
 ]
