@@ -8,7 +8,6 @@ service-account-key.json
 # PyInstaller build artifacts
 build/
 dist/
-*.spec
 
 # Python
 __pycache__/
