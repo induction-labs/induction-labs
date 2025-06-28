@@ -76,4 +76,5 @@ def recording_metadata(username: str, video_segment_buffer_length: float) -> dic
             "logical_pixel_height": int(physical_pixel_height / logical_pixel_ratio),
         },
         "video_segment_buffer_length": video_segment_buffer_length,
+        "platform": sys.platform,
     }
