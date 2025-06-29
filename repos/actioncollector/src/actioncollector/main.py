@@ -9,6 +9,8 @@ import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+import signal
+import socket, threading, sys, os, time
 
 import typer
 from tqdm import tqdm
@@ -44,44 +46,67 @@ def start_screen_record(
     # -segment_time 10 -f segment \
     # -r 30 tmp/video_%03d.mp4
 
-    ffmpeg_path = get_bundled_executable("ffmpeg")
-    cmd = [
-        ffmpeg_path,
-        "-f",
-        "avfoundation",
-        "-framerate",
-        str(framerate),
-        "-use_wallclock_as_timestamps",
-        "1",
-        "-capture_cursor",
-        "1",
-        "-vsync",
-        "vfr",
-        "-i",
-        f"{device_index}:none",
-        "-c:v",
-        "libx264",
-        "-g",
-        "15",
-        "-c:a",
-        "aac",
-        "-preset",
-        "veryfast",
-        "-crf",
-        "17",
-        "-copyts",
-        "-muxdelay",
-        "0",
-        "-f",
-        "segment",
-        "-segment_time",
-        str(segment_time),
-        # "-r", str(framerate),
-        output_path,
-    ]
+    ffmpeg_name = "ffmpeg.exe" if sys.platform.startswith("win") else "ffmpeg"
+    ffmpeg_path = get_bundled_executable(ffmpeg_name)
+    if sys.platform.startswith("win"):
+        cmd = [
+            ffmpeg_path,
+            "-f", "gdigrab",                     # <-- Windows screen-capture device
+            "-framerate", str(framerate),
+            "-use_wallclock_as_timestamps", "1",
+            "-draw_mouse", "1",                 # <-- equivalent to -capture_cursor 1
+            "-vsync", "vfr",
+            "-i", "desktop",                    # <-- no device index needed on Windows
+            "-c:v", "libx264",
+            "-g", "15",
+            "-c:a", "aac",                      # harmless if no audio stream is present
+            "-preset", "veryfast",
+            "-crf", "17",
+            "-copyts",
+            "-muxdelay", "0",
+            "-f", "segment",
+            "-segment_time", str(segment_time),
+            output_path,
+        ]
+    else:
+        cmd = [
+            ffmpeg_path,
+            "-f",
+            "avfoundation",
+            "-framerate",
+            str(framerate),
+            "-use_wallclock_as_timestamps",
+            "1",
+            "-capture_cursor",
+            "1",
+            "-vsync",
+            "vfr",
+            "-i",
+            f"{device_index}:none",
+            "-c:v",
+            "libx264",
+            "-g",
+            "15",
+            "-c:a",
+            "aac",
+            "-preset",
+            "veryfast",
+            "-crf",
+            "17",
+            "-copyts",
+            "-muxdelay",
+            "0",
+            "-f",
+            "segment",
+            "-segment_time",
+            str(segment_time),
+            # "-r", str(framerate),
+            output_path,
+        ]
     # open stdin so we can send 'q' to stop cleanly
     return subprocess.Popen(
-        cmd, stdin=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+        cmd, stdin=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        creationflags=subprocess.CREATE_NO_WINDOW if sys.platform.startswith("win") else 0
     )
 
 
@@ -174,12 +199,14 @@ def run(
 
     executor = ThreadPoolExecutor(max_workers=5)
 
-    devices = ffmpeg_list_video_devices()
-    device_id = get_default_device(devices)
-    print("[info] available video devices:")
-    for idx, name in devices:
-        print(f"  [{idx}] {name}")
-    print("[info] using device index:", device_id, "which is", devices[device_id][1])
+    device_id = 0
+    if sys.platform == "darwin":
+        devices = ffmpeg_list_video_devices()
+        device_id = get_default_device(devices)
+        print("[info] available video devices:")
+        for idx, name in devices:
+            print(f"  [{idx}] {name}")
+        print("[info] using device index:", device_id, "which is", devices[device_id][1])
 
     print("[info] starting screen recording…")
     ffmpeg_proc = start_screen_record(
@@ -202,6 +229,26 @@ def run(
         desc="Video Segments Done",
         dynamic_ncols=True,
     )
+
+    if sys.platform.startswith("win"):
+        def shutdown(server_sock):
+            print("[child] shutdown request received")
+            server_sock.close()  # breaks the accept loop
+
+            ffmpeg_proc.stdin.write("q\n")
+            ffmpeg_proc.stdin.flush()
+
+        def serve_control(port=50572):
+            srv = socket.socket()
+            srv.bind(('127.0.0.1', port))
+            srv.listen(1)
+            print(f"[child] PID {os.getpid()} control on port {port}")
+            conn, _ = srv.accept()  # blocks until parent connects
+            conn.close()
+            shutdown(srv)
+
+        t = threading.Thread(target=serve_control, daemon=True)
+        t.start()
 
     try:
         file_in_progress = None

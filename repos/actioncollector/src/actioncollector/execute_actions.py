@@ -64,7 +64,7 @@ def replay(actions):
         # Dispatch based on action type
         if isinstance(a, MouseMove):
             # absolute positioning
-            mouse.position = (a.x, a.y)
+            mouse.position = (a.x/1.25, a.y/1.25)
 
         elif isinstance(a, MouseButton):
             btn = get_mouse_button(a.button)
@@ -88,7 +88,7 @@ def replay(actions):
             print(f"Skipping unsupported action: {a}")
 
 
-log_path = "/Users/jonathan/Documents/programming/induction/induction-labs/repos/actioncollector/src/actioncollector/playground/output_actions.jsonl"
+log_path = r"C:\Users\jonat\Documents\coding\induction-labs\repos\actioncollector\action_capture_jonathanwindows_2025-06-28_103905_JU1TV_action_capture_000000.jsonl"
 actions = load_actions(log_path)
 print(f"Loaded {len(actions)} actions — starting replay in 2 seconds...")
 time.sleep(2)
