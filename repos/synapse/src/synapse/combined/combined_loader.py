@@ -56,21 +56,18 @@ async def combined_loader(args: CombinedLoaderArgs):
         stream_metadata: StreamMetadata object containing metadata
     """
     stream_metadata = await fetch_metadata_from_zarr(args.frames_zarr_path)
+
     # actions = get_all_action_logs(args.action_logs_dir)
-    frames_start, frames_end = args.frame_range
-    actions_start, actions_end = args.actions_range
 
     # We need `frames_end + 1` because we need an action for the last frame
-    assert frames_end <= stream_metadata.output_video.total_frames, (
-        f"Frame range {args.actions_range} exceeds total frames {stream_metadata.output_video.total_frames}."
-    )
+
     actions_array, frames_per_action = await get_frame_cursor_array(
         args.frames_zarr_path,
     )
     assert frames_per_action == args.frames_per_action, (
         f"Expected frames_per_action {args.frames_per_action}, got {frames_per_action}."
     )
-    actions_array = actions_array[actions_start:actions_end]
+
     assert (
         len(actions_array)
         == stream_metadata.output_video.total_frames // frames_per_action
@@ -78,6 +75,14 @@ async def combined_loader(args: CombinedLoaderArgs):
         f"Actions array length {len(actions_array)} does not match expected length "
         f"{stream_metadata.output_video.total_frames // frames_per_action}."
     )
+    frames_start, frames_end = args.frame_range
+    actions_start, actions_end = args.actions_range
+
+    assert frames_end <= stream_metadata.output_video.total_frames, (
+        f"Frame range {args.actions_range} exceeds total frames {stream_metadata.output_video.total_frames}."
+    )
+
+    actions_array = actions_array[actions_start:actions_end]
     frames = await fetch_frames_from_zarr(
         args.frames_zarr_path, (frames_start, frames_end)
     )  # [seq * frames_per_action, 3, H, W]
@@ -95,4 +100,5 @@ async def combined_loader(args: CombinedLoaderArgs):
     assert len(frames) == len(actions_array), (
         f"Expected frames length {len(actions_array)}, got {len(frames)}."
     )
-    return frames, actions_array, stream_metadata
+
+    return (frames, actions_array), stream_metadata

@@ -92,6 +92,7 @@ class VideoResolution(BaseModel):
     def __repr__(self):
         return self.__str__()
 
+    @property
     def pixels(self):
         return self.width * self.height
 

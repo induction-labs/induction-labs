@@ -2425,9 +2425,13 @@ dependencies = [
 [package.dev-dependencies]
 dev = [
     { name = "huggingface-hub", extra = ["cli"] },
+    { name = "ipykernel" },
+    { name = "ipynb" },
     { name = "ipython" },
+    { name = "jupyter" },
     { name = "matplotlib" },
     { name = "pytest" },
+    { name = "pyzmq" },
     { name = "seaborn" },
     { name = "tabulate" },
 ]
@@ -2469,9 +2473,13 @@ requires-dist = [
 [package.metadata.requires-dev]
 dev = [
     { name = "huggingface-hub", extras = ["cli"], specifier = ">=0.32.4" },
+    { name = "ipykernel", specifier = ">=6.29.5" },
+    { name = "ipynb", specifier = ">=0.5.1" },
     { name = "ipython", specifier = ">=9.3.0" },
+    { name = "jupyter", specifier = ">=1.1.1" },
     { name = "matplotlib", specifier = ">=3.10.3" },
     { name = "pytest", specifier = ">=8.3.5" },
+    { name = "pyzmq", specifier = ">=27.0.0" },
     { name = "seaborn", specifier = ">=0.13.2" },
     { name = "tabulate", specifier = ">=0.9.0" },
 ]
