@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import random
 from fractions import Fraction
+from functools import partial
+from multiprocessing import Pool, set_start_method
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -24,7 +26,7 @@ from synapse.video_loader.zarr_utils import (
     append_batch,
     create_zarr_array,
 )
-from tqdm.asyncio import tqdm_asyncio
+from tqdm.auto import tqdm  # one bar in the main process
 
 OVERLAY = Image.open(
     Path(__file__).parent / ".." / ".." / "assets" / "default.png"
@@ -270,17 +272,40 @@ async def create_sample(sem: asyncio.Semaphore, i: int, path_template: str):
         )
 
 
-async def create_samples(num_samples: int, path_template: str):
-    sem = asyncio.Semaphore(10)
-    await tqdm_asyncio.gather(
-        *[create_sample(sem, i, path_template) for i in range(num_samples)]
+async def _batch(start: int, tpl: str, width: int = 4):
+    sem = asyncio.Semaphore(width)  # 4 concurrent tasks *inside* one process
+    await asyncio.gather(
+        *(create_sample(sem, i, tpl) for i in range(start, start + width))
     )
 
 
+def worker(start: int, tpl: str, width: int = 4):
+    asyncio.run(_batch(start, tpl, width))  # each process owns its own loop
+
+
+# ── driver ───────────────────────────────────────────────────────────
+def run_all(total: int, tpl: str, n_proc: int = 6, width: int = 4):
+    starts = range(0, total, width)  # one “batch” every <width> indices
+    with Pool(n_proc) as pool:
+        for _ in tqdm(
+            pool.imap_unordered(partial(worker, tpl=tpl, width=width), starts),
+            total=len(starts),
+        ):
+            pass
+
+
+# ── entry-point ──────────────────────────────────────────────────────
 if __name__ == "__main__":
-    asyncio.run(
-        create_samples(
-            15000,
-            "gs://induction-labs/jonathan/synth/cursor_follow_v1/sample_{i}.zarr",
-        )
+    import contextlib
+
+    with contextlib.suppress(
+        RuntimeError
+    ):  # makes the script work on Windows & macOS ≥3.8 too
+        set_start_method("spawn")
+
+    run_all(
+        15_000,
+        "gs://induction-labs/jonathan/synth/cursor_follow_v2/sample_{i}.zarr",
+        n_proc=6,
+        width=2,
     )

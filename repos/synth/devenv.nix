@@ -6,16 +6,12 @@
   ...
 }: {
   packages = [
-    pkgs.zlib
   ];
 
   languages.python = {
     libraries = [
-      # pkgs.cmake
     ];
     enable = true;
-    package = pkgs.python312Full;
-
     uv = {
       enable = true;
     };
