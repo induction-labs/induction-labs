@@ -10,7 +10,7 @@ from modeling.config import (
 from modeling.data.text_train import TextPretrainDatapackConfig
 
 from modeling.modules.text_pretrain.qwen3 import Qwen3LITConfig
-from modeling.types.attn_impl import AttentionImplementation
+from modeling.types import AttentionImplementation
 
 Qwen3PretrainExperimentConfig = ExperimentConfig(
     metadata=ExperimentMetadata(
@@ -20,10 +20,11 @@ Qwen3PretrainExperimentConfig = ExperimentConfig(
     module=Qwen3LITConfig(
         model_name="Qwen/Qwen3-4B",
         tokenizer_name="Qwen/Qwen3-4B",
-        attn_impl=AttentionImplementation.FLASH_ATTENTION_2,
     ),
     datapack=TextPretrainDatapackConfig(),
     run=RunConfig(
+        lr=1e-3,
+        attn_impl=AttentionImplementation.FLASH_ATTENTION_2,
         sequence_length=1024,  # Default sequence length
         batch_size=2,
         steps_per_epoch=1000,  # Number of steps per epoch

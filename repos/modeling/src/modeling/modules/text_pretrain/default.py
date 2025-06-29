@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from modeling.config import DatapackConfig
+from modeling.config import DatapackConfig, RunConfig
 from modeling.data.text_train import TextPretrainDatapackConfig
 from modeling.modules.text_module import TextLIT, TextLITConfig
 from transformers import (
@@ -18,8 +18,8 @@ from huggingface_hub import snapshot_download
 
 
 class TextPretrainLIT(TextLIT):
-    def __init__(self, config: TextPretrainLITConfig):
-        super().__init__(config)
+    def __init__(self, config: TextPretrainLITConfig, run_config: RunConfig):
+        super().__init__(config, run_config)
 
         self.model_config = AutoConfig.from_pretrained(
             self.config.model_name, trust_remote_code=True
@@ -39,6 +39,7 @@ class TextPretrainLIT(TextLIT):
         self.model = model
 
     def configure_model(self) -> None:
+        # TODO(jl): make this work with cpu device (e.g. just skip it)
         if self.model.device.type != "meta":
             return  # already configured
         assert isinstance(self.device_mesh, DeviceMesh), (
@@ -76,7 +77,6 @@ class TextPretrainLITConfig(TextLITConfig):
     config_path: str = "modeling.modules.text_pretrain.default.TextPretrainLITConfig"
     model_name: str = "Qwen/Qwen3-0.6B"
     tokenizer_name: str = "Qwen/Qwen3-0.6B"
-    lr: float = 1e-3
 
     @property
     def get_tokenizer(self):
@@ -90,7 +90,5 @@ class TextPretrainLITConfig(TextLITConfig):
         )
         return datapack_config
 
-    def create_module(self) -> TextPretrainLIT:
-        return TextPretrainLIT(
-            self,
-        )
+    def create_module(self, run_config: RunConfig) -> TextPretrainLIT:
+        return TextPretrainLIT(self, run_config)

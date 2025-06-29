@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from modeling.config import DatapackConfig, RunConfig
+from modeling.config import DatapackConfig
 from modeling.data.text_train import TextPretrainDatapackConfig
 from modeling.modules.text_module import TextLIT, TextLITConfig
 from transformers.models.qwen2_5_omni import (
@@ -20,9 +20,8 @@ class Qwen25OLIT(TextLIT):
     def __init__(
         self,
         config: Qwen25OLITConfig,
-        run_config: RunConfig,
     ):
-        super().__init__(config=config, run_config=run_config)
+        super().__init__(config=config)
 
         self.model = Qwen2_5OmniThinkerForConditionalGeneration.from_pretrained(
             config.model_name,
@@ -38,6 +37,7 @@ class Qwen25OLITConfig(TextLITConfig):
     Inherits from TextPretrainLITConfig and sets the model name.
     """
 
+    lr: float = 1e-3
     config_path: str = "modeling.modules.text_pretrain.qwen_25o.Qwen25OLITConfig"
     model_name: str = "Qwen/Qwen2.5-Omni-3B"
     tokenizer_name: str = "Qwen/Qwen2.5-Omni-3B"
@@ -57,5 +57,5 @@ class Qwen25OLITConfig(TextLITConfig):
         )
         return datapack_config
 
-    def create_module(self, run_config: RunConfig) -> Qwen25OLIT:
-        return Qwen25OLIT(self, run_config)
+    def create_module(self) -> Qwen25OLIT:
+        return Qwen25OLIT(self)

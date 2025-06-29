@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from modeling.config import DatapackConfig
+from modeling.config import DatapackConfig, RunConfig
 from modeling.data.text_train import TextPretrainDatapackConfig
 from modeling.modules.text_module import TextLIT, TextLITConfig
 from transformers import (
@@ -24,8 +24,8 @@ from transformers.models.qwen3.modeling_qwen3 import (
 class Qwen3LIT(TextLIT):
     model: Qwen3ForCausalLM
 
-    def __init__(self, config: Qwen3LITConfig):
-        super().__init__(config)
+    def __init__(self, config: Qwen3LITConfig, run_config: RunConfig):
+        super().__init__(config, run_config)
 
         self.model_config = AutoConfig.from_pretrained(
             self.config.model_name, trust_remote_code=True
@@ -88,7 +88,6 @@ class Qwen3LITConfig(TextLITConfig):
     config_path: str = "modeling.modules.text_pretrain.qwen3.Qwen3LITConfig"
     model_name: str = "Qwen/Qwen3-0.6B"
     tokenizer_name: str = "Qwen/Qwen3-0.6B"
-    lr: float = 1e-3
 
     @property
     def get_tokenizer(self):
@@ -102,7 +101,5 @@ class Qwen3LITConfig(TextLITConfig):
         )
         return datapack_config
 
-    def create_module(self) -> Qwen3LIT:
-        return Qwen3LIT(
-            self,
-        )
+    def create_module(self, run_config: RunConfig) -> Qwen3LIT:
+        return Qwen3LIT(self, run_config)

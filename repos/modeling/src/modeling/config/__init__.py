@@ -8,6 +8,7 @@ import lightning as L
 from pydantic import BaseModel, ConfigDict, Field, computed_field, model_validator
 
 from modeling.utils.git import get_git_commit_sha, get_git_commit_sha_short
+from modeling.types import Accelerator, DType, AttentionImplementation
 
 from .distributed import DistributedConfig
 from .wandb import WandbConfig
@@ -77,7 +78,7 @@ class ModuleConfig(ABC, BaseModel):
         raise NotImplementedError("Subclasses must implement this method.")
 
     @abstractmethod
-    def create_module(self) -> L.LightningModule:
+    def create_module(self, run_config: RunConfig) -> L.LightningModule:
         """
         Create a Lightning module instance.
         This method should be implemented by subclasses to return an instance of the Lightning module.
@@ -110,7 +111,7 @@ class SerializedModuleConfig(ModuleConfig):
         )
         return datapack_config
 
-    def create_module(self) -> L.LightningModule:
+    def create_module(self, run_config: RunConfig) -> L.LightningModule:
         """
         Create a Lightning module instance by loading it from the specified path.
         """
@@ -209,6 +210,30 @@ class RunConfig(BaseModel):
     sequence_length: int  # Default sequence length
     batch_size: int  # Default batch size
 
+    lr: float
+
+    attn_impl: AttentionImplementation = AttentionImplementation.SDPA
+    accelerator: Accelerator = Accelerator.CUDA
+    precision: DType = DType.bf16
+    quantize_model: bool = True  # Quantize the model if True. If False, only cast the optimizer weights to precision
+
+    @computed_field
+    @property
+    def lightning_precision(self) -> str:
+        # if we're not quantizing the model, we use the suffix "-true" for the precision
+        # since we're only using the precision for the optimizer and not for the model weights.
+        lighting_mixed_suffix = "-true" if self.quantize_model else "-mixed"
+
+        if self.precision == DType.bf16:
+            return "bf16" + lighting_mixed_suffix
+        elif self.precision == DType.fp16:
+            return "16" + lighting_mixed_suffix
+        elif self.precision == DType.fp32:
+            # quantization doesn't matter
+            return "32"
+        else:
+            raise ValueError(f"Unsupported precision: {self.precision}")
+
     @computed_field
     @property
     def process_batch_size(self) -> int:
@@ -240,7 +265,12 @@ class RunConfig(BaseModel):
             seed=42,
             sequence_length=1024,
             batch_size=4,
+            lr=1e-3,
             distributed=DistributedConfig.mock_data(),
+            attn_impl=AttentionImplementation.SDPA,
+            accelerator=Accelerator.CUDA,
+            precision=DType.bf16,
+            quantize_model=True,
         )
 
 

@@ -22,6 +22,7 @@ Qwen3_1BPretrainExperimentConfig = ExperimentConfig(
     ),
     datapack=TextPretrainDatapackConfig(),
     run=RunConfig(
+        lr=1e-3,
         sequence_length=1024,  # Default sequence length
         batch_size=1,
         steps_per_epoch=1000,  # Number of steps per epoch

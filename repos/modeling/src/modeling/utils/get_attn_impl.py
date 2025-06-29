@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from modeling.types.attn_impl import AttentionImplementation
+from modeling.types import AttentionImplementation
 
 from importlib.util import find_spec
 

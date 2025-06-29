@@ -57,15 +57,15 @@ class Initializer:
             max_epochs=exp_config.run.num_epochs,
             max_steps=exp_config.run.steps_per_epoch,
             # Distributed training configuration
-            accelerator="cuda",
+            accelerator=exp_config.run.accelerator,
             devices=exp_config.run.distributed.devices_per_node,
             num_nodes=exp_config.run.distributed.num_nodes,
             strategy=strategy,
             # Logging and checkpointing
             logger=loggers,
-            precision="bf16-true",
+            precision=exp_config.run.lightning_precision,
         )
         datapack = exp_config.datapack.create_datapack(exp_config)
-        lit_module = exp_config.module.create_module()
+        lit_module = exp_config.module.create_module(exp_config.run)
 
         return trainer, datapack, lit_module

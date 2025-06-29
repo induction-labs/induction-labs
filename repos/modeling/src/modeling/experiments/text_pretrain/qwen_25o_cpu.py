@@ -7,6 +7,7 @@ from modeling.config import (
     RunConfig,
     WandbConfig,
 )
+from modeling.types import Accelerator, DType
 from modeling.data.text_train import TextPretrainDatapackConfig
 from modeling.modules.text_pretrain.qwen_25o import Qwen25OLITConfig
 
@@ -19,13 +20,15 @@ Qwen25OPretrainExperimentConfig = ExperimentConfig(
     datapack=TextPretrainDatapackConfig(),
     run=RunConfig(
         lr=1e-3,
-        sequence_length=1024,  # Default sequence length
+        sequence_length=128,
         batch_size=1,
-        steps_per_epoch=1000,  # Number of steps per epoch
+        steps_per_epoch=1000,
         distributed=DistributedConfig(
             devices_per_node=1,
         ),
+        accelerator=Accelerator.CPU,
+        precision=DType.fp32,
     ),
 )
 
-# mdl export modeling.experiments.text_pretrain.qwen_25o.Qwen25OPretrainExperimentConfig
+# mdl export modeling.experiments.text_pretrain.qwen_25o_cpu.Qwen25OPretrainExperimentConfig
