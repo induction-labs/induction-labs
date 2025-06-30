@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from modeling.config import DatapackConfig, RunConfig
-from modeling.data.text_train import TextPretrainDatapackConfig
+from modeling.data.video_action import ActionDatapackConfig
 from modeling.modules.action_module import ActionLIT, ActionLITConfig
 from transformers.models.qwen2_5_omni import (
     Qwen2_5OmniProcessor,
@@ -38,7 +38,9 @@ class Qwen25OActionLITConfig(ActionLITConfig):
     Inherits from TextPretrainLITConfig and sets the model name.
     """
 
-    config_path: str = "modeling.modules.action_instruct.qwen_25o.Qwen25OLITConfig"
+    config_path: str = (
+        "modeling.modules.action_instruct.qwen_25o.Qwen25OActionLITConfig"
+    )
     model_name: str = "Qwen/Qwen2.5-Omni-3B"
     tokenizer_name: str = "Qwen/Qwen2.5-Omni-3B"
 
@@ -51,9 +53,9 @@ class Qwen25OActionLITConfig(ActionLITConfig):
 
     def validate_datapack_compatibility(
         self, datapack_config: DatapackConfig[Any]
-    ) -> TextPretrainDatapackConfig:
-        assert isinstance(datapack_config, TextPretrainDatapackConfig), (
-            f"Expected {datapack_config=} to be of type TextPretrainDatapackConfig"
+    ) -> ActionDatapackConfig:
+        assert isinstance(datapack_config, ActionDatapackConfig), (
+            f"Expected {datapack_config=} to be of type ActionDatapackConfig"
         )
         return datapack_config
 

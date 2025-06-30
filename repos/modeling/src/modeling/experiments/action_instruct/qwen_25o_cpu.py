@@ -36,4 +36,4 @@ Qwen25OActionExperimentConfig = ExperimentConfig(
     ),
 )
 
-# mdl export modeling.experiments.text_pretrain.qwen_25o_cpu.Qwen25OPretrainExperimentConfig
+# mdl export modeling.experiments.action_instruct.qwen_25o_cpu.Qwen25OActionExperimentConfig
