@@ -23,7 +23,9 @@ class ActionLIT(ABC, L.LightningModule):
         print(f"Using attention implementation: {self.attn_impl}, {self.dtype=}")
         self.config = config
         self.run_config = run_config
-        torch.cuda.reset_peak_memory_stats()
+
+        if self.run_config.accelerator == "cuda":
+            torch.cuda.reset_peak_memory_stats()
 
     def training_step(self, inputs):
         # Forward pass through the model
@@ -37,19 +39,26 @@ class ActionLIT(ABC, L.LightningModule):
             f"Expected outputs.loss to be a Tensor, got {type(outputs.loss)}"
         )
         # TODO: Add more metrics and logging (steptime, tok/s, etc.)
-        torch.cuda.synchronize()
 
-        allocated_memory = torch.cuda.memory_allocated(
-            device=torch.cuda.current_device()
-        )
-        reserved_memory = torch.cuda.memory_reserved(device=torch.cuda.current_device())
+        if self.run_config.accelerator == "cuda":
+            torch.cuda.synchronize()
+
+            allocated_memory = torch.cuda.memory_allocated(
+                device=torch.cuda.current_device()
+            )
+            reserved_memory = torch.cuda.memory_reserved(
+                device=torch.cuda.current_device()
+            )
+            memory_metrics = {
+                "train/allocated_memory": allocated_memory / 1e9,  # in GB
+                "train/reserved_memory": reserved_memory / 1e9,  # in GB
+            }
 
         metrics = {
             "train/step_time": elapsed,
             "train/tokens_per_second": inputs["input_ids"].numel() / elapsed,
             "train/loss": outputs.loss,
-            "train/allocated_memory": allocated_memory / 1e9,  # in GB
-            "train/reserved_memory": reserved_memory / 1e9,  # in GB
+            **memory_metrics,
         }
 
         self.log_dict(
