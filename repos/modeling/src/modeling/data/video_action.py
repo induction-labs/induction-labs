@@ -10,7 +10,6 @@ from pydantic import BaseModel, ConfigDict, model_validator
 from synapse.video_loader.read_frames import fetch_metadata_from_zarr
 from synapse.video_loader.typess import StreamMetadata
 from torch.utils.data import DataLoader, Dataset
-from transformers.data.data_collator import default_data_collator
 from synapse.combined.combined_loader import combined_loader, CombinedLoaderArgs
 import numpy as np
 from typing import Literal
@@ -348,14 +347,9 @@ class ActionDatasetArgs(BaseModel):
     data_paths: list[str]
     max_seq_length: int
     frames_per_action: int
-    batch_size: int
 
 
-class ActionDataset(Dataset[list[Any]]):
-    @property
-    def batch_size(self):
-        return self.config.batch_size
-
+class ActionDataset(Dataset[ActionDataSample]):
     @property
     def data_paths(self) -> list[str]:
         return self.config.data_paths
@@ -366,9 +360,7 @@ class ActionDataset(Dataset[list[Any]]):
     ):
         super().__init__()
         self.config = config
-        assert len(self.data_paths) % self.batch_size == 0, (
-            f"Number of data paths {len(self.data_paths)} must be divisible by batch size {self.batch_size}."
-        )
+
         # TODO: get rid of running asyncio run in sync functions :///
         stream_metadatas: list[StreamMetadata] = asyncio.run(
             self._fetch_metadatas(self.data_paths)
@@ -376,7 +368,7 @@ class ActionDataset(Dataset[list[Any]]):
 
         self.datas = list(zip(self.data_paths, stream_metadatas, strict=True))
 
-    def __getitem__(self, index) -> list[ActionDataSample]:
+    def __getitem__(self, index) -> ActionDataSample:
         # TODO: Make everything async native
         return asyncio.run(self.get_item(index))
 
@@ -391,36 +383,30 @@ class ActionDataset(Dataset[list[Any]]):
             *[fetch_metadata_from_zarr(path) for path in metadata_paths]
         )
 
-    async def get_item(self, index: int) -> list[ActionDataSample]:
+    async def get_item(self, index: int) -> ActionDataSample:
         """
         Asynchronously fetch a batch of data samples.
         This method should be implemented to load the actual data from the paths.
         """
-        batch_data_paths = self.datas[
-            index * self.batch_size : (index + 1) * self.batch_size
-        ]
+        # TODO: Handle case where index is out of bounds by returning a 0 sample and emitting a warning
+        path, stream_metadata = self.datas[index]
 
         # Placeholder implementation, replace with actual data loading logic
         # For now, we just return empty samples
-        return await asyncio.gather(
-            *[
-                fetch_data(
-                    path=path,
-                    num_actions=calc_num_actions_per_sequence(
-                        stream_metadata,
-                        self.config.max_seq_length,
-                        self.config.frames_per_action,
-                    ),
-                    seq_length=self.config.max_seq_length,
-                )
-                for path, stream_metadata in batch_data_paths
-            ]
+        return await fetch_data(
+            path=path,
+            num_actions=calc_num_actions_per_sequence(
+                stream_metadata,
+                self.config.max_seq_length,
+                self.config.frames_per_action,
+            ),
+            seq_length=self.config.max_seq_length,
         )
 
     def __len__(self) -> int:
         # For now only pull the first sequence from each.
         # TODO: Worry about randomization and shit.
-        return len(self.datas) // self.batch_size
+        return len(self.datas)
 
 
 class ActionDataModule(L.LightningDataModule):
@@ -441,17 +427,16 @@ class ActionDataModule(L.LightningDataModule):
                 data_paths=self.config.processed_data_paths,
                 max_seq_length=self.extra_args.seq_length,
                 frames_per_action=self.config.frames_per_action,
-                batch_size=self.extra_args.batch_size,
             )
         )
 
-    def train_dataloader(self) -> DataLoader:
+    def train_dataloader(self) -> DataLoader[ActionDataSample]:
         return DataLoader(
-            self.train_data,  # type: ignore # noqa: PGH003
+            self.train_data,
             batch_size=self.extra_args.batch_size,
             shuffle=True,
             drop_last=True,
-            collate_fn=default_data_collator,
+            collate_fn=ActionDataSample.combine_batch,
         )
 
 

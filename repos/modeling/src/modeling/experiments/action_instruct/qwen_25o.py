@@ -6,15 +6,16 @@ from modeling.config import (
     ExperimentMetadata,
     RunConfig,
     WandbConfig,
+    AttentionImplementation,
 )
 from modeling.types import Accelerator, DType
 from modeling.data.video_action import ActionDatapackConfig
 from modeling.modules.action_instruct.qwen_25o import Qwen25OActionLITConfig
 
-Qwen25OActionExperimentConfig = ExperimentConfig(
+Qwen25OActionExperimentConfig_CPU = ExperimentConfig(
     metadata=ExperimentMetadata(
-        wandb=WandbConfig(project="testing", name="qwen25o_text_pretrain"),
-        output_dir="output/text_pretrain",
+        wandb=WandbConfig(project="mouse_following", name="qwen25o_mouse_follow"),
+        output_dir="output/mouse_following",
     ),
     module=Qwen25OActionLITConfig(),
     datapack=ActionDatapackConfig(
@@ -25,7 +26,7 @@ Qwen25OActionExperimentConfig = ExperimentConfig(
     ),
     run=RunConfig(
         lr=1e-3,
-        sequence_length=1026,
+        sequence_length=560,
         batch_size=1,
         steps_per_epoch=1000,
         distributed=DistributedConfig(
@@ -36,4 +37,19 @@ Qwen25OActionExperimentConfig = ExperimentConfig(
     ),
 )
 
-# mdl export modeling.experiments.text_pretrain.qwen_25o_cpu.Qwen25OPretrainExperimentConfig
+
+Qwen25OActionExperimentConfig_GPU = Qwen25OActionExperimentConfig_CPU.model_copy(
+    update={
+        "run": Qwen25OActionExperimentConfig_CPU.run.model_copy(
+            update={
+                "accelerator": Accelerator.CUDA,
+                "precision": DType.fp16,  # Using mixed precision for GPU training
+                "attn_impl": AttentionImplementation.FLASH_ATTENTION_2,
+            }
+        )
+    }
+)
+
+
+# mdl export modeling.experiments.action_instruct.qwen_25o.Qwen25OActionExperimentConfig_CPU
+# mdl export modeling.experiments.action_instruct.qwen_25o.Qwen25OActionExperimentConfig_GPU

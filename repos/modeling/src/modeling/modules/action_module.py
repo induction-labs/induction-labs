@@ -8,11 +8,20 @@ from modeling.config import ModuleConfig, RunConfig
 from modeling.utils.elapsed_timer import elapsed_timer
 from modeling.utils.get_attn_impl import check_attn_impl
 from transformers.configuration_utils import PretrainedConfig
+
 from transformers.modeling_utils import PreTrainedModel
+from typing import Generic, TypeVar
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from modeling.data.video_action import ActionDataSample
 
 
-class ActionLIT(ABC, L.LightningModule):
-    model: PreTrainedModel
+MODEL_TYPE = TypeVar("MODEL_TYPE", bound=PreTrainedModel)
+
+
+class ActionLIT(ABC, L.LightningModule, Generic[MODEL_TYPE]):
+    model: MODEL_TYPE
     model_config: PretrainedConfig
 
     def __init__(self, config: ActionLITConfig, run_config: RunConfig):
@@ -27,12 +36,13 @@ class ActionLIT(ABC, L.LightningModule):
         if self.run_config.accelerator == "cuda":
             torch.cuda.reset_peak_memory_stats()
 
-    def training_step(self, inputs):
+    # TODO: Move this into higher LIT baseclass and make it generic over model type and data type
+    def training_step(self, inputs: ActionDataSample):
         # Forward pass through the model
 
         with elapsed_timer() as timer:
             # Note: You CANT call self.model.forward here because it fucking doesn't trigger the FSDP hooks so weights dont gather
-            outputs = self.model(**inputs)
+            outputs = self.model(**inputs.model_dump())
             elapsed = timer()
 
         assert isinstance(outputs.loss, torch.Tensor), (
