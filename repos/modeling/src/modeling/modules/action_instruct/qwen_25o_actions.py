@@ -15,7 +15,7 @@ from transformers.models.qwen2_5_omni.configuration_qwen2_5_omni import (
 )
 
 
-class Qwen2_5OmniThinkerForConditionalGeneration(
+class Qwen2_5OmniThinkerForActionModelling(
     Qwen2_5OmniPreTrainedModelForConditionalGeneration, GenerationMixin
 ):
     config_class = Qwen2_5OmniThinkerConfig
@@ -36,14 +36,29 @@ class Qwen2_5OmniThinkerForConditionalGeneration(
         self.model = Qwen2_5OmniThinkerTextModel._from_config(
             config.text_config, attn_implementation=config._attn_implementation
         )
-        self.lm_head = nn.Linear(
-            config.text_config.hidden_size, config.text_config.vocab_size, bias=False
+        self.action_token_embedding = nn.Embedding(1, config.text_config.hidden_size)
+        hidden_size = config.text_config.hidden_size
+        self.lm_head = nn.Sequential(
+            nn.Linear(hidden_size, hidden_size),  # layer 1
+            nn.GELU(),  # non-linearity (ReLU also fine)
+            nn.Linear(hidden_size, 6),  # layer 2
         )
+
         self.pad_token_id = (
             self.config.pad_token_id if self.config.pad_token_id is not None else -1
         )
         self.spatial_merge_size = config.vision_config.spatial_merge_size
         self.rope_deltas = None
+        self.l2_loss = nn.MSELoss(reduction="none")
+        for param in self.parameters():
+            param.requires_grad = False
+
+        for param in self.lm_head.parameters():
+            param.requires_grad = True
+
+        for param in self.action_token_embedding.parameters():
+            param.requires_grad = True
+
         self.post_init()
 
     def get_input_embeddings(self):
@@ -160,7 +175,9 @@ class Qwen2_5OmniThinkerForConditionalGeneration(
         past_key_values: Optional[list[torch.FloatTensor]] = None,
         inputs_embeds: Optional[torch.FloatTensor] = None,
         rope_deltas: Optional[torch.LongTensor] = None,
-        labels: Optional[torch.LongTensor] = None,
+        # labels: Optional[torch.LongTensor] = None,
+        cursor_path: Optional[torch.Tensor] = None,
+        action_tokens: Optional[torch.Tensor] = None,
         use_cache: Optional[bool] = None,
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
@@ -251,7 +268,9 @@ class Qwen2_5OmniThinkerForConditionalGeneration(
 
         if inputs_embeds is None:
             # 1. Extract the input embeddings
-            inputs_embeds = self.get_input_embeddings()(input_ids)
+            inputs_embeds = self.get_input_embeddings()(input_ids)  # [B, S, D]
+
+            inputs_embeds[action_tokens] = self.action_token_embedding.weight[0]
 
         # 2. Merge text , audios , image and video
         if input_ids is not None and input_ids.shape[1] != 1:  # Prefill stage
@@ -335,6 +354,8 @@ class Qwen2_5OmniThinkerForConditionalGeneration(
                 position_ids = position_ids.add(delta)
                 position_ids = position_ids.unsqueeze(0).expand(3, -1, -1)
 
+        attention_mask *= ~action_tokens
+
         outputs = self.model(
             attention_mask=attention_mask,
             position_ids=position_ids,
@@ -348,15 +369,16 @@ class Qwen2_5OmniThinkerForConditionalGeneration(
         )
 
         hidden_states = outputs[0]
-        logits = self.lm_head(hidden_states)
+        logits = self.lm_head(hidden_states)  # [B, S, 6]
 
         loss = None
-        if labels is not None:
-            loss = self.loss_function(
-                logits=logits,
-                labels=labels,
-                vocab_size=self.config.get_text_config().vocab_size,
-            )
+        if cursor_path is not None:
+            loss = self.l2_loss(
+                logits, cursor_path.reshape(*cursor_path.shape[:2], 6)
+            )  # [B, S, 6]
+            loss = torch.sum(loss, dim=-1)
+            loss *= action_tokens
+            loss = loss.sum() / action_tokens.sum().clamp(min=1.0)
 
         if not return_dict:
             output = (logits,) + outputs
@@ -419,71 +441,30 @@ class Qwen2_5OmniThinkerForConditionalGeneration(
 
 
 if __name__ == "__main__":
-    from transformers.models.qwen2_5_omni import Qwen2_5OmniProcessor
-    from modeling.utils.qwen_omni_utils import process_mm_info
+    from modeling.data.video_action import fetch_data, ActionDataSample
+    import asyncio
 
     # default: Load the model on the available device(s)
     config = Qwen2_5OmniThinkerConfig.from_pretrained("Qwen/Qwen2.5-Omni-3B")
-    model = Qwen2_5OmniThinkerForConditionalGeneration(config)
+    model = Qwen2_5OmniThinkerForActionModelling(config)
 
-    # We recommend enabling flash_attention_2 for better acceleration and memory saving.
-    # model = Qwen2_5OmniForConditionalGeneration.from_pretrained(
-    #     "Qwen/Qwen2.5-Omni-7B",
-    #     torch_dtype="auto",
-    #     device_map="auto",
-    #     attn_implementation="flash_attention_2",
-    # )
-
-    processor = Qwen2_5OmniProcessor.from_pretrained("Qwen/Qwen2.5-Omni-3B")
-
-    conversation = [
-        {
-            "role": "system",
-            "content": [
-                {
-                    "type": "text",
-                    "text": "You are Qwen, a virtual human developed by the Qwen Team, Alibaba Group, capable of perceiving auditory and visual inputs, as well as generating text and speech.",
-                }
-            ],
-        },
-        {
-            "role": "user",
-            "content": [
-                {
-                    "type": "video",
-                    "video": "https://qianwen-res.oss-cn-beijing.aliyuncs.com/Qwen2.5-Omni/draw.mp4",
-                },
-            ],
-        },
-        # {
-        #     "role": "user",
-        #     "content": [
-        #         {"type": "text", "text": "hello there 'sup"},
-        #     ],
-        # },
-    ]
-
-    # set use audio in video
-    USE_AUDIO_IN_VIDEO = True
-
-    # Preparation for inference
-    text = processor.apply_chat_template(
-        conversation, add_generation_prompt=True, tokenize=False
+    data = ActionDataSample.combine_batch(
+        [
+            asyncio.run(
+                fetch_data(
+                    num_actions=1,
+                    path="gs://induction-labs/jonathan/synth/cursor_follow_v1/sample_3.zarr",
+                    seq_length=1024,
+                )
+            )
+        ]
     )
-    audios, images, videos = process_mm_info(
-        conversation, use_audio_in_video=USE_AUDIO_IN_VIDEO
-    )
-    inputs = processor(
-        text=text,
-        audio=audios,
-        images=images,
-        videos=videos,
-        return_tensors="pt",
-        padding=True,
-        use_audio_in_video=USE_AUDIO_IN_VIDEO,
-    )
-    inputs = inputs.to(model.device).to(model.dtype)
-    print(inputs)
+    print(data)
+    print("hi", data.qwen_inputs.attention_mask.shape)
 
-    result = model.forward(**inputs)
+    result = model.forward(
+        cursor_path=data.cursor_path,
+        action_tokens=data.action_tokens,
+        **data.qwen_inputs.model_dump(),
+    )
     print(result)

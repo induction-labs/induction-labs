@@ -26,7 +26,7 @@ import torch
 VIDEO_TOKEN_ID = 151656
 PATCH_SIZE = 14
 MERGE_SIZE = 2
-ACTION_TOKEN_ID = -1
+ACTION_TOKEN_ID = 151643
 
 
 @functools.lru_cache(maxsize=1)
@@ -297,7 +297,9 @@ async def fetch_data(
     )
 
     real_input_ids = torch.cat((non_video_input_ids, expanded_video_input_ids), dim=0)
-    real_attention_mask = real_input_ids.ne(ACTION_TOKEN_ID)
+    real_attention_mask = torch.ones_like(
+        real_input_ids
+    )  # .ne(ACTION_TOKEN_ID).to(qwen_inputs.attention_mask.dtype)
     action_tokens = real_input_ids.eq(ACTION_TOKEN_ID)
     input_cursor_path = torch.zeros(
         (len(real_input_ids), 2, 3), dtype=torch.float32
@@ -311,10 +313,16 @@ async def fetch_data(
     if len(real_input_ids) < seq_length:
         padding_len = seq_length - len(real_input_ids)
         real_input_ids = torch.cat(
-            (real_input_ids, torch.zeros(padding_len, dtype=torch.int64))
+            (
+                real_input_ids,
+                torch.zeros(padding_len, dtype=qwen_inputs.input_ids.dtype),
+            )
         )
         real_attention_mask = torch.cat(
-            (real_attention_mask, torch.zeros(padding_len, dtype=torch.bool))
+            (
+                real_attention_mask,
+                torch.zeros(padding_len, dtype=qwen_inputs.attention_mask.dtype),
+            )
         )
         action_tokens = torch.cat(
             (action_tokens, torch.zeros(padding_len, dtype=torch.bool))

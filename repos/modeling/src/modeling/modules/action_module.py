@@ -4,9 +4,7 @@ from abc import ABC
 
 import lightning as L
 import torch
-from modeling.config import ModuleConfig
-from modeling.types.attn_impl import AttentionImplementation
-from modeling.types.dtype import DType
+from modeling.config import ModuleConfig, RunConfig
 from modeling.utils.elapsed_timer import elapsed_timer
 from modeling.utils.get_attn_impl import check_attn_impl
 from transformers.configuration_utils import PretrainedConfig
@@ -17,13 +15,14 @@ class ActionLIT(ABC, L.LightningModule):
     model: PreTrainedModel
     model_config: PretrainedConfig
 
-    def __init__(self, config: ActionLITConfig):
+    def __init__(self, config: ActionLITConfig, run_config: RunConfig):
         super().__init__()
-        self.attn_impl = config.attn_impl
-        self._dtype = config.dtype.torch_dtype
+        self.attn_impl = run_config.attn_impl
+        self._dtype = run_config.precision.torch_dtype
         check_attn_impl(self.attn_impl)
         print(f"Using attention implementation: {self.attn_impl}, {self.dtype=}")
         self.config = config
+        self.run_config = run_config
         torch.cuda.reset_peak_memory_stats()
 
     def training_step(self, inputs):
@@ -62,7 +61,7 @@ class ActionLIT(ABC, L.LightningModule):
     def configure_optimizers(self):
         optimizer = torch.optim.AdamW(
             self.model.parameters(),
-            lr=self.config.lr,
+            lr=self.run_config.lr,
             # foreach=True,
             fused=True,
         )
@@ -71,6 +70,3 @@ class ActionLIT(ABC, L.LightningModule):
 
 class ActionLITConfig(ModuleConfig):
     model_name: str
-    lr: float
-    attn_impl: AttentionImplementation = AttentionImplementation.SDPA
-    dtype: DType = DType.bf16
