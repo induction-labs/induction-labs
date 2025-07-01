@@ -6,7 +6,6 @@ from modeling.config import (
     ExperimentMetadata,
     RunConfig,
     WandbConfig,
-    AttentionImplementation,
 )
 from modeling.types import Accelerator, DType
 from modeling.data.video_action import ActionDatapackConfig
@@ -21,14 +20,14 @@ Qwen25OActionExperimentConfig_CPU = ExperimentConfig(
     datapack=ActionDatapackConfig(
         processed_data_paths=[
             f"gs://induction-labs/jonathan/synth/cursor_follow_v2/sample_{i}.zarr"
-            for i in range(0, 4)
+            for i in range(0, 64)
         ]
     ),
     run=RunConfig(
         lr=1e-3,
-        sequence_length=560,
+        sequence_length=1026,
         batch_size=1,
-        steps_per_epoch=1000,
+        steps_per_epoch=64,
         distributed=DistributedConfig(
             devices_per_node=1,
         ),
@@ -43,8 +42,9 @@ Qwen25OActionExperimentConfig_GPU = Qwen25OActionExperimentConfig_CPU.model_copy
         "run": Qwen25OActionExperimentConfig_CPU.run.model_copy(
             update={
                 "accelerator": Accelerator.CUDA,
-                "precision": DType.fp16,  # Using mixed precision for GPU training
-                "attn_impl": AttentionImplementation.FLASH_ATTENTION_2,
+                "precision": DType.fp32,  # Using mixed precision for GPU training
+                # TODO: Fix this - attn_impl is currently bugged for Qwen2.5O
+                # "attn_impl": AttentionImplementation.FLASH_ATTENTION_2,
             }
         )
     }

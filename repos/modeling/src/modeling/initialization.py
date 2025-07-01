@@ -63,6 +63,7 @@ class Initializer:
             strategy=strategy,
             # Logging and checkpointing
             logger=loggers,
+            log_every_n_steps=1,
             precision=exp_config.run.lightning_precision,
         )
         datapack = exp_config.datapack.create_datapack(exp_config)
