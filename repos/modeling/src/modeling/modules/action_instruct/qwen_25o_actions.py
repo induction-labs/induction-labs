@@ -37,6 +37,7 @@ class Qwen2_5OmniThinkerForActionModelling(
             config.text_config, attn_implementation=config._attn_implementation
         )
         self.action_token_embedding = nn.Embedding(1, config.text_config.hidden_size)
+
         hidden_size = config.text_config.hidden_size
         self.lm_head = nn.Sequential(
             nn.Linear(hidden_size, hidden_size),  # layer 1
