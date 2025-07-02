@@ -3,7 +3,11 @@ from __future__ import annotations
 from pathlib import Path
 
 import typer
+from synapse.utils.logging import configure_logging
 
+logger = configure_logging(
+    __name__,
+)
 app = typer.Typer()
 
 
@@ -31,8 +35,8 @@ def run(
 
     experiment_config = build_experiment_config(Path(config_path))
     # Here you would typically initialize and run your model training or evaluation
-    print("Running with config")
-    print(experiment_config)
+    logger.info("Running with config")
+    logger.info(experiment_config.model_dump_json(serialize_as_any=True, indent=2))
 
     # Initialize the experiment configuration
     trainer, datapack, lit_module = Initializer.init_experiment(experiment_config)
@@ -82,14 +86,14 @@ def export(
     run_command = f"mdl run {export_path}"
 
     serialize_experiment_config(exp_config, export_path, eof_comments=run_command)
-    print("##################################")
-    print(f"Experiment configuration exported to: {export_path}")
-    print("Run the following command to execute the experiment:")
-    print(run_command)
-    print("##################################")
+    logger.info("##################################")
+    logger.info(f"Experiment configuration exported to: {export_path}")
+    logger.info("Run the following command to execute the experiment:")
+    logger.info(run_command)
+    logger.info("##################################")
 
     if submit:
-        print("Running the experiment...")
+        logger.info("Running the experiment...")
         run(config_path=export_path.as_posix())
 
 

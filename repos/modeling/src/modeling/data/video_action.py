@@ -6,11 +6,13 @@ from typing import Any, Self
 import lightning as L
 from modeling.config import DatapackConfig, ExperimentConfig, ModuleConfig
 from pydantic import BaseModel, ConfigDict, model_validator
+from abc import abstractmethod
 from synapse.video_loader.read_frames import fetch_metadata_from_zarr
 from synapse.video_loader.typess import StreamMetadata
 from torch.utils.data import DataLoader, Dataset
 from synapse.combined.combined_loader import combined_loader, CombinedLoaderArgs
 import numpy as np
+from typing import Callable, Generic, TypeVar
 from typing import Literal
 
 from transformers.models.qwen2_5_omni import (
@@ -20,11 +22,45 @@ from transformers.models.qwen2_5_omni import (
 import functools
 import torch
 
+from synapse.utils.logging import configure_logging
+import logging
+
+logger = configure_logging(__name__, logging.DEBUG)
 
 VIDEO_TOKEN_ID = 151656
 PATCH_SIZE = 14
 MERGE_SIZE = 2
 ACTION_TOKEN_ID = 151643
+
+
+R = TypeVar("R")
+
+
+class RemoveKwargProxy(Generic[R]):
+    """
+    Proxy that wraps any callable (or callable-like object) and strips
+    a specified keyword from **kwargs before delegating.
+    """
+
+    _target: Callable[..., R]
+    _kw_to_strip: str
+
+    def __init__(self, target: Callable[..., R], kw_to_strip: str) -> None:
+        self._target = target
+        self._kw_to_strip = kw_to_strip
+
+    def __call__(self, *args: Any, **kwargs: Any) -> R:
+        # Drop the unwanted kwarg if present
+        kwargs.pop(self._kw_to_strip, None)
+        return self._target(*args, **kwargs)
+
+    def __getattr__(self, name: str) -> Any:
+        # Forward attribute access to the wrapped object
+        # (e.g. methods, properties, etc.)
+        return getattr(self._target, name)
+
+
+# Example usage:
 
 
 @functools.lru_cache(maxsize=1)
@@ -35,6 +71,9 @@ def qwen_processor() -> Qwen2_5OmniProcessor:
     """
     processor = Qwen2_5OmniProcessor.from_pretrained("Qwen/Qwen2.5-Omni-3B")
     assert isinstance(processor, Qwen2_5OmniProcessor)
+    processor.video_processor = RemoveKwargProxy(processor.video_processor, "images")
+    # Otherwise everytime we call it it prints "Unused or unrecognized kwargs: images." kms
+
     return processor
 
 
@@ -236,7 +275,6 @@ async def fetch_data(
     )
 
     assert frames.ndim == 5
-    print(frames.shape)
     frames = frames.reshape(
         frames.shape[0] * frames.shape[1],
         frames.shape[2],
@@ -291,7 +329,7 @@ async def fetch_data(
         f"Expected input_ids to have {num_video_tokens} VIDEO_TOKEN_IDs at the end, "
         f"but got {non_video_input_ids}."
     )
-    print(
+    logger.debug(
         f"{len(non_video_input_ids)=}, {len(video_input_ids)=}, {num_video_tokens=}"
         f"{seq_length=} {num_actions=} {tokens_per_action=}"
     )
@@ -430,14 +468,10 @@ class ActionDataModule(L.LightningDataModule):
 
     def setup(self, stage: str | None = None) -> None:
         # This method is used to download the dataset if it is not already present.
-        data_paths = [
-            f"gs://induction-labs/jonathan/synth/cursor_follow_v2/sample_{i}.zarr"
-            for i in range(0, 10_000)
-        ]
 
         self.train_data = ActionDataset(
             ActionDatasetArgs(
-                data_paths=data_paths,
+                data_paths=self.config.data_paths,
                 max_seq_length=self.extra_args.seq_length,
                 frames_per_action=self.config.frames_per_action,
             )
@@ -466,7 +500,16 @@ class ActionDatapackConfig(DatapackConfig[ActionDataModule]):
     """
 
     config_path: str = "modeling.data.video_action.ActionDatapackConfig"
-    processed_data_paths: list[str]
+
+    @property
+    @abstractmethod
+    def data_paths(self) -> list[str]:
+        """
+        List of paths to the processed data files.
+        This should be implemented by subclasses to provide the actual data paths.
+        """
+        raise NotImplementedError("Subclasses must implement data_paths.")
+
     frames_per_action: int = 2
     patch_size: int = PATCH_SIZE
 
@@ -488,6 +531,38 @@ class ActionDatapackConfig(DatapackConfig[ActionDataModule]):
             batch_size=full_config.run.batch_size,
         )
         return ActionDataModule(self, extra_args)
+
+
+class ListActionDatapackConfig(ActionDatapackConfig):
+    """
+    A specific implementation of ActionDatapackConfig that uses a list of data paths.
+    This is useful for scenarios where the data paths are provided as a list.
+    """
+
+    config_path: str = "modeling.data.video_action.ListActionDatapackConfig"
+    data_paths_list: list[str] = []
+
+    @property
+    def data_paths(self) -> list[str]:
+        return self.data_paths_list
+
+
+class RangeActionDatapackConfig(ActionDatapackConfig):
+    """
+    A specific implementation of ActionDatapackConfig that uses a range of data paths.
+    This is useful for scenarios where the data paths are generated based on a range.
+    """
+
+    config_path: str = "modeling.data.video_action.RangeActionDatapackConfig"
+    prefix: str = "gs://induction-labs/jonathan/synth/cursor_follow_v2/sample_"
+    start_index: int = 0
+    end_index: int
+
+    @property
+    def data_paths(self) -> list[str]:
+        return [
+            f"{self.prefix}{i}.zarr" for i in range(self.start_index, self.end_index)
+        ]
 
 
 __all__ = ["ActionDataModule", "ActionDatapackConfig"]

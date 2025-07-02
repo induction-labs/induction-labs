@@ -8,7 +8,7 @@ from modeling.config import (
     WandbConfig,
 )
 from modeling.types import Accelerator, DType
-from modeling.data.video_action import ActionDatapackConfig
+from modeling.data.video_action import RangeActionDatapackConfig
 from modeling.modules.action_instruct.qwen_25o import Qwen25OActionLITConfig
 
 Qwen25OActionExperimentConfig_CPU = ExperimentConfig(
@@ -17,11 +17,9 @@ Qwen25OActionExperimentConfig_CPU = ExperimentConfig(
         output_dir="output/mouse_following",
     ),
     module=Qwen25OActionLITConfig(),
-    datapack=ActionDatapackConfig(
-        processed_data_paths=[
-            f"gs://induction-labs/jonathan/synth/cursor_follow_v2/sample_{i}.zarr"
-            for i in range(0, 64)
-        ]
+    datapack=RangeActionDatapackConfig(
+        prefix="gs://induction-labs/jonathan/synth/cursor_follow_v2/sample_",
+        end_index=10_000,  # 10k samples
     ),
     run=RunConfig(
         lr=1e-5,
