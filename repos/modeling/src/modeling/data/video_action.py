@@ -118,10 +118,12 @@ class ActionDataSample(BaseModel):
 
 
 # <|im_start|>system\nYou are a helpful voice chat bot, and please respond to me in a casual conversation manner using random voice.<|im_end|>\n<|im_start|>user\n<|vision_bos|><|IMAGE|><|vision_eos|><|vision_bos|><|VIDEO|><|vision_eos|><|vision_bos|><|VIDEO|><|vision_eos|><|im_end|>\n<|im_start|>assistant\n
-def calc_tokens_per_frame(image_pixels: int) -> int:
+def calc_tokens_per_action(image_pixels: int) -> int:
     """
     Compute the number of tokens per frame based on the image pixels and patch size.
     This is a placeholder function and should be replaced with actual logic.
+
+    THIS IS ACTUALLY THE NUMBER OF VIDEO TOKENS PER ACTION
     """
     # For now, we assume each frame corresponds to a fixed number of tokens.
     # This can be adjusted based on the actual dataset and requirements.
@@ -132,15 +134,6 @@ def calc_tokens_per_frame(image_pixels: int) -> int:
     return int(tokens_per_frame)
 
 
-def calc_frames_per_sequence(image_pixels: int, max_seq: int) -> int:
-    """
-    Compute the number of frames per sequence based on the frames_per_action.
-    This is a placeholder function and should be replaced with actual logic.
-    """
-    max_video_tokens = max_seq - default_preamble_token_len()
-    return max_video_tokens // (calc_tokens_per_frame(image_pixels) + 1)
-
-
 def calc_num_actions_per_sequence(
     stream_metadata: StreamMetadata, max_seq: int, frames_per_action: int
 ) -> int:
@@ -148,12 +141,25 @@ def calc_num_actions_per_sequence(
     Calculate the number of actions per sequence based on the image pixels, max sequence length, and frames per action.
     This is a placeholder function and should be replaced with actual logic.
     """
-    max_fittable_frames = calc_frames_per_sequence(
+
+    def max_actions_per_sequence(image_pixels: int, max_seq: int) -> int:
+        """
+        Compute the number of frames per sequence based on the frames_per_action.
+        This is a placeholder function and should be replaced with actual logic.
+        """
+        max_video_tokens = max_seq - default_preamble_token_len()
+        return max_video_tokens // (calc_tokens_per_action(image_pixels) + 1)
+
+    max_fittable_frames = max_actions_per_sequence(
         stream_metadata.output_video.resolution.pixels, max_seq
     )
-    num_frames = min(max_fittable_frames, stream_metadata.output_video.total_frames)
 
-    return num_frames // frames_per_action
+    total_actions_in_stream = (
+        stream_metadata.output_video.total_frames // frames_per_action
+    )
+    num_actions = min(max_fittable_frames, total_actions_in_stream)
+
+    return num_actions
 
 
 DEFAULT_PREAMBLE = "You are Qwen, a helpful video processing assistant."
@@ -230,6 +236,7 @@ async def fetch_data(
     )
 
     assert frames.ndim == 5
+    print(frames.shape)
     frames = frames.reshape(
         frames.shape[0] * frames.shape[1],
         frames.shape[2],
@@ -251,10 +258,10 @@ async def fetch_data(
     qwen_inputs = ActionDataSample.QwenInputs(**inputs)
 
     # Insert 0 on every action prediction event in input_ids and attention_mask
-    tokens_per_frame = calc_tokens_per_frame(
+    tokens_per_action = calc_tokens_per_action(
         stream_metadata.output_video.resolution.pixels
     )
-    num_video_tokens = tokens_per_frame * num_actions
+    num_video_tokens = tokens_per_action * num_actions
     assert (
         qwen_inputs.pixel_values_videos.shape[0]
         == num_video_tokens * MERGE_SIZE * MERGE_SIZE
@@ -264,8 +271,9 @@ async def fetch_data(
     )
     # pixel_values_videos.shape =
     # (batch_size,
-    # grid_t * grid_h * grid_w,
+    # grid_t * grid_h * MERGE_SIZE * grid_w * MERGE_SIZE,
     # channel * temporal_patch_size * patch_size * patch_size) (1176)
+    # num_video_tokens = grid_t * grid_h * grid_w
     assert qwen_inputs.input_ids.shape[0] == 1
 
     non_video_input_ids, video_input_ids = (
@@ -284,14 +292,12 @@ async def fetch_data(
         f"but got {non_video_input_ids}."
     )
     print(
-        f"{len(non_video_input_ids)=}, {len(video_input_ids)=}, {num_video_tokens=}, {seq_length=}"
+        f"{len(non_video_input_ids)=}, {len(video_input_ids)=}, {num_video_tokens=}"
+        f"{seq_length=} {num_actions=} {tokens_per_action=}"
     )
 
-    assert (num_video_tokens / (tokens_per_frame)) == num_actions, (
-        f"Expected num_video_tokens {num_video_tokens/ (tokens_per_frame )=} to be divisible equal to {num_actions=}"
-    )
     expanded_video_input_ids = insert_every_n(
-        video_input_ids, tokens_per_frame, ACTION_TOKEN_ID
+        video_input_ids, tokens_per_action, ACTION_TOKEN_ID
     )
     assert len(expanded_video_input_ids) - len(video_input_ids) == num_actions, (
         f"Expected expanded_video_input_ids length to be {len(video_input_ids) + num_actions}, "
