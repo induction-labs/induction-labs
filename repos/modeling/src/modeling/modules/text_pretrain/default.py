@@ -4,73 +4,99 @@ from typing import Any
 
 from modeling.config import DatapackConfig, RunConfig
 from modeling.data.text_train import TextPretrainDatapackConfig
-from modeling.modules.text_module import TextLIT, TextLITConfig
+from modeling.modules.text_module import TextLIT, TextLITConfig, MODEL_TYPE
 from transformers import (
     AutoConfig,
     AutoModelForCausalLM,
     AutoTokenizer,
 )
 from transformers.modeling_utils import PreTrainedModel
-from accelerate import init_empty_weights, load_checkpoint_and_dispatch
+
 import torch
 from torch.distributed.device_mesh import DeviceMesh
-from huggingface_hub import snapshot_download
+
+from torch.distributed.fsdp import MixedPrecisionPolicy, fully_shard
+
+# from huggingface_hub import snapshot_download
+# from accelerate import init_empty_weights, load_checkpoint_and_dispatch
 
 
-class TextPretrainLIT(TextLIT):
-    def __init__(self, config: TextPretrainLITConfig, run_config: RunConfig):
-        super().__init__(config, run_config)
+class TextPretrainLIT(TextLIT[MODEL_TYPE, dict, "TextPretrainLITConfig"]):
+    def __init__(self, module_config, run_config):
+        super().__init__(module_config, run_config)
 
-        self.model_config = AutoConfig.from_pretrained(
-            self.config.model_name, trust_remote_code=True
+        model_config = AutoConfig.from_pretrained(
+            self.module_config.model_name, trust_remote_code=True
         )
-        self.ckpt_dir = snapshot_download(  # downloads all shards & index
-            repo_id=self.config.model_name,
-        )
+        # self.ckpt_dir = snapshot_download(  # downloads all shards & index
+        #     repo_id=module_config.model_name,
+        # )
 
-        with init_empty_weights():  # ① on meta
-            model = AutoModelForCausalLM.from_config(
-                self.model_config, torch_dtype=self.dtype
-            )
+        # with init_empty_weights():  # ① on meta
+        model = AutoModelForCausalLM.from_config(model_config, torch_dtype=self.dtype)
         assert isinstance(model, PreTrainedModel)
-        assert model.device.type == "meta", (
-            f"Expected model to be on meta device, got {model.device.type}"
-        )
+        # assert model.device.type == "meta", (
+        #     f"Expected model to be on meta device, got {model.device.type}"
+        # )
         self.model = model
 
-    def configure_model(self) -> None:
-        # TODO(jl): make this work with cpu device (e.g. just skip it)
-        if self.model.device.type != "meta":
-            return  # already configured
-        assert isinstance(self.device_mesh, DeviceMesh), (
-            f"Expected device_mesh to be a DeviceMesh, got {type(self.device_mesh)}"
-        )
-        _dp_mesh = self.device_mesh[
-            "data_parallel"
-        ]  # provided by ModelParallelStrategy
+    def shard_model(
+        self,
+        *,
+        mp_policy: MixedPrecisionPolicy,
+        device_mesh: DeviceMesh,
+    ):
+        dp_mesh = device_mesh["data_parallel"]  # provided by ModelParallelStrategy
+        fsdp_config = {"mesh": dp_mesh, "mp_policy": mp_policy}
+        return fully_shard(self.model, **fsdp_config)
 
-        self.model.to_empty(device=torch.cuda.current_device())
-        load_checkpoint_and_dispatch(
-            self.model,
-            checkpoint=self.ckpt_dir,  # hub ID or local folder
-            device_map={"": torch.cuda.current_device()},
-            dtype=self.model.dtype,
+    def run_training_step(self, inputs: dict) -> torch.Tensor:
+        """
+        Run a training step with the provided inputs.
+        The inputs should be a dictionary containing the necessary data for the model.
+        """
+        # Forward pass through the model
+        outputs = self.model(
+            **inputs,  # inputs should contain the necessary model inputs
         )
-        from accelerate import (
-            FullyShardedDataParallelPlugin,
-            Accelerator,
+        assert isinstance(outputs.loss, torch.Tensor), (
+            f"Expected outputs.loss to be a Tensor, got {type(outputs.loss)}"
         )
-        from accelerate.utils.fsdp_utils import (
-            fsdp2_prepare_model,
-        )
+        return outputs.loss
 
-        fsdp_plugin = FullyShardedDataParallelPlugin(fsdp_version=2)
-        accelerator = Accelerator(fsdp_plugin=fsdp_plugin)
-        # TODO: This doesn't fully work yet because it doens't handle the device mesh correctly
-        self.model = fsdp2_prepare_model(
-            accelerator=accelerator,
-            model=self.model,
-        )
+    # def configure_model(self) -> None:
+    #     # TODO(jl): make this work with cpu device (e.g. just skip it)
+    #     if self.model.device.type != "meta":
+    #         return  # already configured
+    #     assert isinstance(self.device_mesh, DeviceMesh), (
+    #         f"Expected device_mesh to be a DeviceMesh, got {type(self.device_mesh)}"
+    #     )
+    #     _dp_mesh = self.device_mesh[
+    #         "data_parallel"
+    #     ]  # provided by ModelParallelStrategy
+
+    #     self.model.to_empty(device=torch.cuda.current_device())
+    #     load_checkpoint_and_dispatch(
+    #         self.model,
+    #         checkpoint=self.ckpt_dir,  # hub ID or local folder
+    #         device_map={"": torch.cuda.current_device()},
+    #         dtype=self.model.dtype,
+    #     )
+    #     from accelerate import (
+    #         FullyShardedDataParallelPlugin,
+    #         Accelerator,
+    #     )
+    #     from accelerate.utils.fsdp_utils import (
+    #         fsdp2_prepare_model,
+    #     )
+
+    #     fsdp_plugin = FullyShardedDataParallelPlugin(fsdp_version=2)
+    #     accelerator = Accelerator(fsdp_plugin=fsdp_plugin)
+    #     # TODO: This doesn't fully work yet because it doens't handle the device mesh correctly
+    #     self.model = fsdp2_prepare_model(
+    #         accelerator=accelerator,
+    #         model=self.model,
+    #     )
 
 
 class TextPretrainLITConfig(TextLITConfig):

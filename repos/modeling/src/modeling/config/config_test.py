@@ -122,7 +122,7 @@ class TestBuildExperimentConfig:
             basic_experiment_config,
         )
 
-        module = config.module.create_module()
+        module = config.module.create_module(config.run)
         assert isinstance(module, TextPretrainLIT)
 
     def test_build_experiment_config_file_not_found(self):

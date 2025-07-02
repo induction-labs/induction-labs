@@ -24,10 +24,10 @@ Qwen25OActionExperimentConfig_CPU = ExperimentConfig(
         ]
     ),
     run=RunConfig(
-        lr=1e-3,
-        sequence_length=1026,
+        lr=1e-5,
+        sequence_length=8192,  # 16k tokens
         batch_size=1,
-        steps_per_epoch=64,
+        steps_per_epoch=1,
         distributed=DistributedConfig(
             devices_per_node=1,
         ),
@@ -42,7 +42,7 @@ Qwen25OActionExperimentConfig_GPU = Qwen25OActionExperimentConfig_CPU.model_copy
         "run": Qwen25OActionExperimentConfig_CPU.run.model_copy(
             update={
                 "accelerator": Accelerator.CUDA,
-                "precision": DType.fp32,  # Using mixed precision for GPU training
+                "precision": DType.bf16,  # Using mixed precision for GPU training
                 # TODO: Fix this - attn_impl is currently bugged for Qwen2.5O
                 # "attn_impl": AttentionImplementation.FLASH_ATTENTION_2,
             }

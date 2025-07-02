@@ -13,7 +13,13 @@ from modeling.types import Accelerator, DType, AttentionImplementation
 from .distributed import DistributedConfig
 from .wandb import WandbConfig
 from typing import Optional
+from torch.distributed.fsdp import MixedPrecisionPolicy
 
+from lightning.fabric.plugins.precision.precision import (
+    _PRECISION_INPUT,
+)
+
+_PRECISION_INPUT
 # _T = TypeVar("_T")
 # _T_co = TypeVar("_T_co", covariaint=True)
 
@@ -219,7 +225,7 @@ class RunConfig(BaseModel):
 
     @computed_field
     @property
-    def lightning_precision(self) -> str:
+    def lightning_precision(self) -> _PRECISION_INPUT:
         # if we're not quantizing the model, we use the suffix "-true" for the precision
         # since we're only using the precision for the optimizer and not for the model weights.
         lighting_mixed_suffix = "-true" if self.quantize_model else "-mixed"
@@ -233,6 +239,17 @@ class RunConfig(BaseModel):
             return "32"
         else:
             raise ValueError(f"Unsupported precision: {self.precision}")
+
+    @property
+    def mp_policy(self) -> MixedPrecisionPolicy:
+        return MixedPrecisionPolicy(
+            param_dtype=self.precision.torch_dtype,
+            reduce_dtype=DType.fp32.torch_dtype
+            if self.quantize_model
+            else self.precision.torch_dtype,
+            output_dtype=self.precision.torch_dtype,  # output dtype is always the same as param dtype
+            cast_forward_inputs=True,  # cast inputs to BF16 before each module
+        )
 
     @computed_field
     @property

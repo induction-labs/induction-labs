@@ -5,7 +5,6 @@ from typing import Any, Self
 
 import lightning as L
 from modeling.config import DatapackConfig, ExperimentConfig, ModuleConfig
-from modeling.modules.action_module import ActionLITConfig
 from pydantic import BaseModel, ConfigDict, model_validator
 from synapse.video_loader.read_frames import fetch_metadata_from_zarr
 from synapse.video_loader.typess import StreamMetadata
@@ -282,7 +281,9 @@ async def fetch_data(
         f"Expected input_ids to have {num_video_tokens} VIDEO_TOKEN_IDs at the end, "
         f"but got {non_video_input_ids}."
     )
-    print(f"{len(non_video_input_ids)=}, {len(video_input_ids)=}, {num_video_tokens=}")
+    print(
+        f"{len(non_video_input_ids)=}, {len(video_input_ids)=}, {num_video_tokens=}, {seq_length=}"
+    )
 
     assert (num_video_tokens / (tokens_per_frame)) == num_actions, (
         f"Expected num_video_tokens {num_video_tokens/ (tokens_per_frame )=} to be divisible equal to {num_actions=}"
@@ -421,10 +422,14 @@ class ActionDataModule(L.LightningDataModule):
 
     def setup(self, stage: str | None = None) -> None:
         # This method is used to download the dataset if it is not already present.
+        data_paths = [
+            f"gs://induction-labs/jonathan/synth/cursor_follow_v2/sample_{i}.zarr"
+            for i in range(0, 10_000)
+        ]
 
         self.train_data = ActionDataset(
             ActionDatasetArgs(
-                data_paths=self.config.processed_data_paths,
+                data_paths=data_paths,
                 max_seq_length=self.extra_args.seq_length,
                 frames_per_action=self.config.frames_per_action,
             )
@@ -459,14 +464,11 @@ class ActionDatapackConfig(DatapackConfig[ActionDataModule]):
 
     def validate_module_compatibility(
         self, module_config: ModuleConfig[Any]
-    ) -> ActionLITConfig[Any]:
+    ) -> ModuleConfig[Any]:
         """
         Validate that the Lightning module is compatible with the data module.
         This method should be implemented by subclasses to perform any necessary checks.
         """
-        assert isinstance(module_config, ActionLITConfig), (
-            "ActionDatapackConfig can only be used with ActionLITConfig."
-        )
         return module_config
 
     def create_datapack(
