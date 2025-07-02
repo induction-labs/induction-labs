@@ -16,6 +16,7 @@
 
   # Allow buildx bake by default to access ../../ context
   env.BUILDX_BAKE_ENTITLEMENTS_FS = "0";
+  env.LD_PRELOAD = "/usr/lib/x86_64-linux-gnu/libcuda.so:/usr/lib/x86_64-linux-gnu/libnvidia-ml.so.1";
 
   # https://devenv.sh/packages/
   packages = with pkgs; [

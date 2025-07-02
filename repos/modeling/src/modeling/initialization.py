@@ -23,8 +23,11 @@ class Initializer:
         """
         loggers: list[Logger] = []
         if wandb_config := exp_config.metadata.wandb:
+            # TODO: For some reason lightnign / wanbd is fucking logging checkpoints, i cant find the setting for this right now but turn it off.
             wandb_logger = WandbLogger(
-                project=wandb_config.project, name=wandb_config.name
+                project=wandb_config.project,
+                name=wandb_config.name,
+                save_dir=exp_config.metadata.output_dir,
             )
             wandb_experiment = wandb_logger.experiment
             assert isinstance(wandb_experiment, Run) or isinstance(
@@ -63,6 +66,7 @@ class Initializer:
             strategy=strategy,
             # Logging and checkpointing
             logger=loggers,
+            default_root_dir=exp_config.metadata.output_dir,
             log_every_n_steps=1,
             precision=exp_config.run.lightning_precision,
         )
