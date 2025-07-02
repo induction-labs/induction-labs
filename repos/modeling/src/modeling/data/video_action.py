@@ -33,7 +33,9 @@ def qwen_processor() -> Qwen2_5OmniProcessor:
     Returns a cached instance of the Qwen2_5OmniProcessor.
     This is used to avoid reloading the processor multiple times.
     """
-    return Qwen2_5OmniProcessor.from_pretrained("Qwen/Qwen2.5-Omni-3B")
+    processor = Qwen2_5OmniProcessor.from_pretrained("Qwen/Qwen2.5-Omni-3B")
+    assert isinstance(processor, Qwen2_5OmniProcessor)
+    return processor
 
 
 type CursorPathArray = np.ndarray[
