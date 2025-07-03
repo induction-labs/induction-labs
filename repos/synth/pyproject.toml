@@ -26,5 +26,7 @@ build-backend = "hatchling.build"
 
 [dependency-groups]
 dev = [
+    "gcsfs>=2025.3.0",
     "ipykernel>=6.29.5",
+    "nltk>=3.9.1",
 ]

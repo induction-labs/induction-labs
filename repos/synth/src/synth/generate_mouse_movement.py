@@ -125,7 +125,11 @@ def generate_image_from_segments(
 
 
 def create_video_array(
-    x_start: float, y_start: float, x_cubics: list[Cubic], y_cubics: list[Cubic]
+    x_start: float,
+    y_start: float,
+    x_cubics: list[Cubic],
+    y_cubics: list[Cubic],
+    garbage: bool = False,
 ):
     ts, all_poly_x, all_poly_y = cubics_to_points(x_start, y_start, x_cubics, y_cubics)
     base_image = generate_image_from_segments(ts, all_poly_x, all_poly_y, SCREEN_SIZE)
@@ -146,6 +150,12 @@ def create_video_array(
     img_array = np.array([imgs[0], *imgs])[:, :, :, :3]
     time_array = np.array(timestamps)
 
+    if garbage:
+        img_array = np.zeros_like(img_array)
+        # actually generate just noise
+        noise = np.random.randint(0, 256, img_array.shape, dtype=np.uint8)
+        img_array = noise
+
     return time_array, img_array, x_cubics, y_cubics
 
 
@@ -153,14 +163,15 @@ SCREEN_SIZE = smart_resize(854, 480, factor=28, min_pixels=0, max_pixels=854 * 4
 
 
 def create_video(
-    n_segments: int, delta: float
+    n_segments: int, delta: float, garbage: bool = False
 ) -> tuple[np.ndarray, np.ndarray, list[Cubic], list[Cubic]]:
     (x_start, x_cubics), (y_start, y_cubics) = (
         sample_cubics(n_segments, delta),
         sample_cubics(n_segments, delta),
     )
+
     time, imgs, x_cubics, y_cubics = create_video_array(
-        x_start, y_start, x_cubics, y_cubics
+        x_start, y_start, x_cubics, y_cubics, garbage=garbage
     )
 
     return time, imgs, x_cubics, y_cubics
@@ -263,32 +274,44 @@ async def upload_sample(
     )
 
 
-async def create_sample(sem: asyncio.Semaphore, i: int, path_template: str):
+async def create_sample(
+    sem: asyncio.Semaphore, i: int, path_template: str, garbage: bool = False
+):
     async with sem:
         segments = random.randrange(5, 12)
         delta = random.uniform(0.1, 1)
         await upload_sample(
-            *create_video(n_segments=segments, delta=delta), path_template.format(i=i)
+            *create_video(n_segments=segments, delta=delta, garbage=garbage),
+            path_template.format(i=i),
         )
 
 
-async def _batch(start: int, tpl: str, width: int = 4):
+async def _batch(start: int, tpl: str, garbage: bool = False, width: int = 4):
     sem = asyncio.Semaphore(width)  # 4 concurrent tasks *inside* one process
     await asyncio.gather(
-        *(create_sample(sem, i, tpl) for i in range(start, start + width))
+        *(
+            create_sample(sem, i, tpl, garbage=garbage)
+            for i in range(start, start + width)
+        )
     )
 
 
-def worker(start: int, tpl: str, width: int = 4):
-    asyncio.run(_batch(start, tpl, width))  # each process owns its own loop
+def worker(start: int, tpl: str, garbage: bool = False, width: int = 4):
+    asyncio.run(
+        _batch(start, tpl, garbage=garbage, width=width)
+    )  # each process owns its own loop
 
 
 # ── driver ───────────────────────────────────────────────────────────
-def run_all(total: int, tpl: str, n_proc: int = 6, width: int = 4):
+def run_all(
+    total: int, tpl: str, n_proc: int = 6, garbage: bool = False, width: int = 4
+):
     starts = range(0, total, width)  # one “batch” every <width> indices
     with Pool(n_proc) as pool:
         for _ in tqdm(
-            pool.imap_unordered(partial(worker, tpl=tpl, width=width), starts),
+            pool.imap_unordered(
+                partial(worker, tpl=tpl, garbage=garbage, width=width), starts
+            ),
             total=len(starts),
         ):
             pass
@@ -304,8 +327,9 @@ if __name__ == "__main__":
         set_start_method("spawn")
 
     run_all(
-        15_000,
-        "gs://induction-labs/jonathan/synth/cursor_follow_v2/sample_{i}.zarr",
-        n_proc=6,
+        64000,
+        "gs://induction-labs/jonathan/synth/cursor_follow_v3/sample_{i}.zarr",
+        n_proc=12,
+        garbage=False,
         width=2,
     )

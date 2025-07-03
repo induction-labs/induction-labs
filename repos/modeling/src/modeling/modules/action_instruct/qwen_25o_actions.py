@@ -451,6 +451,7 @@ if __name__ == "__main__":
     # default: Load the model on the available device(s)
     config = Qwen2_5OmniThinkerConfig.from_pretrained("Qwen/Qwen2.5-Omni-3B")
     model = Qwen2_5OmniThinkerForActionModelling(config)
+    print(model.action_token_embedding.weight)
 
     data = ActionDataSample.combine_batch(
         [

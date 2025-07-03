@@ -21,7 +21,9 @@ import pandas as pd
 class VideoDurationAnalyzer:
     VIDEO_DURATION_SECONDS = 30.0
 
-    def __init__(self, bucket_path: str = "gs://induction-labs/action_capture/"):
+    def __init__(
+        self, bucket_path: str = "gs://induction-labs-data-ext/action_capture/"
+    ):
         self.bucket_path = bucket_path
         self.fs = gcsfs.GCSFileSystem()
 
