@@ -60,6 +60,9 @@ class Qwen2_5OmniThinkerForActionModelling(
         for param in self.action_token_embedding.parameters():
             param.requires_grad = True
 
+        for param in self.visual.parameters():
+            param.requires_grad = True
+        # TODO: When training print number of trainable parameters
         self.post_init()
 
     def get_input_embeddings(self):
