@@ -13,7 +13,7 @@ from modeling.data.video_action import RangeActionDatapackConfig
 from modeling.modules.action_instruct.qwen_25o import Qwen25OActionLITConfig
 from modeling.utils.cloud_path import CloudPath
 
-Qwen25OActionExperimentConfig_CPU = ExperimentConfig(
+Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
     metadata=ExperimentMetadata(
         wandb=WandbConfig(
             project="mouse_following", name="qwen25o_mouse_follow_vision_unfrozen_noise"
@@ -43,25 +43,19 @@ Qwen25OActionExperimentConfig_CPU = ExperimentConfig(
         distributed=DistributedConfig(
             devices_per_node=1,
         ),
-        accelerator=Accelerator.CPU,
-        precision=DType.fp32,
+        # "attn_impl": AttentionImplementation.FLASH_ATTENTION_2,
+        accelerator=Accelerator.CUDA,
+        precision=DType.bf16,
     ),
 )
 
+Qwen25OActionGPU_Test = Qwen25OActionExperimentConfig_GPU.testing_config()
 
-Qwen25OActionExperimentConfig_GPU = Qwen25OActionExperimentConfig_CPU.model_copy(
-    update={
-        "run": Qwen25OActionExperimentConfig_CPU.run.model_copy(
-            update={
-                "accelerator": Accelerator.CUDA,
-                "precision": DType.bf16,  # Using mixed precision for GPU training
-                # TODO: Fix this - attn_impl is currently bugged for Qwen2.5O
-                # "attn_impl": AttentionImplementation.FLASH_ATTENTION_2,
-            }
-        )
-    }
+Qwen25OActionExperimentConfig_CPU = Qwen25OActionExperimentConfig_GPU.model_copy(
+    update={"run": Qwen25OActionExperimentConfig_GPU.run.cpu_config()}
 )
 
 
 # mdl export modeling.experiments.action_instruct.qwen_25o.Qwen25OActionExperimentConfig_CPU
 # mdl export modeling.experiments.action_instruct.qwen_25o.Qwen25OActionExperimentConfig_GPU
+# mdl export modeling.experiments.action_instruct.qwen_25o.Qwen25OActionGPU_Test

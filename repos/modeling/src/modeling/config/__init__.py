@@ -359,6 +359,24 @@ class RunConfig(BaseModel):
         _ = self.process_batch_size  # Trigger the property to validate batch size
         return self
 
+    def cpu_config(self) -> RunConfig:
+        """
+        Create a CPU-specific configuration for the run.
+        This is useful for testing or running on CPU-only environments.
+        """
+        return self.model_copy(
+            update={
+                "accelerator": Accelerator.CPU,
+                "precision": DType.fp32,  # Use full precision on CPU
+                "attn_impl": AttentionImplementation.SDPA,  # Use SDPA for CPU
+                "quantize_model": False,  # No quantization on CPU
+                "distributed": DistributedConfig(
+                    devices_per_node=1,
+                    num_nodes=1,  # Single node for CPU runs
+                ),
+            }
+        )
+
     @classmethod
     def mock_data(cls) -> RunConfig:
         """
@@ -403,6 +421,40 @@ class ExperimentConfig(BaseModel, Generic[_LITDataModule]):
         import tomli_w
 
         return tomli_w.dumps(self.model_dump(serialize_as_any=True))
+
+    def testing_config(self, num_steps: int = 1) -> Self:
+        """
+        Create a testing configuration for the experiment.
+        This is useful for unit tests to avoid running the full experiment.
+        """
+
+        updated_wandb_config = (
+            self.metadata.wandb.model_copy(
+                update={
+                    "project": "testing",
+                    "name": self.metadata.wandb.name,
+                }
+            )
+            if self.metadata.wandb is not None
+            else None
+        )
+        return self.model_copy(
+            update={
+                "metadata": self.metadata.model_copy(
+                    update={
+                        "wandb": updated_wandb_config,
+                        "output_dir": "/tmp/test_output",
+                        "checkpoint": None,
+                    }
+                ),
+                "run": self.run.model_copy(
+                    update={
+                        "num_epochs": 1,
+                        "steps_per_epoch": num_steps,
+                    }
+                ),
+            }
+        )
 
 
 class SerializedExperimentConfig(ExperimentConfig[L.LightningDataModule]):
