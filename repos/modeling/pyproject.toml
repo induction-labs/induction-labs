@@ -25,7 +25,6 @@ dependencies = [
   "typer>=0.16.0",
   "einops>=0.8.1",
   "synapse",
-  "pathy>=0.11.0",
 ]
 [project.scripts]
 mdl = "modeling.main:app"
