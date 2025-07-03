@@ -155,6 +155,26 @@ class GCSCheckpointCallback(Callback):
                 local_dir=self.tmp_dir,
             )
 
+    def on_fit_start(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
+        # Save the initial model checkpoint
+        assert isinstance(pl_module, BaseLITModule), (
+            f"Expected pl_module to be an instance of BaseLITModule, got {type(pl_module)}"
+        )
+        assert self.tmp_dir is not None, (
+            "Temporary directory for checkpoints is not set up"
+        )
+
+        model = pl_module.model
+        assert isinstance(model, PreTrainedModel)
+        if self.ckpt_config.checkpoint_first_step:
+            logger.info(f"Saving first checkpoint to {self.ckpt_path}")
+            save_checkpoint_to_gcs(
+                model=model,
+                gcs_bucket=self.ckpt_config.bucket_and_path[0],
+                gcs_prefix=self.ckpt_config.bucket_and_path[1] / "step_0",
+                local_dir=self.tmp_dir,
+            )
+
     def on_fit_end(
         self, trainer: "pl.Trainer", pl_module: "pl.LightningModule"
     ) -> None:

@@ -88,10 +88,9 @@ class GCSCheckpointConfig(BaseModel):
     def should_checkpoint(self, step: int) -> bool:
         """
         Determine if a checkpoint should be saved at the given step.
+        Step should be strictly positive
         """
-        if step == 0:
-            logging.debug(f"Checkpointing at first step. {self.checkpoint_first_step=}")
-            return self.checkpoint_first_step
+        assert step > 0, "Step must be strictly positive for checkpointing."
         if self.checkpoint_frequency == 0:
             return False
         return step % self.checkpoint_frequency == 0
