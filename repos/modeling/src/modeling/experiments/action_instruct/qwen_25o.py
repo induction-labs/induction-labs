@@ -31,17 +31,17 @@ Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
     module=Qwen25OActionLITConfig(),
     datapack=RangeActionDatapackConfig(
         # prefix="gs://induction-labs/jonathan/synth/garbage_cursor_follow_v1/sample_",
-        # prefix="gs://induction-labs/jonathan/synth/cursor_follow_v2/sample_",
-        prefix="gs://induction-labs/jonathan/synth/noise_cursor_follow_v1/sample_",
+        prefix="gs://induction-labs/jonathan/synth/cursor_follow_v2/sample_",
+        # prefix="gs://induction-labs/jonathan/synth/noise_cursor_follow_v1/sample_",
         end_index=5000,  # 5k samples
     ),
     run=RunConfig(
         lr=1e-5,
         sequence_length=2048,
-        batch_size=1,
+        batch_size=2,
         steps_per_epoch=5000,
         distributed=DistributedConfig(
-            devices_per_node=1,
+            devices_per_node=2,
         ),
         # "attn_impl": AttentionImplementation.FLASH_ATTENTION_2,
         accelerator=Accelerator.CUDA,
@@ -49,7 +49,7 @@ Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
     ),
 )
 
-Qwen25OActionGPU_Test = Qwen25OActionExperimentConfig_GPU.testing_config()
+Qwen25OActionGPU_Test = Qwen25OActionExperimentConfig_GPU.testing_config(num_steps=10)
 
 Qwen25OActionExperimentConfig_CPU = Qwen25OActionExperimentConfig_GPU.model_copy(
     update={"run": Qwen25OActionExperimentConfig_GPU.run.cpu_config()}

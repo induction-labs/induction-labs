@@ -9,6 +9,12 @@ from lightning.fabric.loggers.logger import _DummyExperiment
 from lightning.pytorch.strategies import ModelParallelStrategy
 from lightning.pytorch.loggers import Logger
 from modeling.checkpoints.save import GCSCheckpointCallback
+from synapse.utils.logging import configure_logging
+
+logger = configure_logging(
+    __name__,
+    #    level=logging.DEBUG
+)
 
 
 class Initializer:
@@ -24,13 +30,16 @@ class Initializer:
         """
         loggers: list[Logger] = []
         if wandb_config := exp_config.metadata.wandb:
-            # TODO: For some reason lightnign / wanbd is fucking logging checkpoints, i cant find the setting for this right now but turn it off.
+            logger.debug("Initializing WandbLogger with config: %s", wandb_config)
             wandb_logger = WandbLogger(
                 project=wandb_config.project,
                 name=wandb_config.name,
                 save_dir=exp_config.metadata.output_dir,
             )
             wandb_experiment = wandb_logger.experiment
+            logger.debug(
+                "WandbLogger initialized with experiment: %s", wandb_experiment
+            )
             assert isinstance(wandb_experiment, Run) or isinstance(
                 wandb_experiment, _DummyExperiment
             ), f"{wandb_experiment=} should be an instance of wandb.sdk.wandb_run.Run"
@@ -38,6 +47,9 @@ class Initializer:
                 wandb_experiment.config.update(
                     exp_config.model_dump(serialize_as_any=True)
                 )
+            logger.debug(
+                "WandbLogger configuration updated with experiment config",
+            )
             loggers.append(wandb_logger)
         return loggers
 
@@ -56,6 +68,7 @@ class Initializer:
             tensor_parallel_size=1,  # (= no TP)  just pure FSDP2
             # save_distributed_checkpoint=True,  # write one shard per rank
         )
+        logger.debug("Initializing trainer:")
 
         trainer = L.Trainer(
             max_epochs=exp_config.run.num_epochs,
@@ -83,7 +96,9 @@ class Initializer:
             default_root_dir=exp_config.metadata.output_dir,
             log_every_n_steps=1,
         )
+        logger.debug("Trainer initialized with config:")
         datapack = exp_config.datapack.create_datapack(exp_config)
         lit_module = exp_config.module.create_module(exp_config.run)
+        logger.debug("Data pack and module initialized.")
 
         return trainer, datapack, lit_module

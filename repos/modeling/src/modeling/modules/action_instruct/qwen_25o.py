@@ -67,22 +67,22 @@ class Qwen25OActionLIT(
         dp_mesh = device_mesh["data_parallel"]  # provided by ModelParallelStrategy
         fsdp_config = {"mesh": dp_mesh, "mp_policy": mp_policy}
 
-        # for layer_id, transformer_block in enumerate(self.model.model.layers):
-        #     # Apply activation checkpointing
+        for layer_id, transformer_block in enumerate(self.model.model.layers):
+            # Apply activation checkpointing
 
-        #     # For now this is broken with HF models https://github.com/huggingface/transformers/issues/34928
-        #     #             from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
-        #     #     checkpoint_wrapper,
-        #     # )
-        #     # transformer_block = checkpoint_wrapper(transformer_block)
+            # For now this is broken with HF models https://github.com/huggingface/transformers/issues/34928
+            #             from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
+            #     checkpoint_wrapper,
+            # )
+            # transformer_block = checkpoint_wrapper(transformer_block)
 
-        #     reshard_after_forward = int(layer_id) < len(self.model.model.layers) - 1
-        #     fully_shard(
-        #         transformer_block,
-        #         **fsdp_config,
-        #         reshard_after_forward=reshard_after_forward,
-        #     )
-        #     self.model.model.layers[layer_id] = transformer_block
+            reshard_after_forward = int(layer_id) < len(self.model.model.layers) - 1
+            fully_shard(
+                transformer_block,
+                **fsdp_config,
+                reshard_after_forward=reshard_after_forward,
+            )
+            self.model.model.layers[layer_id] = transformer_block
         return fully_shard(self.model, **fsdp_config)
 
 

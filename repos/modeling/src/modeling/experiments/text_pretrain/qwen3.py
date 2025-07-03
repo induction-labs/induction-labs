@@ -12,10 +12,13 @@ from modeling.data.text_train import TextPretrainDatapackConfig
 from modeling.modules.text_pretrain.qwen3 import Qwen3LITConfig
 from modeling.types import AttentionImplementation
 
+from modeling.types import Accelerator, DType
+
 Qwen3PretrainExperimentConfig = ExperimentConfig(
     metadata=ExperimentMetadata(
         wandb=WandbConfig(project="testing", name="qwen3_4B_text_pretrain"),
         output_dir="output/text_pretrain",
+        checkpoint=None,
     ),
     module=Qwen3LITConfig(
         model_name="Qwen/Qwen3-4B",
@@ -23,16 +26,21 @@ Qwen3PretrainExperimentConfig = ExperimentConfig(
     ),
     datapack=TextPretrainDatapackConfig(),
     run=RunConfig(
-        lr=1e-3,
-        attn_impl=AttentionImplementation.FLASH_ATTENTION_2,
-        sequence_length=1024,  # Default sequence length
-        batch_size=2,
-        steps_per_epoch=1000,  # Number of steps per epoch
+        lr=1e-5,
+        sequence_length=2048,
+        batch_size=4,
+        steps_per_epoch=5000,
         distributed=DistributedConfig(
-            devices_per_node=2,
-            num_nodes=1,
+            devices_per_node=4,
         ),
+        attn_impl=AttentionImplementation.SDPA,
+        accelerator=Accelerator.CUDA,
+        precision=DType.bf16,
     ),
+)
+Qwen3PretrainTest = Qwen3PretrainExperimentConfig.testing_config(
+    num_steps=10, enable_wandb=True
 )
 
 # mdl export modeling.experiments.text_pretrain.qwen3.Qwen3PretrainExperimentConfig
+# mdl export modeling.experiments.text_pretrain.qwen3.Qwen3PretrainTest

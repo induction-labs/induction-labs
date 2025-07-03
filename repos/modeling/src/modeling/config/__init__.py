@@ -422,7 +422,11 @@ class ExperimentConfig(BaseModel, Generic[_LITDataModule]):
 
         return tomli_w.dumps(self.model_dump(serialize_as_any=True))
 
-    def testing_config(self, num_steps: int = 1) -> Self:
+    def testing_config(
+        self,
+        num_steps: int = 1,
+        enable_wandb: bool = True,
+    ) -> Self:
         """
         Create a testing configuration for the experiment.
         This is useful for unit tests to avoid running the full experiment.
@@ -435,7 +439,7 @@ class ExperimentConfig(BaseModel, Generic[_LITDataModule]):
                     "name": self.metadata.wandb.name,
                 }
             )
-            if self.metadata.wandb is not None
+            if self.metadata.wandb is not None and enable_wandb
             else None
         )
         return self.model_copy(
