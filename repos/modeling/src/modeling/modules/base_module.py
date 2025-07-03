@@ -13,6 +13,12 @@ from transformers.configuration_utils import PretrainedConfig
 from torch.distributed.fsdp import FSDPModule, MixedPrecisionPolicy, fully_shard
 from transformers.modeling_utils import PreTrainedModel
 from typing import Generic, TypeVar, final
+from synapse.utils.logging import configure_logging
+
+logger = configure_logging(
+    __file__,
+    #    level=logging.DEBUG
+)
 
 MODEL_TYPE = TypeVar("MODEL_TYPE", bound=PreTrainedModel, covariant=True)
 DATA_TYPE = TypeVar("DATA_TYPE")
@@ -60,9 +66,11 @@ class BaseLITModule(
     @final
     def configure_model(self) -> None:
         # We need to ensure that all models are fsdp because that is we use by default
+        logger.debug("Configuring model for FSDP sharding...")
 
         if isinstance(self.model, FSDPModule):
             return  # already configured
+        self.model = self.load_weights()
 
         assert isinstance(self.device_mesh, DeviceMesh), (
             f"Expected device_mesh to be a DeviceMesh, got {type(self.device_mesh)}"
@@ -71,9 +79,18 @@ class BaseLITModule(
             mp_policy=self.run_config.mp_policy,
             device_mesh=self.device_mesh,
         )  # type: ignore[assignment]
+        logger.debug(f"Sharded model {self.model} with dtype {self.dtype}")
         assert isinstance(self.model, FSDPModule), (
             f"Expected self.model to be a FullyShardedDataParallel, got {type(self.model)}"
         )
+
+    @abstractmethod
+    def load_weights(self) -> MODEL_TYPE:
+        """
+        Abstract method to be implemented by subclasses for loading model weights.
+        This method should handle the loading of pre-trained weights or checkpoint files.
+        """
+        return self.model
 
     @abstractmethod
     def run_training_step(self, inputs: DATA_TYPE) -> torch.Tensor:

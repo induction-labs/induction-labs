@@ -1,10 +1,5 @@
 from __future__ import annotations
 
-import multiprocessing
-import tempfile
-import weakref
-from itertools import chain
-from pathlib import Path
 from typing import Any
 
 import datasets
@@ -16,11 +11,62 @@ from torch.utils.data import DataLoader
 from transformers.data.data_collator import default_data_collator
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 
+import torch
+from torch.utils.data import Dataset
+from typing import List, Callable, Optional
+from synapse.utils.logging import configure_logging
 
-def _cleanup_temp_dir(temp_dir: tempfile.TemporaryDirectory, path: str):
-    """Function to clean up temp directory - called by finalizer."""
-    # print(f"Finalizer cleaning up: {path}")
-    temp_dir.cleanup()
+logger = configure_logging(__name__)
+
+
+class GenericSFTDataset(Dataset):
+    """
+    A generic PyTorch Dataset for sequence fine-tuning (SFT) tasks.
+
+    Args:
+        texts (List[str]): A list of raw text strings to tokenize and chunk.
+        tokenizer (Callable[[str], dict]): A tokenizer function that takes a string
+            and returns a dict with at least the key 'input_ids'.
+        seq_len (int): The sequence length for each example.
+        stride (Optional[int]): The stride for sliding window, defaults to seq_len (no overlap).
+    """
+
+    def __init__(
+        self,
+        texts: List[str],
+        tokenizer: Callable[[str], dict],
+        seq_len: int,
+        stride: Optional[int] = None,
+    ):
+        self.tokenizer = tokenizer
+        self.seq_len = seq_len
+        self.stride = stride or seq_len
+
+        # Tokenize and flatten all texts into a single list of token IDs
+        all_ids = []
+        for txt in texts:
+            tokens = tokenizer(txt)
+            if "input_ids" not in tokens:
+                raise ValueError("Tokenizer output must contain 'input_ids'")
+            all_ids.extend(tokens["input_ids"])
+
+        # Calculate number of chunks
+        self.examples = []
+        for start_idx in range(0, len(all_ids) - seq_len + 1, self.stride):
+            chunk = all_ids[start_idx : start_idx + seq_len]
+            self.examples.append(chunk)
+
+    def __len__(self) -> int:
+        return len(self.examples)
+
+    def __getitem__(self, idx: int) -> dict:
+        input_ids = self.examples[idx]
+        # For SFT, labels are the same as inputs (language modeling)
+        labels = input_ids.copy()
+        return {
+            "input_ids": torch.tensor(input_ids, dtype=torch.long),
+            "labels": torch.tensor(labels, dtype=torch.long),
+        }
 
 
 class TextPretrainDataModule(L.LightningDataModule):
@@ -32,71 +78,25 @@ class TextPretrainDataModule(L.LightningDataModule):
         super().__init__()
         self.config = config
         self.extra_args = extra_args
-        self._temp_dir = "/tmp/tmpstut1ibm"
-        self.temp_path = Path(self._temp_dir)
-        self._finalizer = weakref.finalize(
-            self, _cleanup_temp_dir, self._temp_dir, str(self.temp_path)
-        )
+        # ...
 
     def setup(self, stage: str | None = None) -> None:
-        # This method is used to download the dataset if it is not already present.
-        train_data = datasets.load_from_disk(self.temp_path / "train_data")
-        assert isinstance(train_data, datasets.Dataset), (
-            "Expected train_data to be a Dataset"
+        logger.info("Loading wikitext-2 dataset...")
+        dataset = datasets.load_dataset("wikitext", "wikitext-2-raw-v1", split="train")
+        logger.info(f"Dataset loaded with {len(dataset)} examples")
+
+        # Extract text from the dataset
+        texts = [example["text"] for example in dataset if example["text"].strip()]
+        logger.info(f"Filtered to {len(texts)} non-empty text examples")
+
+        # Create the training dataset using GenericSFTDataset
+        logger.info("Creating training dataset...")
+        self.train_data = GenericSFTDataset(
+            texts=texts,
+            tokenizer=lambda x: self.extra_args.tokenizer(x, return_tensors=None),
+            seq_len=self.extra_args.seq_length,
         )
-        self.train_data = train_data
-
-    def prepare_data(self):
-        """
-        Function created using code found in
-        https://github.com/huggingface/transformers/blob/v4.45.1/examples/pytorch/language-modeling/run_clm_no_trainer.py
-        """
-        # This method is used to set up the dataset for training.
-        data = datasets.load_dataset(self.config.dataset_name, trust_remote_code=True)
-        column_names = data["train"].column_names  # type: ignore # noqa: PGH003
-        text_column_name = "text" if "text" in column_names else column_names[0]
-
-        def tokenize_function(examples):
-            return self.extra_args.tokenizer(examples[text_column_name])
-
-        tokenized_datasets = data.map(
-            tokenize_function,
-            batched=True,
-            remove_columns=column_names,
-            num_proc=1,  # type: ignore  # noqa: PGH003
-            load_from_cache_file=True,  # type: ignore  # noqa: PGH003
-            desc="Running tokenizer on dataset",  # type: ignore  # noqa: PGH003
-        )
-        seq_length = self.extra_args.seq_length
-
-        # Main data processing function that will concatenate all texts from our dataset and generate chunks of block_size.
-        def group_texts(examples):
-            # Concatenate all texts.
-            concatenated_examples = {k: list(chain(*examples[k])) for k in examples}
-            total_length = len(concatenated_examples[next(iter(examples.keys()))])
-            # We drop the small remainder, and if the total_length < block_size  we exclude this batch and return an empty dict.
-            # We could add padding if the model supported it instead of this drop, you can customize this part to your needs.
-            if total_length > seq_length:
-                total_length = (total_length // seq_length) * seq_length
-            # Split by chunks of max_len.
-            result = {
-                k: [t[i : i + seq_length] for i in range(0, total_length, seq_length)]
-                for k, t in concatenated_examples.items()
-            }
-            result["labels"] = result["input_ids"].copy()
-            return result
-
-        lm_datasets = tokenized_datasets.map(
-            group_texts,
-            batched=True,
-            num_proc=multiprocessing.cpu_count(),
-            load_from_cache_file=True,
-            desc=f"Grouping texts in chunks of {seq_length}",
-        )
-        train_data = lm_datasets["train"]
-        assert isinstance(train_data, datasets.Dataset)
-        print("Saving train data to disk at", self.temp_path / "train_data")
-        train_data.save_to_disk(self.temp_path / "train_data")
+        logger.info(f"Training dataset created with {len(self.train_data)} examples")
 
     def train_dataloader(self) -> DataLoader:
         return DataLoader(
@@ -122,7 +122,7 @@ class TextPretrainDatapackConfig(DatapackConfig[TextPretrainDataModule]):
     """
 
     config_path: str = "modeling.data.text_train.TextPretrainDatapackConfig"
-    dataset_name: str = "tatsu-lab/alpaca"
+    dataset_name: str = "wikitext"
     num_workers: int = 2
 
     def validate_module_compatibility(
