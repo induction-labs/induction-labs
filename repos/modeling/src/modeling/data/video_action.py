@@ -23,9 +23,8 @@ import functools
 import torch
 
 from synapse.utils.logging import configure_logging
-import logging
 
-logger = configure_logging(__name__, logging.DEBUG)
+logger = configure_logging(__name__)
 
 VIDEO_TOKEN_ID = 151656
 PATCH_SIZE = 14

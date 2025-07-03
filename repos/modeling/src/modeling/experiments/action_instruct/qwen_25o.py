@@ -6,26 +6,37 @@ from modeling.config import (
     ExperimentMetadata,
     RunConfig,
     WandbConfig,
+    GCSCheckpointConfig,
 )
 from modeling.types import Accelerator, DType
 from modeling.data.video_action import RangeActionDatapackConfig
 from modeling.modules.action_instruct.qwen_25o import Qwen25OActionLITConfig
+from modeling.utils.cloud_path import CloudPath
 
 Qwen25OActionExperimentConfig_CPU = ExperimentConfig(
     metadata=ExperimentMetadata(
         wandb=WandbConfig(project="mouse_following", name="qwen25o_mouse_follow"),
-        output_dir="output/mouse_following",
+        output_dir="output",
+        checkpoint=GCSCheckpointConfig(
+            checkpoint_path=CloudPath.from_str(
+                "gs://induction-labs/checkpoints/qwen25o_mouse_follow/test",
+            ),
+            checkpoint_frequency=2,  # Save every 1000 steps
+            checkpoint_first_step=True,  # Save the first step
+            checkpoint_last_step=True,  # Save the last step
+        ),
     ),
     module=Qwen25OActionLITConfig(),
     datapack=RangeActionDatapackConfig(
-        prefix="gs://induction-labs/jonathan/synth/cursor_follow_v2/sample_",
-        end_index=10_000,  # 10k samples
+        prefix="gs://induction-labs/jonathan/synth/garbage_cursor_follow_v1/sample_",
+        # prefix="gs://induction-labs/jonathan/synth/cursor_follow_v2/sample_",
+        end_index=5000,  # 5k samples
     ),
     run=RunConfig(
         lr=1e-5,
-        sequence_length=8192,  # 16k tokens
+        sequence_length=4096,
         batch_size=1,
-        steps_per_epoch=1,
+        steps_per_epoch=3,
         distributed=DistributedConfig(
             devices_per_node=1,
         ),

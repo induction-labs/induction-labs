@@ -8,6 +8,7 @@ from modeling.config import ExperimentConfig
 from lightning.fabric.loggers.logger import _DummyExperiment
 from lightning.pytorch.strategies import ModelParallelStrategy
 from lightning.pytorch.loggers import Logger
+from modeling.checkpoints.save import GCSCheckpointCallback
 
 
 class Initializer:
@@ -58,17 +59,29 @@ class Initializer:
 
         trainer = L.Trainer(
             max_epochs=exp_config.run.num_epochs,
-            max_steps=exp_config.run.steps_per_epoch,
             # Distributed training configuration
+            limit_train_batches=exp_config.run.num_epochs
+            * exp_config.run.steps_per_epoch,
             accelerator=exp_config.run.accelerator,
             devices=exp_config.run.distributed.devices_per_node,
             num_nodes=exp_config.run.distributed.num_nodes,
+            # Precision and parallel
             strategy=strategy,
+            precision=exp_config.run.lightning_precision,
             # Logging and checkpointing
             logger=loggers,
+            callbacks=(
+                [
+                    GCSCheckpointCallback(
+                        exp_config=exp_config,
+                    )
+                ]
+                if exp_config.metadata.checkpoint
+                else []
+            ),
+            enable_checkpointing=False,
             default_root_dir=exp_config.metadata.output_dir,
             log_every_n_steps=1,
-            precision=exp_config.run.lightning_precision,
         )
         datapack = exp_config.datapack.create_datapack(exp_config)
         lit_module = exp_config.module.create_module(exp_config.run)

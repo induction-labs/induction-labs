@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-import tomllib
+import tomli
+
 from pathlib import Path
 from typing import Any
 
@@ -12,7 +13,7 @@ def build_experiment_config(experiment_config_toml: Path) -> ExperimentConfig[An
     from modeling.utils.dynamic_import import import_from_string
 
     with open(experiment_config_toml, "rb") as f:
-        data = tomllib.load(f)
+        data = tomli.load(f)
     try:
         serialized_exp_config = SerializedExperimentConfig.model_validate(data)
     except TypeError as e:
@@ -55,10 +56,10 @@ def serialize_experiment_config(
     """
     Serialize the ExperimentConfig to a TOML file. Adds eof_comments to the end of the file.
     """
-    import tomli_w
+    toml_str = experiment_config.serialize_to_toml()
 
-    with open(output_path, "wb") as f:
-        tomli_w.dump(experiment_config.model_dump(serialize_as_any=True), f)
+    with open(output_path, "w") as f:
+        f.write(toml_str)
 
     if eof_comments:
         # Write each line of eof_comments to the end of the file

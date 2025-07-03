@@ -14,12 +14,16 @@ from .distributed import DistributedConfig
 from .wandb import WandbConfig
 from typing import Optional
 from torch.distributed.fsdp import MixedPrecisionPolicy
-
+from pathlib import Path
+from modeling.utils.cloud_path import CloudPath
 from lightning.fabric.plugins.precision.precision import (
     _PRECISION_INPUT,
 )
 
-_PRECISION_INPUT
+from synapse.utils.logging import configure_logging
+import logging
+
+logger = configure_logging(__name__, logging.DEBUG)
 # _T = TypeVar("_T")
 # _T_co = TypeVar("_T_co", covariaint=True)
 
@@ -27,9 +31,88 @@ _PRECISION_INPUT
 _LITDataModule = TypeVar("_LITDataModule", bound="L.LightningDataModule")
 
 
+# TODO: Make checkpoint config use different backends and have it dynamically loaded and stuff
+# for now just only use gcs checkpoints
+class GCSCheckpointConfig(BaseModel):
+    """
+    Configuration for GCS checkpointing.
+    This class is used to configure the GCS checkpointing settings for an experiment.
+    """
+
+    checkpoint_frequency: int = Field(
+        0, description="How often to save checkpoints in steps. Set to 0 to disable."
+    )
+    checkpoint_last_step: bool = Field(
+        True,
+        description="Whether to save the last step checkpoint. If True, the last step will always be saved regardless of checkpoint_frequency.",
+    )
+    checkpoint_first_step: bool = Field(
+        False, description="Whether to save the first step checkpoint."
+    )
+
+    loaded_at: Optional[datetime] = Field(
+        default=None,
+        description="Timestamp when the checkpoint was loaded. Used to determine if the checkpoint is fresh.",
+    )
+    checkpoint_path: CloudPath = Field(
+        ...,
+        description="Path to the GCS bucket where checkpoints will be stored. Should be gs://induction-labs/...",
+    )
+
+    @property
+    def bucket_and_path(self) -> tuple[str, Path]:
+        """
+        Extract the bucket name and path from the checkpoint_path.
+        Returns a tuple of (bucket_name, path_in_bucket).
+        """
+
+        bucket_name, *prefix_parts = self.checkpoint_path.path.parts
+
+        return bucket_name, Path(*prefix_parts)
+
+    @property
+    def ckpt_config_path(self) -> CloudPath:
+        return self.checkpoint_path / "config.toml"
+
+    @model_validator(mode="after")
+    def validate_checkpoint_path(self) -> Self:
+        """
+        Validate the checkpoint_path format.
+        Ensures it starts with 'gs://' and contains a valid bucket name.
+        """
+        assert self.checkpoint_path.cloud == CloudPath.Cloud.GS, (
+            f"Only GCS checkpoints are supported. {self.checkpoint_path.cloud=}"
+        )
+        return self
+
+    def should_checkpoint(self, step: int) -> bool:
+        """
+        Determine if a checkpoint should be saved at the given step.
+        """
+        if step == 0:
+            logging.debug(f"Checkpointing at first step. {self.checkpoint_first_step=}")
+            return self.checkpoint_first_step
+        if self.checkpoint_frequency == 0:
+            return False
+        return step % self.checkpoint_frequency == 0
+
+    @classmethod
+    def mock_data(cls) -> GCSCheckpointConfig:
+        """
+        Create a mock instance of GCSCheckpointConfig for testing purposes.
+        """
+        return cls(
+            checkpoint_path=CloudPath.from_str("gs://induction-labs/checkpoints"),
+            checkpoint_frequency=0,
+            checkpoint_last_step=False,
+            checkpoint_first_step=False,
+        )
+
+
 class ExperimentMetadata(BaseModel):
     wandb: Optional[WandbConfig]
     output_dir: str
+    checkpoint: Optional[GCSCheckpointConfig]
 
     @classmethod
     def mock_data(cls) -> ExperimentMetadata:
@@ -39,6 +122,7 @@ class ExperimentMetadata(BaseModel):
         return cls(
             wandb=WandbConfig.mock_data(),
             output_dir="/tmp/experiment_output",
+            checkpoint=GCSCheckpointConfig.mock_data(),
         )
 
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
@@ -50,6 +134,11 @@ class ExperimentMetadata(BaseModel):
         This is called when the config is loaded from toml.
         """
         self.loaded_at = datetime.now(UTC)
+        if self.checkpoint is not None:
+            assert self.checkpoint.loaded_at is None, (
+                "Checkpoint loaded_at should be None when resetting the loaded_at timestamp."
+            )
+            self.checkpoint.loaded_at = self.loaded_at
 
     commit: str = Field(default_factory=get_git_commit_sha)
     commit_short: str = Field(default_factory=get_git_commit_sha_short)
@@ -310,6 +399,11 @@ class ExperimentConfig(BaseModel, Generic[_LITDataModule]):
         self.module.validate_datapack_compatibility(self.datapack)
         self.datapack.validate_module_compatibility(self.module)
         return self
+
+    def serialize_to_toml(self) -> str:
+        import tomli_w
+
+        return tomli_w.dumps(self.model_dump(serialize_as_any=True))
 
 
 class SerializedExperimentConfig(ExperimentConfig[L.LightningDataModule]):

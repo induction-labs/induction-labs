@@ -5,6 +5,7 @@ from pathlib import Path
 import typer
 from synapse.utils.logging import configure_logging
 
+
 logger = configure_logging(
     __name__,
 )
@@ -86,11 +87,13 @@ def export(
     run_command = f"mdl run {export_path}"
 
     serialize_experiment_config(exp_config, export_path, eof_comments=run_command)
-    logger.info("##################################")
-    logger.info(f"Experiment configuration exported to: {export_path}")
-    logger.info("Run the following command to execute the experiment:")
-    logger.info(run_command)
-    logger.info("##################################")
+    logger.info(
+        "##################################\n"
+        f"Experiment configuration exported to: {export_path}\n"
+        "Run the following command to execute the experiment:\n"
+        f"{run_command}\n"
+        "##################################"
+    )
 
     if submit:
         logger.info("Running the experiment...")
