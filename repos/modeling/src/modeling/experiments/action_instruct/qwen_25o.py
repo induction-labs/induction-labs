@@ -16,12 +16,12 @@ from modeling.utils.cloud_path import CloudPath
 Qwen25OActionExperimentConfig_CPU = ExperimentConfig(
     metadata=ExperimentMetadata(
         wandb=WandbConfig(
-            project="mouse_following", name="qwen25o_mouse_follow_vision_unfrozen"
+            project="mouse_following", name="qwen25o_mouse_follow_vision_unfrozen_noise"
         ),
         output_dir="output",
         checkpoint=GCSCheckpointConfig(
             checkpoint_path=CloudPath.from_str(
-                "gs://induction-labs/checkpoints/qwen25o_mouse_follow/test",
+                "gs://induction-labs/checkpoints/qwen25o_mouse_follow/test_noise",
             ),
             checkpoint_frequency=1000,  # Save every 1000 steps
             checkpoint_first_step=True,  # Save the first step
@@ -31,7 +31,8 @@ Qwen25OActionExperimentConfig_CPU = ExperimentConfig(
     module=Qwen25OActionLITConfig(),
     datapack=RangeActionDatapackConfig(
         # prefix="gs://induction-labs/jonathan/synth/garbage_cursor_follow_v1/sample_",
-        prefix="gs://induction-labs/jonathan/synth/cursor_follow_v2/sample_",
+        # prefix="gs://induction-labs/jonathan/synth/cursor_follow_v2/sample_",
+        prefix="gs://induction-labs/jonathan/synth/noise_cursor_follow_v1/sample_",
         end_index=5000,  # 5k samples
     ),
     run=RunConfig(

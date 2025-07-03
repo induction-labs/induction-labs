@@ -1,4 +1,3 @@
-import logging
 from pathlib import Path
 import lightning.pytorch as pl
 from lightning.pytorch.callbacks import Callback
@@ -17,7 +16,7 @@ import shutil
 from transformers.modeling_utils import PreTrainedModel
 from synapse.utils.logging import configure_logging
 
-logger = configure_logging(__name__, logging.DEBUG)
+logger = configure_logging(__name__)
 
 
 def save_checkpoint_to_gcs(
