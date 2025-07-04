@@ -3,6 +3,8 @@ from __future__ import annotations
 import lightning as L
 from lightning.pytorch.loggers import WandbLogger
 from wandb.sdk.wandb_run import Run
+from contextlib import contextmanager
+from typing import Iterator
 
 from modeling.config import ExperimentConfig
 from lightning.fabric.loggers.logger import _DummyExperiment
@@ -10,6 +12,7 @@ from lightning.pytorch.strategies import ModelParallelStrategy
 from lightning.pytorch.loggers import Logger
 from modeling.checkpoints.save import GCSCheckpointCallback
 from synapse.utils.logging import configure_logging
+from modeling.utils.tmpdir import TmpDirContext
 
 logger = configure_logging(
     __name__,
@@ -54,12 +57,15 @@ class Initializer:
         return loggers
 
     @staticmethod
+    @contextmanager
     def init_experiment(
         exp_config: ExperimentConfig,
-    ) -> tuple[L.Trainer, L.LightningDataModule, L.LightningModule]:
+    ) -> Iterator[tuple[L.Trainer, L.LightningDataModule, L.LightningModule]]:
         """
         Initialize the experiment configuration from a given path.
         """
+        tmpdir_context = TmpDirContext().__enter__()
+
         loggers = Initializer.init_wandb(exp_config)
         # https://lightning.ai/docs/pytorch/stable/api/lightning.pytorch.loggers.wandb.html#module-lightning.pytorch.loggers.wandb
 
@@ -97,8 +103,18 @@ class Initializer:
             log_every_n_steps=1,
         )
         logger.debug("Trainer initialized with config:")
-        datapack = exp_config.datapack.create_datapack(exp_config)
-        lit_module = exp_config.module.create_module(exp_config.run)
-        logger.debug("Data pack and module initialized.")
 
-        return trainer, datapack, lit_module
+        # Create temporary directory for module initialization
+
+        try:
+            datapack = exp_config.datapack.create_datapack(exp_config)
+            lit_module = exp_config.module.create_module(exp_config.run)
+            logger.debug("Data pack and module initialized.")
+
+            yield trainer, datapack, lit_module
+        finally:
+            # Clean up temporary directory
+            tmpdir_context.__exit__(None, None, None)
+
+
+#

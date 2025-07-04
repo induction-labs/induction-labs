@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Any
+from pathlib import Path
+from typing import Any, cast
 
 from modeling.config import DatapackConfig, RunConfig
 from modeling.data.text_train import TextPretrainDatapackConfig
@@ -18,8 +19,7 @@ from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.fsdp import MixedPrecisionPolicy, fully_shard
 
 from synapse.utils.logging import configure_logging
-from huggingface_hub import snapshot_download
-from accelerate import init_empty_weights, load_checkpoint_and_dispatch
+from accelerate import init_empty_weights
 
 logger = configure_logging(
     __name__,
@@ -28,16 +28,12 @@ logger = configure_logging(
 
 
 class TextPretrainLIT(TextLIT[MODEL_TYPE, dict, "TextPretrainLITConfig"]):
-    def __init__(self, module_config, run_config):
-        super().__init__(module_config, run_config)
-
+    def init_model_meta(self, *args) -> MODEL_TYPE:
         model_config = AutoConfig.from_pretrained(
             self.module_config.model_name, trust_remote_code=True
         )
-        self.ckpt_dir = snapshot_download(  # downloads all shards & index
-            repo_id=module_config.model_name,
-        )
-        logger.debug(f"Initializing model {module_config.model_name} with config")
+
+        logger.debug(f"Initializing model {self.module_config.model_name} with config")
 
         with init_empty_weights():  # ① on meta
             model = AutoModelForCausalLM.from_config(
@@ -45,13 +41,13 @@ class TextPretrainLIT(TextLIT[MODEL_TYPE, dict, "TextPretrainLITConfig"]):
             )
 
         logger.debug(
-            f"Initialized model {module_config.model_name} with dtype {self.dtype}"
+            f"Initialized model {self.module_config.model_name} with dtype {self.dtype}"
         )
         assert isinstance(model, PreTrainedModel)
         assert model.device.type == "meta", (
             f"Expected model to be on meta device, got {model.device.type}"
         )
-        self.model = model
+        return cast(MODEL_TYPE, model)
 
     def shard_model(
         self,
@@ -76,22 +72,6 @@ class TextPretrainLIT(TextLIT[MODEL_TYPE, dict, "TextPretrainLITConfig"]):
             f"Expected outputs.loss to be a Tensor, got {type(outputs.loss)}"
         )
         return outputs.loss
-
-    def load_weights(self) -> MODEL_TYPE:
-        """
-        Load the model weights from the specified checkpoint directory.
-        This method should handle the loading of pre-trained weights or checkpoint files.
-        """
-        logger.debug(f"Loading model weights from {self.ckpt_dir}")
-        # Load the model weights and dispatch them to the appropriate devices
-        self.model.to_empty(device=torch.cuda.current_device())
-        self.model = load_checkpoint_and_dispatch(
-            self.model,
-            checkpoint=self.ckpt_dir,  # hub ID or local folder
-            device_map={"": torch.cuda.current_device()},
-            dtype=self.model.dtype,
-        )
-        return self.model
 
     # def configure_model(self) -> None:
     #     # TODO(jl): make this work with cpu device (e.g. just skip it)
@@ -145,5 +125,5 @@ class TextPretrainLITConfig(TextLITConfig):
         )
         return datapack_config
 
-    def create_module(self, run_config: RunConfig) -> TextPretrainLIT:
-        return TextPretrainLIT(self, run_config)
+    def create_module(self, run_config: RunConfig, tmp_dir: Path) -> TextPretrainLIT:
+        return TextPretrainLIT(self, run_config, tmp_dir)

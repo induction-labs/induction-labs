@@ -1,4 +1,5 @@
 from __future__ import annotations
+from pathlib import Path
 
 
 from modeling.config import RunConfig
@@ -15,9 +16,6 @@ from modeling.modules.text_pretrain.default import (
 
 
 class Qwen3LIT(TextPretrainLIT[Qwen3ForCausalLM]):
-    def __init__(self, config: Qwen3LITConfig, run_config: RunConfig):
-        super().__init__(config, run_config)
-
     def shard_model(
         self,
         *,
@@ -54,5 +52,5 @@ class Qwen3LITConfig(TextPretrainLITConfig):
     model_name: str = "Qwen/Qwen3-0.6B"
     tokenizer_name: str = "Qwen/Qwen3-0.6B"
 
-    def create_module(self, run_config: RunConfig) -> Qwen3LIT:
-        return Qwen3LIT(self, run_config)
+    def create_module(self, run_config: RunConfig, tmp_dir: Path) -> Qwen3LIT:
+        return Qwen3LIT(self, run_config, tmp_dir)

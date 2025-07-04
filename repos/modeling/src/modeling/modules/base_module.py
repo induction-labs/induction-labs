@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from pathlib import Path
 
+from accelerate import load_checkpoint_and_dispatch
 import lightning as L
+from modeling.utils.cloud_path import CloudPath
 import torch
 from modeling.config import ModuleConfig, RunConfig
 from modeling.utils.elapsed_timer import elapsed_timer
@@ -12,17 +15,35 @@ from transformers.configuration_utils import PretrainedConfig
 
 from torch.distributed.fsdp import FSDPModule, MixedPrecisionPolicy, fully_shard
 from transformers.modeling_utils import PreTrainedModel
-from typing import Generic, TypeVar, final
+from typing import Generic, TypeVar, cast, final
 from synapse.utils.logging import configure_logging
+import os
+from modeling.checkpoints.load import download_model_checkpoint
 
 logger = configure_logging(
     __file__,
     #    level=logging.DEBUG
 )
 
+
+class BaseModuleConfig(ModuleConfig):
+    """
+    Base configuration class for modules.
+    This class should be extended by specific module configurations.
+    """
+
+    model_name: str
+    checkpoint_path: CloudPath | None = None
+
+    @abstractmethod
+    def create_module(
+        self, run_config: RunConfig, tmp_dir: Path
+    ) -> "BaseLITModule": ...
+
+
 MODEL_TYPE = TypeVar("MODEL_TYPE", bound=PreTrainedModel, covariant=True)
 DATA_TYPE = TypeVar("DATA_TYPE")
-CONFIG_TYPE = TypeVar("CONFIG_TYPE", bound=ModuleConfig, covariant=True)
+CONFIG_TYPE = TypeVar("CONFIG_TYPE", bound=BaseModuleConfig, covariant=True)
 
 
 class BaseLITModule(
@@ -34,18 +55,24 @@ class BaseLITModule(
     def model_config(self) -> PretrainedConfig:
         return self.model.config
 
-    def __init__(self, module_config: CONFIG_TYPE, run_config: RunConfig):
+    @final
+    def __init__(
+        self, module_config: CONFIG_TYPE, run_config: RunConfig, tmp_dir: Path
+    ):
         super().__init__()
         self.module_config = module_config
         self.run_config = run_config
         self.attn_impl = run_config.attn_impl
         self._dtype = run_config.precision.torch_dtype
+        self.tmp_dir = tmp_dir
+        os.makedirs(self.tmp_dir, exist_ok=True)
 
         check_attn_impl(self.attn_impl)
-        print(f"Using attention implementation: {self.attn_impl}, {self.dtype=}")
-
+        logger.debug(f"Using attention implementation: {self.attn_impl}, {self.dtype=}")
         if self.run_config.accelerator == "cuda":
             torch.cuda.reset_peak_memory_stats()
+        self.model = self.init_model_meta()
+        self.download_weights(self.tmp_dir)
 
     @abstractmethod
     def shard_model(
@@ -70,7 +97,7 @@ class BaseLITModule(
 
         if isinstance(self.model, FSDPModule):
             return  # already configured
-        self.model = self.load_weights()
+        self.model = self.load_weights(self.tmp_dir)
 
         assert isinstance(self.device_mesh, DeviceMesh), (
             f"Expected device_mesh to be a DeviceMesh, got {type(self.device_mesh)}"
@@ -84,12 +111,39 @@ class BaseLITModule(
             f"Expected self.model to be a FullyShardedDataParallel, got {type(self.model)}"
         )
 
-    def load_weights(self) -> MODEL_TYPE:
+    @abstractmethod
+    def init_model_meta(self) -> MODEL_TYPE:
         """
-        Abstract method to be implemented by subclasses for loading model weights.
+        Abstract method to be implemented by subclasses for initializing the model in meta mode.
+        This method should return a model instance on meta device
+        """
+        raise NotImplementedError("Subclasses must implement this method.")
+
+    def download_weights(self, tmpdir: Path) -> None:
+        """
+        Abstract method to be implemented by subclasses for downloading model weights.
+        """
+        download_model_checkpoint(
+            tmpdir,
+            self.module_config.model_name,
+            self.module_config.checkpoint_path,
+        )
+
+    def load_weights(self, tmpdir: Path) -> MODEL_TYPE:
+        """
+        Load the model weights from the specified checkpoint directory.
         This method should handle the loading of pre-trained weights or checkpoint files.
         """
-        return self.model
+        logger.debug(f"Loading model weights from {tmpdir}")
+        # Load the model weights and dispatch them to the appropriate devices
+        self.model.to_empty(device=torch.cuda.current_device())
+        loaded_model = load_checkpoint_and_dispatch(
+            self.model,
+            checkpoint=tmpdir,  # hub ID or local folder
+            device_map={"": torch.cuda.current_device()},
+            dtype=self.model.dtype,
+        )
+        return cast(MODEL_TYPE, loaded_model)
 
     @abstractmethod
     def run_training_step(self, inputs: DATA_TYPE) -> torch.Tensor:

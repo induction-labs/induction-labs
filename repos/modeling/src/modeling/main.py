@@ -84,13 +84,17 @@ def run(
         logger.info(experiment_config.model_dump_json(serialize_as_any=True, indent=2))
 
         # Initialize the experiment configuration
-        trainer, datapack, lit_module = Initializer.init_experiment(experiment_config)
-        logger.debug("Experiment initialized successfully.")
-
-        trainer.fit(
+        with Initializer.init_experiment(experiment_config) as (
+            trainer,
+            datapack,
             lit_module,
-            datamodule=datapack,
-        )
+        ):
+            logger.debug("Experiment initialized successfully.")
+
+            trainer.fit(
+                lit_module,
+                datamodule=datapack,
+            )
     except Exception as e:
         if get_rank() == 0:
             raise e

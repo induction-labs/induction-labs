@@ -181,7 +181,7 @@ class ModuleConfig(ABC, BaseModel):
         raise NotImplementedError("Subclasses must implement this method.")
 
     @abstractmethod
-    def create_module(self, run_config: RunConfig) -> L.LightningModule:
+    def create_module(self, run_config: RunConfig, tmp_dir: Path) -> L.LightningModule:
         """
         Create a Lightning module instance.
         This method should be implemented by subclasses to return an instance of the Lightning module.
@@ -214,7 +214,7 @@ class SerializedModuleConfig(ModuleConfig):
         )
         return datapack_config
 
-    def create_module(self, run_config: RunConfig) -> L.LightningModule:
+    def create_module(self, run_config: RunConfig, tmp_dir: Path) -> L.LightningModule:
         """
         Create a Lightning module instance by loading it from the specified path.
         """

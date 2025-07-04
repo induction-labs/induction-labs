@@ -522,7 +522,8 @@ class ActionDatapackConfig(DatapackConfig[ActionDataModule]):
         return module_config
 
     def create_datapack(
-        self, full_config: ExperimentConfig[ActionDataModule]
+        self,
+        full_config: ExperimentConfig[ActionDataModule],
     ) -> ActionDataModule:
         self.validate_module_compatibility(full_config.module)
         extra_args = ActionDataModuleExtraArgs(

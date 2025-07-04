@@ -138,7 +138,8 @@ class TextPretrainDatapackConfig(DatapackConfig[TextPretrainDataModule]):
         return module_config
 
     def create_datapack(
-        self, full_config: ExperimentConfig[TextPretrainDataModule]
+        self,
+        full_config: ExperimentConfig[TextPretrainDataModule],
     ) -> TextPretrainDataModule:
         module_config = self.validate_module_compatibility(full_config.module)
         extra_args = TextPretrainDataModuleExtraArgs(

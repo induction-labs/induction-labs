@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from modeling.config import DatapackConfig, RunConfig, ModuleConfig
+from modeling.checkpoints.save import Path
+from modeling.config import DatapackConfig, RunConfig
 from modeling.data.video_action import ActionDataSample, ActionDatapackConfig
-from modeling.modules.base_module import BaseLITModule
+from modeling.modules.base_module import BaseLITModule, BaseModuleConfig
 from .qwen_25o_actions import (
     Qwen2_5OmniThinkerForActionModelling,
     Qwen2_5OmniThinkerActionConfig,
@@ -26,13 +27,10 @@ class Qwen25OActionLIT(
     Inherits from TextPretrainLIT and uses the Qwen-2.5O model.
     """
 
-    def __init__(
+    def init_model_meta(
         self,
-        module_config: Qwen25OActionLITConfig,
-        run_config: RunConfig,
     ):
-        super().__init__(module_config=module_config, run_config=run_config)
-
+        module_config = self.module_config
         config = Qwen2_5OmniThinkerActionConfig.from_pretrained(
             module_config.model_name,
             freeze_network=module_config.freeze_network,
@@ -51,7 +49,7 @@ class Qwen25OActionLIT(
             f"Expected model to be of type Qwen2_5OmniThinkerForActionModelling, "
             f"got {type(model)}"
         )
-        self.model = model
+        return model
 
     def run_training_step(self, inputs: ActionDataSample):
         # Forward pass through the model
@@ -78,6 +76,7 @@ class Qwen25OActionLIT(
 
         dp_mesh = device_mesh["data_parallel"]  # provided by ModelParallelStrategy
         fsdp_config = {"mesh": dp_mesh, "mp_policy": mp_policy}
+        fully_shard(self.model.visual, **fsdp_config)
 
         for layer_id, transformer_block in enumerate(self.model.model.layers):
             # Apply activation checkpointing
@@ -98,7 +97,7 @@ class Qwen25OActionLIT(
         return fully_shard(self.model, **fsdp_config)
 
 
-class Qwen25OActionLITConfig(ModuleConfig):
+class Qwen25OActionLITConfig(BaseModuleConfig):
     """
     Configuration class for Qwen-2.5O Lightning Module.
     Inherits from TextPretrainLITConfig and sets the model name.
@@ -123,5 +122,5 @@ class Qwen25OActionLITConfig(ModuleConfig):
         )
         return datapack_config
 
-    def create_module(self, run_config: RunConfig) -> Qwen25OActionLIT:
-        return Qwen25OActionLIT(self, run_config)
+    def create_module(self, run_config: RunConfig, tmp_dir: Path) -> Qwen25OActionLIT:
+        return Qwen25OActionLIT(self, run_config, tmp_dir)

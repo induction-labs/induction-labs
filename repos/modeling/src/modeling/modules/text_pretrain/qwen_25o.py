@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from modeling.config import DatapackConfig, RunConfig
@@ -57,5 +58,5 @@ class Qwen25OLITConfig(TextLITConfig):
         )
         return datapack_config
 
-    def create_module(self, run_config: RunConfig) -> Qwen25OLIT:
-        return Qwen25OLIT(self, run_config)
+    def create_module(self, run_config: RunConfig, tmp_dir: Path) -> Qwen25OLIT:
+        return Qwen25OLIT(self, run_config, tmp_dir)
