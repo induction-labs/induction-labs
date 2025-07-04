@@ -21,7 +21,7 @@ Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
         output_dir="output",
         checkpoint=GCSCheckpointConfig(
             checkpoint_path=CloudPath.from_str(
-                "gs://induction-labs/checkpoints/qwen25o_mouse_follow/test_noise",
+                "gs://induction-labs/checkpoints/qwen25o_mouse_follow/test_noise_2",
             ),
             checkpoint_frequency=1000,  # Save every 1000 steps
             checkpoint_first_step=True,  # Save the first step
@@ -38,10 +38,10 @@ Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
     run=RunConfig(
         lr=1e-5,
         sequence_length=2048,
-        batch_size=2,
+        batch_size=1,
         steps_per_epoch=5000,
         distributed=DistributedConfig(
-            devices_per_node=2,
+            devices_per_node=1,
         ),
         # "attn_impl": AttentionImplementation.FLASH_ATTENTION_2,
         accelerator=Accelerator.CUDA,

@@ -5,7 +5,10 @@ from typing import Any
 from modeling.config import DatapackConfig, RunConfig, ModuleConfig
 from modeling.data.video_action import ActionDataSample, ActionDatapackConfig
 from modeling.modules.base_module import BaseLITModule
-from .qwen_25o_actions import Qwen2_5OmniThinkerForActionModelling
+from .qwen_25o_actions import (
+    Qwen2_5OmniThinkerForActionModelling,
+    Qwen2_5OmniThinkerActionConfig,
+)
 from torch.distributed.fsdp import MixedPrecisionPolicy
 
 from torch.distributed.fsdp import fully_shard
@@ -30,8 +33,17 @@ class Qwen25OActionLIT(
     ):
         super().__init__(module_config=module_config, run_config=run_config)
 
+        config = Qwen2_5OmniThinkerActionConfig.from_pretrained(
+            module_config.model_name,
+            freeze_network=module_config.freeze_network,
+            freeze_vision=module_config.freeze_vision,
+            freeze_action_head=module_config.freeze_action_head,
+            freeze_action_embedding=module_config.freeze_action_embedding,
+        )
+
         model = MODEL_TYPE.from_pretrained(
             module_config.model_name,
+            config=config,
             torch_dtype=self.dtype,
             attn_implementation=self.attn_impl,
         ).train()
@@ -97,6 +109,11 @@ class Qwen25OActionLITConfig(ModuleConfig):
     )
     model_name: str = "Qwen/Qwen2.5-Omni-3B"
     tokenizer_name: str = "Qwen/Qwen2.5-Omni-3B"
+
+    freeze_network: bool = True
+    freeze_vision: bool = True
+    freeze_action_head: bool = False
+    freeze_action_embedding: bool = False
 
     def validate_datapack_compatibility(
         self, datapack_config: DatapackConfig[Any]

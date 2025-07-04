@@ -15,14 +15,31 @@ from transformers.models.qwen2_5_omni.configuration_qwen2_5_omni import (
 )
 
 
+class Qwen2_5OmniThinkerActionConfig(Qwen2_5OmniThinkerConfig):
+    def __init__(
+        self,
+        freeze_network=True,
+        freeze_vision=True,
+        freeze_action_head=False,
+        freeze_action_embedding=False,
+        **kwargs,
+    ):
+        self.freeze_network = freeze_network
+        self.freeze_vision = freeze_vision
+        self.freeze_action_head = freeze_action_head
+        self.freeze_action_embedding = freeze_action_embedding
+
+        super().__init__(**kwargs)
+
+
 class Qwen2_5OmniThinkerForActionModelling(
     Qwen2_5OmniPreTrainedModelForConditionalGeneration, GenerationMixin
 ):
-    config_class = Qwen2_5OmniThinkerConfig
+    config_class = Qwen2_5OmniThinkerActionConfig
     base_model_prefix = "thinker"
     _no_split_modules = ["Qwen2_5OmniAudioEncoder", "Qwen2_5OmniVisionEncoder"]
 
-    def __init__(self, config: Qwen2_5OmniThinkerConfig):
+    def __init__(self, config: Qwen2_5OmniThinkerActionConfig):
         super().__init__(config)
         self.audio_tower = Qwen2_5OmniAudioEncoder._from_config(
             config.audio_config, attn_implementation=config._attn_implementation
@@ -51,17 +68,19 @@ class Qwen2_5OmniThinkerForActionModelling(
         self.spatial_merge_size = config.vision_config.spatial_merge_size
         self.rope_deltas = None
         self.l2_loss = nn.MSELoss(reduction="none")
+
         for param in self.parameters():
-            param.requires_grad = False
+            param.requires_grad = not self.config.freeze_network
 
         for param in self.lm_head.parameters():
-            param.requires_grad = True
+            param.requires_grad = not self.config.freeze_action_head
 
         for param in self.action_token_embedding.parameters():
-            param.requires_grad = True
+            param.requires_grad = not self.config.freeze_action_embedding
 
         for param in self.visual.parameters():
-            param.requires_grad = True
+            param.requires_grad = not self.config.freeze_vision
+
         # TODO: When training print number of trainable parameters
         self.post_init()
 
