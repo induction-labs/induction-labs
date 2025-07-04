@@ -84,7 +84,6 @@ class BaseLITModule(
             f"Expected self.model to be a FullyShardedDataParallel, got {type(self.model)}"
         )
 
-    @abstractmethod
     def load_weights(self) -> MODEL_TYPE:
         """
         Abstract method to be implemented by subclasses for loading model weights.
