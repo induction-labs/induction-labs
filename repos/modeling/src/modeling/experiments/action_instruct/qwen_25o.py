@@ -20,7 +20,7 @@ Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
         ),
         output_dir="output",
         checkpoint=GCSCheckpointConfig(
-            checkpoint_path=CloudPath.from_str(
+            checkpoint_prefix=CloudPath.from_str(
                 "gs://induction-labs/checkpoints/qwen25o_mouse_follow/test_noise_2",
             ),
             checkpoint_frequency=1000,  # Save every 1000 steps

@@ -9,7 +9,7 @@ class WandbConfig(BaseModel):
 
     @classmethod
     def mock_data(cls) -> WandbConfig:
-        """i
+        """
         Create a mock instance of WandbConfig for testing purposes.
         """
         return cls(project="test-project", name="test-experiment")

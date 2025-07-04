@@ -54,10 +54,18 @@ class GCSCheckpointConfig(BaseModel):
         default=None,
         description="Timestamp when the checkpoint was loaded. Used to determine if the checkpoint is fresh.",
     )
-    checkpoint_path: CloudPath = Field(
+    checkpoint_prefix: CloudPath = Field(
         ...,
         description="Path to the GCS bucket where checkpoints will be stored. Should be gs://induction-labs/...",
     )
+
+    @computed_field
+    @property
+    def checkpoint_path(self) -> CloudPath:
+        if self.loaded_at is None:
+            # If loaded_at is not set, return the prefix only
+            return self.checkpoint_prefix / "{date}"
+        return self.checkpoint_prefix / f"{self.loaded_at:%Y-%m-%dT%H-%M-%S}"
 
     @property
     def bucket_and_path(self) -> tuple[str, Path]:
@@ -101,7 +109,7 @@ class GCSCheckpointConfig(BaseModel):
         Create a mock instance of GCSCheckpointConfig for testing purposes.
         """
         return cls(
-            checkpoint_path=CloudPath.from_str("gs://induction-labs/checkpoints"),
+            checkpoint_prefix=CloudPath.from_str("gs://induction-labs/checkpoints"),
             checkpoint_frequency=0,
             checkpoint_last_step=False,
             checkpoint_first_step=False,
@@ -132,6 +140,7 @@ class ExperimentMetadata(BaseModel):
         Reset the loaded_at timestamp to the current time.
         This is called when the config is loaded from toml.
         """
+        logger.debug("Resetting loaded_at timestamp to current time.")
         self.loaded_at = datetime.now(UTC)
         if self.checkpoint is not None:
             assert self.checkpoint.loaded_at is None, (
