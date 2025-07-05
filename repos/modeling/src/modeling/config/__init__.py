@@ -313,6 +313,9 @@ class RunConfig(BaseModel):
     sequence_length: int  # Default sequence length
     batch_size: int  # Default batch size
 
+    validation_every_n_steps: int = -1
+    validation_steps: int = 1
+
     lr: float
 
     attn_impl: AttentionImplementation = AttentionImplementation.SDPA

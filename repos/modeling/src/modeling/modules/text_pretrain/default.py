@@ -73,6 +73,23 @@ class TextPretrainLIT(TextLIT[MODEL_TYPE, dict, "TextPretrainLITConfig"]):
         )
         return outputs.loss
 
+    def run_validation_step(
+        self, inputs: dict
+    ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
+        """
+        Run a training step with the provided inputs.
+        The inputs should be a dictionary containing the necessary data for the model.
+        """
+        # Forward pass through the model
+        outputs = self.model(
+            **inputs,  # inputs should contain the necessary model inputs
+        )
+
+        assert isinstance(outputs.loss, torch.Tensor), (
+            f"Expected outputs.loss to be a Tensor, got {type(outputs.loss)}"
+        )
+        return outputs.loss, {}
+
     # def configure_model(self) -> None:
     #     # TODO(jl): make this work with cpu device (e.g. just skip it)
     #     if self.model.device.type != "meta":

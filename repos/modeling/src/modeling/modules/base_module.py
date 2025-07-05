@@ -146,6 +146,18 @@ class BaseLITModule(
         return cast(MODEL_TYPE, loaded_model)
 
     @abstractmethod
+    def run_validation_step(
+        self, inputs: DATA_TYPE
+    ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
+        """
+        Abstract method to be implemented by subclasses for the evaluation step.
+        This method should handle the forward pass and return the loss and metrics.
+        Note: You CANT call self.model.forward here because it fucking doesn't
+          trigger the FSDP hooks so weights dont gather
+        """
+        raise NotImplementedError("Subclasses must implement this method.")
+
+    @abstractmethod
     def run_training_step(self, inputs: DATA_TYPE) -> torch.Tensor:
         """
         Abstract method to be implemented by subclasses for the training step.
@@ -167,7 +179,6 @@ class BaseLITModule(
     @final
     def training_step(self, inputs: DATA_TYPE):
         # Forward pass through the model
-
         with elapsed_timer() as timer:
             loss = self.run_training_step(inputs)
             loss = self.check_loss(loss)
@@ -201,6 +212,39 @@ class BaseLITModule(
             logger=True,
         )
         return loss
+
+    @final
+    def validation_step(self, inputs: DATA_TYPE):
+        # Forward pass through the model
+        with elapsed_timer() as timer:
+            loss, val_metrics = self.run_validation_step(inputs)
+            loss = self.check_loss(loss)
+            elapsed = timer()
+
+        metrics = {
+            "val/step_time": elapsed,
+            "val/loss": loss,
+            **val_metrics,
+        }
+
+        return metrics
+
+    def validation_epoch_end(self, validation_step_outputs):
+        metrics = {}
+        for output in validation_step_outputs:
+            for key, value in output.items():
+                if key not in metrics:
+                    metrics[key] = []
+                metrics[key].append(value)
+        # Average the metrics across all validation steps
+        for key, value in metrics.items():
+            metrics[key] = torch.tensor(value).mean()
+
+        self.log_dict(
+            metrics,
+            logger=True,
+            sync_dist=True,
+        )
 
     def configure_optimizers(self):
         optimizer = torch.optim.AdamW(

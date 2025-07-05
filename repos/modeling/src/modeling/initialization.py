@@ -78,6 +78,10 @@ class Initializer:
 
         trainer = L.Trainer(
             max_epochs=exp_config.run.num_epochs,
+            val_check_interval=exp_config.run.validation_every_n_steps
+            if exp_config.run.validation_every_n_steps > 0
+            else None,
+            limit_val_batches=1,
             # Distributed training configuration
             limit_train_batches=exp_config.run.num_epochs
             * exp_config.run.steps_per_epoch,
@@ -108,7 +112,10 @@ class Initializer:
 
         try:
             datapack = exp_config.datapack.create_datapack(exp_config)
-            lit_module = exp_config.module.create_module(exp_config.run)
+            assert tmpdir_context.tmpdir is not None
+            lit_module = exp_config.module.create_module(
+                exp_config.run, tmpdir_context.tmpdir
+            )
             logger.debug("Data pack and module initialized.")
 
             yield trainer, datapack, lit_module
