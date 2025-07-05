@@ -4,7 +4,6 @@ from torch import nn
 from typing import Optional, Union
 from transformers.generation.utils import GenerationMixin
 from transformers.models.qwen2_5_omni.modeling_qwen2_5_omni import (
-    Qwen2_5OmniAudioEncoder,
     Qwen2_5OmniThinkerTextModel,
     Qwen2_5OmniVisionEncoder,
     Qwen2_5OmniPreTrainedModelForConditionalGeneration,
@@ -41,9 +40,9 @@ class Qwen2_5OmniThinkerForActionModelling(
 
     def __init__(self, config: Qwen2_5OmniThinkerActionConfig):
         super().__init__(config)
-        self.audio_tower = Qwen2_5OmniAudioEncoder._from_config(
-            config.audio_config, attn_implementation=config._attn_implementation
-        )
+        # self.audio_tower = Qwen2_5OmniAudioEncoder._from_config(
+        #     config.audio_config, attn_implementation=config._attn_implementation
+        # )
 
         self.visual = Qwen2_5OmniVisionEncoder._from_config(
             config.vision_config, attn_implementation=config._attn_implementation
@@ -57,9 +56,13 @@ class Qwen2_5OmniThinkerForActionModelling(
 
         hidden_size = config.text_config.hidden_size
         self.lm_head = nn.Sequential(
-            nn.Linear(hidden_size, hidden_size),  # layer 1
+            nn.Linear(hidden_size, hidden_size * 2),  # layer 1
             nn.GELU(),  # non-linearity (ReLU also fine)
-            nn.Linear(hidden_size, 6),  # layer 2
+            nn.Linear(hidden_size * 2, hidden_size * 2),  # layer 2
+            nn.GELU(),  # non-linearity (ReLU also fine)
+            nn.Linear(hidden_size * 2, hidden_size * 2),  # layer 3
+            nn.GELU(),  # non-linearity (ReLU also fine)
+            nn.Linear(hidden_size * 2, 6),  # layer 4
         )
 
         self.pad_token_id = (
@@ -72,11 +75,17 @@ class Qwen2_5OmniThinkerForActionModelling(
         for param in self.parameters():
             param.requires_grad = not self.config.freeze_network
 
+        num = 0
         for param in self.lm_head.parameters():
             param.requires_grad = not self.config.freeze_action_head
+            num += param.numel()
 
+        print("lm_head", num, hidden_size)
+
+        num = 0
         for param in self.action_token_embedding.parameters():
             param.requires_grad = not self.config.freeze_action_embedding
+        print("action_token_embedding", num)
 
         for param in self.visual.parameters():
             param.requires_grad = not self.config.freeze_vision

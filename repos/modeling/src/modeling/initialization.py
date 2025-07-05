@@ -74,6 +74,17 @@ class Initializer:
             tensor_parallel_size=1,  # (= no TP)  just pure FSDP2
             # save_distributed_checkpoint=True,  # write one shard per rank
         )
+
+        # my_auto_wrap_policy = partial(
+        #     size_based_auto_wrap_policy, min_num_params=100_000_000
+        # )
+
+        # strategy = FSDPStrategy(
+        #     sharding_strategy=ShardingStrategy.FULL_SHARD, # or GRAD_SHARD or NO_SHARD
+        # 	auto_wrap_policy=my_auto_wrap_policy,
+        #     sync_module_states=True
+        # )
+
         logger.debug("Initializing trainer:")
 
         trainer = L.Trainer(

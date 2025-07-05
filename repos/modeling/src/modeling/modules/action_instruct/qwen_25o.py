@@ -71,6 +71,8 @@ class Qwen25OActionLIT(
         mp_policy: MixedPrecisionPolicy,
         device_mesh: DeviceMesh,
     ):
+        # return self.model
+
         # if self.model.device.type != "meta":
         #     return  # already configured
 
@@ -78,22 +80,22 @@ class Qwen25OActionLIT(
         fsdp_config = {"mesh": dp_mesh, "mp_policy": mp_policy}
         fully_shard(self.model.visual, **fsdp_config)
 
-        for layer_id, transformer_block in enumerate(self.model.model.layers):
-            # Apply activation checkpointing
+        # for layer_id, transformer_block in enumerate(self.model.model.layers):
+        #     # Apply activation checkpointing
 
-            # For now this is broken with HF models https://github.com/huggingface/transformers/issues/34928
-            #             from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
-            #     checkpoint_wrapper,
-            # )
-            # transformer_block = checkpoint_wrapper(transformer_block)
+        #     # For now this is broken with HF models https://github.com/huggingface/transformers/issues/34928
+        #     #             from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
+        #     #     checkpoint_wrapper,
+        #     # )
+        #     # transformer_block = checkpoint_wrapper(transformer_block)
 
-            reshard_after_forward = int(layer_id) < len(self.model.model.layers) - 1
-            fully_shard(
-                transformer_block,
-                **fsdp_config,
-                reshard_after_forward=reshard_after_forward,
-            )
-            self.model.model.layers[layer_id] = transformer_block
+        #     reshard_after_forward = int(layer_id) < len(self.model.model.layers) - 1
+        #     fully_shard(
+        #         transformer_block,
+        #         **fsdp_config,
+        #         reshard_after_forward=reshard_after_forward,
+        #     )
+        #     self.model.model.layers[layer_id] = transformer_block
         return fully_shard(self.model, **fsdp_config)
 
 
