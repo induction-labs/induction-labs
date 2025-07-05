@@ -24,11 +24,15 @@ Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
                 "gs://induction-labs/checkpoints/qwen25o_mouse_follow/test_noise_2",
             ),
             checkpoint_frequency=1000,  # Save every 1000 steps
-            checkpoint_first_step=True,  # Save the first step
+            checkpoint_first_step=False,  # Save the first step
             checkpoint_last_step=True,  # Save the last step
         ),
     ),
-    module=Qwen25OActionLITConfig(),
+    module=Qwen25OActionLITConfig(
+        checkpoint_path=CloudPath.from_str(
+            "gs://induction-labs/checkpoints/qwen25o_mouse_follow/test_noise_2/2025-07-04T04-05-09/step_-1"
+        )
+    ),
     datapack=RangeActionDatapackConfig(
         # prefix="gs://induction-labs/jonathan/synth/garbage_cursor_follow_v1/sample_",
         prefix="gs://induction-labs/jonathan/synth/cursor_follow_v2/sample_",

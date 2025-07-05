@@ -107,6 +107,16 @@ class TextPretrainDataModule(L.LightningDataModule):
             collate_fn=default_data_collator,
         )
 
+    def val_dataloader(self) -> DataLoader:
+        # For pretraining, we typically don't have a validation set
+        return DataLoader(
+            self.train_data,  # Using the same data for validation
+            batch_size=self.extra_args.batch_size,
+            shuffle=False,
+            drop_last=False,
+            collate_fn=default_data_collator,
+        )
+
 
 class TextPretrainDataModuleExtraArgs(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -138,7 +148,8 @@ class TextPretrainDatapackConfig(DatapackConfig[TextPretrainDataModule]):
         return module_config
 
     def create_datapack(
-        self, full_config: ExperimentConfig[TextPretrainDataModule]
+        self,
+        full_config: ExperimentConfig[TextPretrainDataModule],
     ) -> TextPretrainDataModule:
         module_config = self.validate_module_compatibility(full_config.module)
         extra_args = TextPretrainDataModuleExtraArgs(

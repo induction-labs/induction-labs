@@ -14,6 +14,7 @@ TextPretrainExperimentConfig = ExperimentConfig(
     metadata=ExperimentMetadata(
         wandb=WandbConfig(project="testing", name="text_pretrain"),
         output_dir="output/text_pretrain",
+        checkpoint=None,
     ),
     module=TextPretrainLITConfig(),
     datapack=TextPretrainDatapackConfig(),
@@ -22,6 +23,7 @@ TextPretrainExperimentConfig = ExperimentConfig(
         batch_size=2,
         steps_per_epoch=1000,  # Number of steps per epoch
         distributed=DistributedConfig.mock_data(),
+        lr=1e-5,  # Learning rate
     ),
 )
 
