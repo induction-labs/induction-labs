@@ -359,16 +359,16 @@ class RunConfig(BaseModel):
         Torch is troll because batch size is handled differently depending on the distributed strategy.
         https://pytorch-lightning.readthedocs.io/en/1.5.10/advanced/multi_gpu.html#batch-size
         """
-        assert (self.batch_size % (self.distributed.world_size)) == 0, (
-            f"Batch size {self.batch_size=} must be divisible by "
-            f"{self.distributed.world_size=} "
-        )
+        # assert (self.batch_size % (self.distributed.world_size)) == 0, (
+        #     f"Batch size {self.batch_size=} must be divisible by "
+        #     f"{self.distributed.world_size=} "
+        # )
 
-        return self.batch_size // (self.distributed.world_size)
+        return self.batch_size  # // (self.distributed.world_size)
 
     @model_validator(mode="after")
     def check_batch_size(self) -> Self:
-        _ = self.process_batch_size  # Trigger the property to validate batch size
+        # _ = self.process_batch_size  # Trigger the property to validate batch size
         return self
 
     def cpu_config(self) -> RunConfig:

@@ -21,14 +21,14 @@ Qwen3PretrainExperimentConfig = ExperimentConfig(
         checkpoint=None,
     ),
     module=Qwen3LITConfig(
-        model_name="meta-llama/Meta-Llama-3-8B",
-        tokenizer_name="meta-llama/Meta-Llama-3-8B",
+        model_name="Qwen/Qwen3-8B",
+        tokenizer_name="Qwen/Qwen3-8B",
     ),
     datapack=TextPretrainDatapackConfig(),
     run=RunConfig(
         lr=1e-5,
         sequence_length=1024,
-        batch_size=8,
+        batch_size=4,
         steps_per_epoch=5000,
         distributed=DistributedConfig(
             devices_per_node=8,
