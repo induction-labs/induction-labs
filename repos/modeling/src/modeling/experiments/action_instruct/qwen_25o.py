@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from modeling.config import (
+    AttentionImplementation,
     DistributedConfig,
     ExperimentConfig,
     ExperimentMetadata,
@@ -10,12 +11,11 @@ from modeling.config import (
 from modeling.types import Accelerator, DType
 from modeling.data.video_action import RangeActionDatapackConfig
 from modeling.modules.action_instruct.qwen_25o import Qwen25OActionLITConfig
-from modeling.utils.cloud_path import CloudPath
 
 Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
     metadata=ExperimentMetadata(
         wandb=WandbConfig(
-            project="mouse_following", name="qwen25o_mouse_follow_big_mlp"
+            project="mouse_following", name="qwen25o_mouse_follow_unmask_actiontoken"
         ),
         output_dir="output",
         checkpoint=None,
@@ -29,9 +29,9 @@ Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
         # ),
     ),
     module=Qwen25OActionLITConfig(
-        checkpoint_path=CloudPath.from_str(
-            "gs://induction-labs/checkpoints/qwen25o_mouse_follow/test_noise_2/2025-07-04T04-05-09/step_-1"
-        )
+        # checkpoint_path=CloudPath.from_str(
+        #     "gs://induction-labs/checkpoints/qwen25o_mouse_follow/test_noise_2/2025-07-04T04-05-09/step_-1"
+        # )
     ),
     datapack=RangeActionDatapackConfig(
         # prefix="gs://induction-labs/jonathan/synth/garbage_cursor_follow_v1/sample_",
@@ -48,8 +48,7 @@ Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
         distributed=DistributedConfig(
             devices_per_node=8,
         ),
-        # "attn_impl": AttentionImplementation.FLASH_ATTENTION_2,
-        # attn_impl=AttentionImplementation.FLASH_ATTENTION_2,
+        attn_impl=AttentionImplementation.SDPA,
         accelerator=Accelerator.CUDA,
         precision=DType.bf16,
     ),
