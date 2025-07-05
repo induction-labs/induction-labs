@@ -46,6 +46,18 @@ DATA_TYPE = TypeVar("DATA_TYPE")
 CONFIG_TYPE = TypeVar("CONFIG_TYPE", bound=BaseModuleConfig, covariant=True)
 
 
+def get_mem_stats(device=None):
+    mem = torch.cuda.memory_stats(device)
+    props = torch.cuda.get_device_properties(device)
+    return {
+        "total_gb": 1e-9 * props.total_memory,
+        "curr_alloc_gb": 1e-9 * mem["allocated_bytes.all.current"],
+        "peak_alloc_gb": 1e-9 * mem["allocated_bytes.all.peak"],
+        "curr_resv_gb": 1e-9 * mem["reserved_bytes.all.current"],
+        "peak_resv_gb": 1e-9 * mem["reserved_bytes.all.peak"],
+    }
+
+
 class BaseLITModule(
     ABC, L.LightningModule, Generic[MODEL_TYPE, DATA_TYPE, CONFIG_TYPE]
 ):
@@ -188,17 +200,8 @@ class BaseLITModule(
         memory_metrics = {}
         if self.run_config.accelerator == "cuda":
             torch.cuda.synchronize()
-
-            allocated_memory = torch.cuda.memory_allocated(
-                device=torch.cuda.current_device()
-            )
-            reserved_memory = torch.cuda.memory_reserved(
-                device=torch.cuda.current_device()
-            )
-            memory_metrics = {
-                "train/allocated_memory": allocated_memory / 1e9,  # in GB
-                "train/reserved_memory": reserved_memory / 1e9,  # in GB
-            }
+            memory_metrics = get_mem_stats(device=torch.cuda.current_device())
+            torch.cuda.reset_peak_memory_stats()
 
         metrics = {
             "train/step_time": elapsed,

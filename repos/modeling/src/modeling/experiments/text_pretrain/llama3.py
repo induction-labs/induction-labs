@@ -9,18 +9,18 @@ from modeling.config import (
 )
 from modeling.data.text_train import TextPretrainDatapackConfig
 
-from modeling.modules.text_pretrain.qwen3 import Qwen3LITConfig
+from modeling.modules.text_pretrain.llama3 import Llama3LITConfig
 from modeling.types import AttentionImplementation
 
 from modeling.types import Accelerator, DType
 
-Qwen3PretrainExperimentConfig = ExperimentConfig(
+Llama3PretrainExperimentConfig = ExperimentConfig(
     metadata=ExperimentMetadata(
-        wandb=WandbConfig(project="testing", name="qwen3_4B_text_pretrain"),
+        wandb=WandbConfig(project="testing", name="llama3_4B_text_pretrain"),
         output_dir="output/text_pretrain",
         checkpoint=None,
     ),
-    module=Qwen3LITConfig(
+    module=Llama3LITConfig(
         model_name="meta-llama/Meta-Llama-3-8B",
         tokenizer_name="meta-llama/Meta-Llama-3-8B",
     ),
@@ -33,14 +33,14 @@ Qwen3PretrainExperimentConfig = ExperimentConfig(
         distributed=DistributedConfig(
             devices_per_node=8,
         ),
-        attn_impl=AttentionImplementation.SDPA,
+        attn_impl=AttentionImplementation.FLASH_ATTENTION_2,
         accelerator=Accelerator.CUDA,
         precision=DType.bf16,
     ),
 )
-Qwen3PretrainTest = Qwen3PretrainExperimentConfig.testing_config(
-    num_steps=10, enable_wandb=True
+Llama3PretrainTest = Llama3PretrainExperimentConfig.testing_config(
+    num_steps=100, enable_wandb=True
 )
 
-# mdl export modeling.experiments.text_pretrain.qwen3.Qwen3PretrainExperimentConfig
-# mdl export modeling.experiments.text_pretrain.qwen3.Qwen3PretrainTest
+# mdl export modeling.experiments.text_pretrain.llama3.Llama3PretrainExperimentConfig
+# mdl export modeling.experiments.text_pretrain.llama3.Llama3PretrainTest

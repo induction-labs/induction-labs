@@ -131,14 +131,14 @@ def export(
     export_path = exp_module_path(config_path, file_extension=".toml")
     export_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # run_command = (
-    #     f"torchrun --nproc_per_node={exp_config.run.distributed.devices_per_node}"
-    #     f" --nnodes {exp_config.run.distributed.num_nodes}"
-    #     " --node_rank 0"
-    #     f" src/modeling/main.py run {export_path}"
-    # )
+    run_command = (
+        f"torchrun --nproc_per_node={exp_config.run.distributed.devices_per_node}"
+        f" --nnodes {exp_config.run.distributed.num_nodes}"
+        " --node_rank 0"
+        f" src/modeling/main.py run {export_path}"
+    )
 
-    run_command = f"mdl run {export_path}"
+    # run_command = f"mdl run {export_path}"
 
     serialize_experiment_config(exp_config, export_path, eof_comments=run_command)
     logger.info(

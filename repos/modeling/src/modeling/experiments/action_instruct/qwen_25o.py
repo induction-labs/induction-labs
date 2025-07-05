@@ -16,12 +16,13 @@ from modeling.utils.cloud_path import CloudPath
 Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
     metadata=ExperimentMetadata(
         wandb=WandbConfig(
-            project="mouse_following", name="qwen25o_mouse_follow_vision_unfrozen_noise"
+            project="mouse_following", name="qwen25o_mouse_follow_big_mlp"
         ),
         output_dir="output",
+        # checkpoint=None,
         checkpoint=GCSCheckpointConfig(
             checkpoint_prefix=CloudPath.from_str(
-                "gs://induction-labs/checkpoints/qwen25o_mouse_follow/test_noise_2",
+                "gs://induction-labs/checkpoints/qwen25o_mouse_follow/test_big_mlp",
             ),
             checkpoint_frequency=1000,  # Save every 1000 steps
             checkpoint_first_step=False,  # Save the first step
@@ -35,19 +36,20 @@ Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
     ),
     datapack=RangeActionDatapackConfig(
         # prefix="gs://induction-labs/jonathan/synth/garbage_cursor_follow_v1/sample_",
-        prefix="gs://induction-labs/jonathan/synth/cursor_follow_v2/sample_",
+        prefix="gs://induction-labs/jonathan/synth/cursor_follow_v3/sample_",
         # prefix="gs://induction-labs/jonathan/synth/noise_cursor_follow_v1/sample_",
-        end_index=5000,  # 5k samples
+        end_index=60000,  # 60k samples
     ),
     run=RunConfig(
         lr=1e-5,
-        sequence_length=2048,
-        batch_size=1,
-        steps_per_epoch=5000,
+        sequence_length=4096,
+        batch_size=4,
+        steps_per_epoch=60000 / 4,
         distributed=DistributedConfig(
-            devices_per_node=1,
+            devices_per_node=8,
         ),
         # "attn_impl": AttentionImplementation.FLASH_ATTENTION_2,
+        # attn_impl=AttentionImplementation.FLASH_ATTENTION_2,
         accelerator=Accelerator.CUDA,
         precision=DType.bf16,
     ),

@@ -35,7 +35,7 @@ class TextPretrainLIT(TextLIT[MODEL_TYPE, dict, "TextPretrainLITConfig"]):
 
         logger.debug(f"Initializing model {self.module_config.model_name} with config")
 
-        with init_empty_weights():  # ① on meta
+        with init_empty_weights():
             model = AutoModelForCausalLM.from_config(
                 model_config, trust_remote_code=True
             )
