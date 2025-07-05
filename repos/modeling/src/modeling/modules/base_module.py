@@ -232,22 +232,22 @@ class BaseLITModule(
 
         return metrics
 
-    def validation_epoch_end(self, validation_step_outputs):
-        metrics = {}
-        for output in validation_step_outputs:
-            for key, value in output.items():
-                if key not in metrics:
-                    metrics[key] = []
-                metrics[key].append(value)
-        # Average the metrics across all validation steps
-        for key, value in metrics.items():
-            metrics[key] = torch.tensor(value).mean()
+    # def validation_epoch_end(self, validation_step_outputs):
+    #     metrics = {}
+    #     for output in validation_step_outputs:
+    #         for key, value in output.items():
+    #             if key not in metrics:
+    #                 metrics[key] = []
+    #             metrics[key].append(value)
+    #     # Average the metrics across all validation steps
+    #     for key, value in metrics.items():
+    #         metrics[key] = torch.tensor(value).mean()
 
-        self.log_dict(
-            metrics,
-            logger=True,
-            sync_dist=True,
-        )
+    #     self.log_dict(
+    #         metrics,
+    #         logger=True,
+    #         sync_dist=True,
+    #     )
 
     def configure_optimizers(self):
         optimizer = torch.optim.AdamW(
