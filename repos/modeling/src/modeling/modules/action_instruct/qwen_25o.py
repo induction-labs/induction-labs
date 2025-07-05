@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 from modeling.checkpoints.save import Path
 from modeling.config import DatapackConfig, RunConfig
@@ -50,6 +50,22 @@ class Qwen25OActionLIT(
             f"got {type(model)}"
         )
         return model
+
+    def load_weights(self, tmpdir: Path) -> Qwen2_5OmniThinkerForActionModelling:
+        """
+        Load the model weights from the specified checkpoint directory.
+        This method should handle the loading of pre-trained weights or checkpoint files.
+        """
+        # logger.debug(f"Loading model weights from {tmpdir}")
+        # Load the model weights and dispatch them to the appropriate devices
+        self.model.to_empty(device=torch.cuda.current_device())
+        loaded_model = MODEL_TYPE.from_pretrained(
+            self.module_config.model_name,
+            config=self.model.config,
+            torch_dtype=self.dtype,
+            attn_implementation=self.attn_impl,
+        ).train()
+        return cast(MODEL_TYPE, loaded_model)
 
     def run_training_step(self, inputs: ActionDataSample):
         # Forward pass through the model

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from modeling.config import (
+    AttentionImplementation,
     DistributedConfig,
     ExperimentConfig,
     ExperimentMetadata,
@@ -16,13 +17,13 @@ from modeling.utils.cloud_path import CloudPath
 Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
     metadata=ExperimentMetadata(
         wandb=WandbConfig(
-            project="mouse_following", name="qwen25o_mouse_follow_big_mlp"
+            project="mouse_following", name="qwen25o_mouse_follow_unmask_actiontoken"
         ),
         output_dir="output",
         # checkpoint=None,
         checkpoint=GCSCheckpointConfig(
             checkpoint_prefix=CloudPath.from_str(
-                "gs://induction-labs/checkpoints/qwen25o_mouse_follow/test_big_mlp",
+                "gs://induction-labs/checkpoints/qwen25o_mouse_follow/unmask_actiontoken",
             ),
             checkpoint_frequency=1000,  # Save every 1000 steps
             checkpoint_first_step=False,  # Save the first step
@@ -30,9 +31,9 @@ Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
         ),
     ),
     module=Qwen25OActionLITConfig(
-        checkpoint_path=CloudPath.from_str(
-            "gs://induction-labs/checkpoints/qwen25o_mouse_follow/test_noise_2/2025-07-04T04-05-09/step_-1"
-        )
+        # checkpoint_path=CloudPath.from_str(
+        #     "gs://induction-labs/checkpoints/qwen25o_mouse_follow/test_noise_2/2025-07-04T04-05-09/step_-1"
+        # )
     ),
     datapack=RangeActionDatapackConfig(
         # prefix="gs://induction-labs/jonathan/synth/garbage_cursor_follow_v1/sample_",
@@ -43,13 +44,12 @@ Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
     run=RunConfig(
         lr=1e-5,
         sequence_length=4096,
-        batch_size=4,
-        steps_per_epoch=60000 / 4,
+        batch_size=1,
+        steps_per_epoch=5000,
         distributed=DistributedConfig(
             devices_per_node=8,
         ),
-        # "attn_impl": AttentionImplementation.FLASH_ATTENTION_2,
-        # attn_impl=AttentionImplementation.FLASH_ATTENTION_2,
+        attn_impl=AttentionImplementation.SDPA,
         accelerator=Accelerator.CUDA,
         precision=DType.bf16,
     ),

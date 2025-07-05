@@ -4,14 +4,18 @@ from torch import nn
 from typing import Optional, Union
 from transformers.generation.utils import GenerationMixin
 from transformers.models.qwen2_5_omni.modeling_qwen2_5_omni import (
-    Qwen2_5OmniAudioEncoder,
     Qwen2_5OmniThinkerTextModel,
     Qwen2_5OmniVisionEncoder,
     Qwen2_5OmniPreTrainedModelForConditionalGeneration,
     Qwen2_5OmniThinkerCausalLMOutputWithPast,
+    Qwen2_5OmniThinkerForConditionalGeneration,
 )
 from transformers.models.qwen2_5_omni.configuration_qwen2_5_omni import (
     Qwen2_5OmniThinkerConfig,
+)
+from transformers.masking_utils import (
+    create_causal_mask,
+    create_sliding_window_causal_mask,
 )
 
 
@@ -41,9 +45,9 @@ class Qwen2_5OmniThinkerForActionModelling(
 
     def __init__(self, config: Qwen2_5OmniThinkerActionConfig):
         super().__init__(config)
-        self.audio_tower = Qwen2_5OmniAudioEncoder._from_config(
-            config.audio_config, attn_implementation=config._attn_implementation
-        )
+        # self.audio_tower = Qwen2_5OmniAudioEncoder._from_config(
+        #     config.audio_config, attn_implementation=config._attn_implementation
+        # )
 
         self.visual = Qwen2_5OmniVisionEncoder._from_config(
             config.vision_config, attn_implementation=config._attn_implementation
@@ -56,7 +60,10 @@ class Qwen2_5OmniThinkerForActionModelling(
         self.action_token_embedding = nn.Embedding(1, config.text_config.hidden_size)
 
         hidden_size = config.text_config.hidden_size
-        self.lm_head = nn.Sequential(
+        self.lm_head = nn.Linear(
+            config.text_config.hidden_size, config.text_config.vocab_size, bias=False
+        )
+        self.action_head = nn.Sequential(
             nn.Linear(hidden_size, hidden_size),  # layer 1
             nn.GELU(),  # non-linearity (ReLU also fine)
             nn.Linear(hidden_size, 6),  # layer 2
@@ -72,7 +79,7 @@ class Qwen2_5OmniThinkerForActionModelling(
         for param in self.parameters():
             param.requires_grad = not self.config.freeze_network
 
-        for param in self.lm_head.parameters():
+        for param in self.action_head.parameters():
             param.requires_grad = not self.config.freeze_action_head
 
         for param in self.action_token_embedding.parameters():
@@ -292,8 +299,9 @@ class Qwen2_5OmniThinkerForActionModelling(
         if inputs_embeds is None:
             # 1. Extract the input embeddings
             inputs_embeds = self.get_input_embeddings()(input_ids)  # [B, S, D]
-
-            inputs_embeds[action_tokens] = self.action_token_embedding.weight[0]
+            # If we are in decode
+            if action_tokens.shape[1] == inputs_embeds.shape[1]:
+                inputs_embeds[action_tokens] = self.action_token_embedding.weight[0]
 
         # 2. Merge text , audios , image and video
         if input_ids is not None and input_ids.shape[1] != 1:  # Prefill stage
@@ -377,10 +385,52 @@ class Qwen2_5OmniThinkerForActionModelling(
                 position_ids = position_ids.add(delta)
                 position_ids = position_ids.unsqueeze(0).expand(3, -1, -1)
 
-        attention_mask *= ~action_tokens
+        # If we are in decode, we only multiply out on the first k tokens
+        attention_mask[:, : action_tokens.shape[1]] = (
+            attention_mask[:, : action_tokens.shape[1]] * ~action_tokens
+        )
+        if cache_position is None:
+            past_seen_tokens = (
+                past_key_values.get_seq_length() if past_key_values is not None else 0
+            )
+            cache_position = torch.arange(
+                past_seen_tokens,
+                past_seen_tokens + inputs_embeds.shape[1],
+                device=inputs_embeds.device,
+            )
+        mask_kwargs = {
+            "config": self.model.config,
+            "input_embeds": inputs_embeds,
+            "attention_mask": attention_mask,
+            "cache_position": cache_position,
+            "past_key_values": past_key_values,
+            "position_ids": position_ids,
+        }
+        full_attention_mask = create_causal_mask(**mask_kwargs)
+        # Allow action tokens to attend to themselves but not be attended to.
+        if full_attention_mask.shape[2] == action_tokens.shape[1]:
+            unmasked_value = True if full_attention_mask.dtype == torch.bool else 0.0
+            # This is because fucking mask dtype is different depending on attention impl
+            # SPDA is bool, eager is float
+            diag = full_attention_mask[:, 0, :, :].diagonal(dim1=-2, dim2=-1)
+            assert diag[action_tokens].ne(unmasked_value).all(), (
+                "Action tokens should not be masked %s",
+                diag[action_tokens],
+            )
+            diag[action_tokens] = unmasked_value
+        # Create the masks
+        causal_mask_mapping = {
+            "full_attention": full_attention_mask,
+        }
+        # The sliding window alternating layers are not always activated depending on the config
+        if self.model.has_sliding_layers:
+            raise NotImplementedError()
+            causal_mask_mapping["sliding_attention"] = (
+                create_sliding_window_causal_mask(**mask_kwargs)
+            )
 
         outputs = self.model(
-            attention_mask=attention_mask,
+            attention_mask=causal_mask_mapping,
             position_ids=position_ids,
             past_key_values=past_key_values,
             inputs_embeds=inputs_embeds,
@@ -392,12 +442,13 @@ class Qwen2_5OmniThinkerForActionModelling(
         )
 
         hidden_states = outputs[0]
-        logits = self.lm_head(hidden_states)  # [B, S, 6]
+        logits = self.lm_head(hidden_states)  # [B, S, V]
+        action_outputs = self.action_head(hidden_states)  # [B, S, 6]
 
         loss = None
         if cursor_path is not None:
             loss = self.l2_loss(
-                logits, cursor_path.reshape(*cursor_path.shape[:2], 6)
+                action_outputs, cursor_path.reshape(*cursor_path.shape[:2], 6)
             )  # [B, S, 6]
             loss = torch.sum(loss, dim=-1)
             loss *= action_tokens
@@ -463,32 +514,45 @@ class Qwen2_5OmniThinkerForActionModelling(
         return model_inputs
 
 
-if __name__ == "__main__":
+async def main():
     from modeling.data.video_action import fetch_data, ActionDataSample
-    import asyncio
+    from transformers import AutoTokenizer
 
     # default: Load the model on the available device(s)
+    t = AutoTokenizer.from_pretrained("Qwen/Qwen2.5-Omni-3B")
     config = Qwen2_5OmniThinkerConfig.from_pretrained("Qwen/Qwen2.5-Omni-3B")
-    model = Qwen2_5OmniThinkerForActionModelling(config)
-    print(model.action_token_embedding.weight)
-
-    data = ActionDataSample.combine_batch(
-        [
-            asyncio.run(
-                fetch_data(
-                    num_actions=1,
-                    path="gs://induction-labs/jonathan/synth/cursor_follow_v1/sample_3.zarr",
-                    seq_length=1024,
-                )
-            )
-        ]
+    model = Qwen2_5OmniThinkerForConditionalGeneration.from_pretrained(
+        "Qwen/Qwen2.5-Omni-3B",
+        config=config,
+        torch_dtype=torch.bfloat16,
+        device_map="auto",
     )
+
+    data = await fetch_data(
+        num_actions=3,
+        path="gs://induction-labs/jonathan/synth/cursor_follow_v1/sample_3.zarr",
+        seq_length=2048,
+    )
+    data = ActionDataSample.combine_batch([data])
+    inputs = data.qwen_inputs.model_dump()
+
+    for k, v in inputs.items():
+        if isinstance(v, torch.Tensor):
+            inputs[k] = v.to("cuda")
     print(data)
-    print("hi", data.qwen_inputs.attention_mask.shape)
+    with torch.no_grad():
+        result = model.forward(
+            # cursor_path=data.cursor_path,
+            # action_tokens=data.action_tokens,
+            **inputs,
+        )
+        result2 = model.generate(**inputs)
 
-    result = model.forward(
-        cursor_path=data.cursor_path,
-        action_tokens=data.action_tokens,
-        **data.qwen_inputs.model_dump(),
-    )
-    print(result)
+    print(result, result2)
+    print(t.decode(result2[0], skip_special_tokens=False))
+
+
+if __name__ == "__main__":
+    import asyncio
+
+    asyncio.run(main())
