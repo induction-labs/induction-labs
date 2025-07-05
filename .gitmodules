@@ -7,3 +7,6 @@
 [submodule "repos/osworld"]
 	path = repos/osworld
 	url = git@github.com:induction-labs/osworld.git
+[submodule "repos/lingua"]
+	path = repos/lingua
+	url = git@github.com:induction-labs/lingua.git

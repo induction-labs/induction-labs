@@ -13,7 +13,7 @@ package = true
 [tool.uv.workspace]
 members = ["repos/*"]
 # We need to exclude vllm as a workspace dep because it is dynamically versioned :/
-exclude = ["repos/vllm"]
+exclude = ["repos/vllm", "repos/output", "repos/lingua"]
 
 [dependency-groups]
 dev = ["pre-commit>=4.2.0", "ruff>=0.11.8"]
