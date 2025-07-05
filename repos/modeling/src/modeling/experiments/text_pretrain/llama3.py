@@ -21,8 +21,8 @@ Llama3PretrainExperimentConfig = ExperimentConfig(
         checkpoint=None,
     ),
     module=Llama3LITConfig(
-        model_name="meta-llama/Meta-Llama-3-8B",
-        tokenizer_name="meta-llama/Meta-Llama-3-8B",
+        model_name="meta-llama/Llama-3.1-8B",
+        tokenizer_name="meta-llama/Llama-3.1-8B",
     ),
     datapack=TextPretrainDatapackConfig(),
     run=RunConfig(
@@ -33,7 +33,7 @@ Llama3PretrainExperimentConfig = ExperimentConfig(
         distributed=DistributedConfig(
             devices_per_node=8,
         ),
-        attn_impl=AttentionImplementation.FLASH_ATTENTION_2,
+        attn_impl=AttentionImplementation.SDPA,
         accelerator=Accelerator.CUDA,
         precision=DType.bf16,
     ),

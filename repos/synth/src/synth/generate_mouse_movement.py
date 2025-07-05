@@ -7,13 +7,15 @@ from functools import partial
 from multiprocessing import Pool, set_start_method
 from pathlib import Path
 
-import matplotlib.pyplot as plt
 import numpy as np
 import tensorstore as ts
 import torch
-from matplotlib import cm
-from PIL import Image, ImageDraw
+from PIL import Image
 from synapse import Cubic
+from synapse.actions.mouse_movements import (
+    cubics_to_points,
+    generate_image_from_segments,
+)
 from synapse.video_loader.typess import (
     FramesMetadata,
     StreamMetadata,
@@ -63,65 +65,6 @@ def sample_cubics(n: int, delta: float) -> tuple[float, list[Cubic]]:
         current_cubics.append(cubic)
 
     return start_position, current_cubics
-
-
-def cubics_to_points(
-    x_start: float,
-    y_start: float,
-    x_cubics: list[Cubic],
-    y_cubics: list[Cubic],
-    fps=2,
-    x_points: np.ndarray | None = None,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    if x_points is None:
-        x_points = np.linspace(0, 1, 400)
-
-    previous_last = (x_start, y_start)
-
-    all_poly_x = []
-    all_poly_y = []
-
-    for xc, yc in zip(x_cubics, y_cubics, strict=False):
-        x_dense = x_points
-        y_cubic_of_xcoord = xc(x_dense)
-        y_cubic_of_ycoord = yc(x_dense)
-
-        all_poly_x.extend(y_cubic_of_xcoord + previous_last[0])
-        all_poly_y.extend(y_cubic_of_ycoord + previous_last[1])
-
-        previous_last = (xc(1) + previous_last[0], yc(1) + previous_last[1])
-
-    # t = list(range(len(all_poly_x)))
-    t = np.arange(0, len(all_poly_x) / fps, 1 / fps)
-
-    return t, np.array(all_poly_x), np.array(all_poly_y)
-
-
-def generate_image_from_segments(
-    t: np.ndarray, x_norm: np.ndarray, y_norm: np.ndarray, screen_size: tuple[int, int]
-) -> Image.Image:
-    x = x_norm * screen_size[0]
-    y = y_norm * screen_size[1]
-    norm = plt.Normalize(t.min(), t.max())
-    colors = cm.viridis(norm(t))
-
-    # pick a colormap and normalize t to [0,1]
-    norm = (t - t.min()) / (t.max() - t.min())
-    colors = (cm.viridis(norm)[:, :3] * 255).astype(np.uint8)
-
-    # make a blank RGBA image
-    scale_factor = 8
-    upsampled = (int(screen_size[0] * scale_factor), int(screen_size[1] * scale_factor))
-    img = Image.new("RGBA", upsampled, (255, 255, 255, 255))
-    draw = ImageDraw.Draw(img)
-
-    for i in range(len(x) - 1):
-        p0 = (x[i] * scale_factor, y[i] * scale_factor)
-        p1 = (x[i + 1] * scale_factor, y[i + 1] * scale_factor)
-        draw.line([p0, p1], fill=tuple(colors[i]), width=int(4.3 * scale_factor))
-
-    img_small = img.resize(screen_size, Image.LANCZOS)
-    return img_small
 
 
 def create_video_array(

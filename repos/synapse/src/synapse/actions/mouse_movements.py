@@ -7,6 +7,8 @@ from collections.abc import Callable
 import gcsfs
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib import cm
+from PIL import Image, ImageDraw
 from synapse.actions.models import Action, Cubic, MouseMove
 
 
@@ -397,7 +399,88 @@ def convert_cubic_to_np(cubics: list[Cubic]) -> np.ndarray:
     return np.array([[cubic.m, cubic.n, cubic.a] for cubic in cubics])
 
 
+def cubics_to_points(
+    x_start: float,
+    y_start: float,
+    x_cubics: list[Cubic],
+    y_cubics: list[Cubic],
+    fps=2,
+    x_points: np.ndarray | None = None,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    if x_points is None:
+        x_points = np.linspace(0, 1, 400)
+
+    previous_last = (x_start, y_start)
+
+    all_poly_x = []
+    all_poly_y = []
+
+    for xc, yc in zip(x_cubics, y_cubics, strict=False):
+        x_dense = x_points
+        y_cubic_of_xcoord = xc(x_dense)
+        y_cubic_of_ycoord = yc(x_dense)
+
+        all_poly_x.extend(y_cubic_of_xcoord + previous_last[0])
+        all_poly_y.extend(y_cubic_of_ycoord + previous_last[1])
+
+        previous_last = (xc(1) + previous_last[0], yc(1) + previous_last[1])
+
+    # t = list(range(len(all_poly_x)))
+    t = np.arange(0, len(all_poly_x) / fps, 1 / fps)
+
+    return t, np.array(all_poly_x), np.array(all_poly_y)
+
+
+def generate_image_from_segments(
+    t: np.ndarray, x_norm: np.ndarray, y_norm: np.ndarray, screen_size: tuple[int, int]
+) -> Image.Image:
+    x = x_norm * screen_size[0]
+    y = y_norm * screen_size[1]
+    norm = plt.Normalize(t.min(), t.max())
+    colors = cm.viridis(norm(t))
+
+    # pick a colormap and normalize t to [0,1]
+    norm = (t - t.min()) / (t.max() - t.min())
+    colors = (cm.viridis(norm)[:, :3] * 255).astype(np.uint8)
+
+    # make a blank RGBA image
+    scale_factor = 8
+    upsampled = (int(screen_size[0] * scale_factor), int(screen_size[1] * scale_factor))
+    img = Image.new("RGBA", upsampled, (255, 255, 255, 255))
+    draw = ImageDraw.Draw(img)
+
+    for i in range(len(x) - 1):
+        p0 = (x[i] * scale_factor, y[i] * scale_factor)
+        p1 = (x[i + 1] * scale_factor, y[i + 1] * scale_factor)
+        draw.line([p0, p1], fill=tuple(colors[i]), width=int(4.3 * scale_factor))
+
+    img_small = img.resize(screen_size, Image.LANCZOS)
+    return img_small
+
+
 if __name__ == "__main__":
+    x_start = 1
+    y_start = 1
+    x_cubics = [
+        Cubic(m=0.0024479394813769623, n=-0.07114152826414698, a=-0.7001973562975599),
+        Cubic(m=0.04047473155767062, n=-0.07822818502124514, a=-0.11771556067455546),
+        Cubic(m=-0.028577456905693396, n=0.09822379429525549, a=0.862081323539617),
+        Cubic(m=-0.010902793990792817, n=0.06331117674165176, a=-0.37978214658173437),
+    ]
+    y_cubics = [
+        Cubic(m=-0.003540029052765778, n=-0.034074677430898245, a=0.013324580300036026),
+        Cubic(m=0.031508241663414344, n=0.012203512758275137, a=-0.46332771617696455),
+        Cubic(m=-0.039534959253284235, n=-0.09326305131693796, a=0.3968321858408459),
+        Cubic(m=0.060337973435395764, n=-0.057098015768339616, a=-0.4512644540881401),
+    ]
+    SCREEN_SIZE = (854, 480)
+
+    ts, all_poly_x, all_poly_y = cubics_to_points(x_start, y_start, x_cubics, y_cubics)
+    base_image = generate_image_from_segments(ts, all_poly_x, all_poly_y, SCREEN_SIZE)
+    # write to output.png
+    base_image.save("output.png")
+
+    quit()
     # Generate the comparison plot
     logs = get_all_action_logs(
         "gs://induction-labs-data-ext/action_capture/jonathan/2025-06-26_164012_TG1MZ"

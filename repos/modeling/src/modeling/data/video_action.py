@@ -485,6 +485,15 @@ class ActionDataModule(L.LightningDataModule):
             collate_fn=ActionDataSample.combine_batch,
         )
 
+    def val_dataloader(self) -> DataLoader[ActionDataSample]:
+        return DataLoader(
+            self.train_data,
+            batch_size=self.extra_args.batch_size,
+            shuffle=True,
+            drop_last=True,
+            collate_fn=ActionDataSample.combine_batch,
+        )
+
 
 class ActionDataModuleExtraArgs(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)

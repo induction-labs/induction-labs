@@ -6,7 +6,6 @@ from modeling.config import (
     ExperimentMetadata,
     RunConfig,
     WandbConfig,
-    GCSCheckpointConfig,
 )
 from modeling.types import Accelerator, DType
 from modeling.data.video_action import RangeActionDatapackConfig
@@ -19,15 +18,15 @@ Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
             project="mouse_following", name="qwen25o_mouse_follow_big_mlp"
         ),
         output_dir="output",
-        # checkpoint=None,
-        checkpoint=GCSCheckpointConfig(
-            checkpoint_prefix=CloudPath.from_str(
-                "gs://induction-labs/checkpoints/qwen25o_mouse_follow/test_big_mlp",
-            ),
-            checkpoint_frequency=1000,  # Save every 1000 steps
-            checkpoint_first_step=False,  # Save the first step
-            checkpoint_last_step=True,  # Save the last step
-        ),
+        checkpoint=None,
+        # checkpoint=GCSCheckpointConfig(
+        #     checkpoint_prefix=CloudPath.from_str(
+        #         "gs://induction-labs/checkpoints/qwen25o_mouse_follow/test_big_mlp",
+        #     ),
+        #     checkpoint_frequency=1000,  # Save every 1000 steps
+        #     checkpoint_first_step=False,  # Save the first step
+        #     checkpoint_last_step=True,  # Save the last step
+        # ),
     ),
     module=Qwen25OActionLITConfig(
         checkpoint_path=CloudPath.from_str(
@@ -41,10 +40,11 @@ Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
         end_index=60000,  # 60k samples
     ),
     run=RunConfig(
-        lr=1e-5,
+        lr=1e-4,
         sequence_length=4096,
         batch_size=4,
         steps_per_epoch=60000 / 4,
+        validation_every_n_steps=2,
         distributed=DistributedConfig(
             devices_per_node=8,
         ),
@@ -60,7 +60,6 @@ Qwen25OActionGPU_Test = Qwen25OActionExperimentConfig_GPU.testing_config(num_ste
 Qwen25OActionExperimentConfig_CPU = Qwen25OActionExperimentConfig_GPU.model_copy(
     update={"run": Qwen25OActionExperimentConfig_GPU.run.cpu_config()}
 )
-
 
 # mdl export modeling.experiments.action_instruct.qwen_25o.Qwen25OActionExperimentConfig_CPU
 # mdl export modeling.experiments.action_instruct.qwen_25o.Qwen25OActionExperimentConfig_GPU

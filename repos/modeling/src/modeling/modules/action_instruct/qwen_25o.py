@@ -10,7 +10,13 @@ from .qwen_25o_actions import (
     Qwen2_5OmniThinkerForActionModelling,
     Qwen2_5OmniThinkerActionConfig,
 )
+from synapse.actions.mouse_movements import (
+    Cubic,
+    cubics_to_points,
+    generate_image_from_segments,
+)
 from torch.distributed.fsdp import MixedPrecisionPolicy
+import wandb
 
 from torch.distributed.fsdp import fully_shard
 from torch.distributed.device_mesh import DeviceMesh
@@ -61,9 +67,65 @@ class Qwen25OActionLIT(
         assert isinstance(outputs.loss, torch.Tensor), (
             f"Expected outputs.loss to be a Tensor, got {type(outputs.loss)}"
         )
-        # Assert that the loss is a scalar tensor
 
         return outputs.loss
+
+    def run_validation_step(self, inputs: ActionDataSample):
+        # Forward pass through the model
+        outputs = self.model(
+            cursor_path=inputs.cursor_path,
+            action_tokens=inputs.action_tokens,
+            **inputs.qwen_inputs.model_dump(),
+        )
+        assert isinstance(outputs.loss, torch.Tensor), (
+            f"Expected outputs.loss to be a Tensor, got {type(outputs.loss)}"
+        )
+
+        # print(outputs.logits)
+        # print(outputs.logits.shape)
+        # print("---------")
+        # print(inputs.cursor_path[inputs.action_tokens])
+        # print(inputs.cursor_path[inputs.action_tokens].shape)
+        # print("---------")
+        # print(outputs.logits[inputs.action_tokens])
+        # print(outputs.logits[inputs.action_tokens].shape)
+
+        predicted_image = self.visualize_action(outputs.logits[inputs.action_tokens])
+        real_image = self.visualize_action(
+            inputs.cursor_path[inputs.action_tokens].reshape(-1, 6)
+        )
+
+        wandb.log(
+            {
+                "validation/real_image": [wandb.Image(real_image)],
+                "validation/predicted_image": [wandb.Image(predicted_image)],
+            }
+        )
+
+        return outputs.loss, {}
+
+    def visualize_action(
+        self,
+        actions: torch.Tensor,  # [n, 6]
+        resolution: tuple[int, int] = (854, 480),
+    ):
+        predicted_cubics_x = []
+        predicted_cubics_y = []
+        print(actions.shape)
+        for value in actions:
+            value = value.to(dtype=torch.float32).cpu().numpy()
+            predicted_cubics_x.append(Cubic(m=value[0], n=value[1], a=value[2]))
+            predicted_cubics_y.append(Cubic(m=value[3], n=value[4], a=value[5]))
+
+        SCREEN_SIZE = (854, 480)
+        ts, all_poly_x, all_poly_y = cubics_to_points(
+            0.5, 0.5, predicted_cubics_x, predicted_cubics_y
+        )
+        base_image = generate_image_from_segments(
+            ts, all_poly_x, all_poly_y, SCREEN_SIZE
+        )
+
+        return base_image
 
     def shard_model(
         self,
