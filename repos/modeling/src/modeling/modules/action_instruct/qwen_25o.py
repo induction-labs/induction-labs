@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import functools
 from typing import Any, cast
 
 from modeling.checkpoints.save import Path
@@ -64,27 +63,6 @@ def to_numpy_clean(tensor: torch.Tensor, dtype=torch.float32) -> np.ndarray:
     Convert a PyTorch tensor to a NumPy array, ensuring it is on CPU and detached.
     """
     return tensor.to(dtype=dtype, device="cpu").detach().numpy()
-
-
-stupid_wandb_table = None
-
-
-@functools.lru_cache(maxsize=1)
-def get_stupid_wandb_table() -> wandb.Table:
-    """
-    Create a dummy wandb.Table for testing purposes.
-    This is used to avoid issues with empty tables in the validation step.
-    """
-    # I Can't believe wandb is real fucking company
-    # https://github.com/wandb/wandb/issues/2981#issuecomment-2922700231
-    global stupid_wandb_table
-    if stupid_wandb_table is None:
-        stupid_wandb_table = wandb.Table(
-            columns=["actual", "predicted"],
-            data=[],
-            log_mode="INCREMENTAL",
-        )
-    return stupid_wandb_table
 
 
 class Qwen25OActionLIT(
@@ -239,14 +217,19 @@ class Qwen25OActionLIT(
         predicted_image = generate_image_from_segments(
             np_predicted_xs, np_predicted_ys, SCREEN_SIZE
         )
-        table = get_stupid_wandb_table()
-        # table.add_data(
-        #     [paths.to_list() for paths in to_numpy_clean(cursor_path)],
-        #     [paths.to_list() for paths in to_numpy_clean(action_outputs)],
-        # )
+        table = wandb.Table(
+            columns=["actual", "predicted"],
+            data=[
+                [str(actual), str(predicted)]
+                for actual, predicted in zip(
+                    to_numpy_clean(cursor_path),
+                    to_numpy_clean(action_outputs),
+                )
+            ],
+        )
 
         metrics = {
-            "validation/cubics": table,
+            f"validation/cubics/{self.trainer.global_step}": table,
             "validation/real_image": [wandb.Image(real_image)],
             "validation/predicted_image": [wandb.Image(predicted_image)],
             "validation/computed_predicted_image": [
