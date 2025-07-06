@@ -298,6 +298,21 @@ class SerializedDatapackConfig(DatapackConfig[L.LightningDataModule]):
         )
 
 
+class LinearLRSchedule(BaseModel):
+    peak_lr: float = Field(
+        description="Peak learning rate for the learning rate schedule."
+    )
+    end_lr: float = Field(
+        description="Final learning rate for the learning rate schedule."
+    )
+    warmup_steps: int = Field(
+        description="Number of warmup steps for the learning rate schedule."
+    )
+    end_step: int = Field(
+        description="Total number of steps for the learning rate schedule."
+    )
+
+
 class RunConfig(BaseModel):
     """
     Configuration for a run.
@@ -316,7 +331,7 @@ class RunConfig(BaseModel):
     validation_every_n_steps: int = -1
     validation_steps: int = 1
 
-    lr: float
+    lr: LinearLRSchedule
 
     attn_impl: AttentionImplementation = AttentionImplementation.SDPA
     accelerator: Accelerator = Accelerator.CUDA

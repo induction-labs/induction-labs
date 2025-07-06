@@ -6,6 +6,7 @@ from modeling.config import (
     ExperimentMetadata,
     RunConfig,
     WandbConfig,
+    LinearLRSchedule,
 )
 from modeling.data.text_train import TextPretrainDatapackConfig
 
@@ -26,7 +27,12 @@ Llama3PretrainExperimentConfig = ExperimentConfig(
     ),
     datapack=TextPretrainDatapackConfig(),
     run=RunConfig(
-        lr=1e-5,
+        lr=LinearLRSchedule(
+            peak_lr=1e-3,
+            end_lr=1e-5,
+            warmup_steps=16,
+            end_step=500,  # 10k steps
+        ),
         sequence_length=1024,
         batch_size=8,
         steps_per_epoch=5000,

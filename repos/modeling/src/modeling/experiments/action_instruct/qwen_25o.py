@@ -8,6 +8,7 @@ from modeling.config import (
     GCSCheckpointConfig,
     RunConfig,
     WandbConfig,
+    LinearLRSchedule,
 )
 from modeling.types import Accelerator, DType
 from modeling.data.video_action import RangeActionDatapackConfig
@@ -39,14 +40,19 @@ Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
         # prefix="gs://induction-labs/jonathan/synth/garbage_cursor_follow_v1/sample_",
         prefix="gs://induction-labs/jonathan/synth/cursor_follow_v3/sample_",
         # prefix="gs://induction-labs/jonathan/synth/noise_cursor_follow_v1/sample_",
-        end_index=5000,  # 60k samples
+        end_index=4000,  # 60k samples
     ),
     run=RunConfig(
-        lr=1e-4,
+        lr=LinearLRSchedule(
+            peak_lr=1e-3,
+            end_lr=1e-5,
+            warmup_steps=16,
+            end_step=500,  # 10k steps
+        ),
         sequence_length=4096,
         batch_size=1,
-        steps_per_epoch=5000,
-        validation_every_n_steps=10,
+        steps_per_epoch=1000,
+        validation_every_n_steps=32,
         distributed=DistributedConfig(
             devices_per_node=1,
         ),

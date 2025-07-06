@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any, cast
+import json
 
 from modeling.checkpoints.save import Path
 from modeling.config import DatapackConfig, RunConfig
@@ -112,25 +113,51 @@ class Qwen25OActionLIT(
         real_image = self.visualize_action(
             inputs.cursor_path[inputs.action_tokens].reshape(-1, 6)
         )
-        self.log_dict(
-            {
-                "validation/action_outputs": [
+        # self.log_dict(
+        #     {
+        #         "validation/action_outputs": [
+        #             outputs.action_outputs[inputs.action_tokens]
+        #             .to(dtype=torch.float32)
+        #             .cpu()
+        #             .numpy()
+        #         ],
+        #         "validation/real_action": [
+        #             inputs.action_tokens.to(dtype=torch.float32).cpu().numpy()
+        #         ],
+        #     }
+        # )
+        columns = ["sample", "cubic_values"]
+        data = [
+            [
+                "predicted",
+                json.dumps(
                     outputs.action_outputs[inputs.action_tokens]
                     .to(dtype=torch.float32)
                     .cpu()
                     .numpy()
-                ],
-                "validation/real_action": [
-                    inputs.action_tokens.to(dtype=torch.float32).cpu().numpy()
-                ],
-            }
-        )
+                    .tolist()
+                ),
+            ],
+            [
+                "real",
+                json.dumps(
+                    inputs.cursor_path[inputs.action_tokens]
+                    .reshape(-1, 6)
+                    .to(dtype=torch.float32)
+                    .cpu()
+                    .numpy()
+                    .tolist()
+                ),
+            ],
+        ]
+
+        tab = wandb.Table(data=data, columns=columns)
 
         wandb.log(
             {
                 "validation/real_image": [wandb.Image(real_image)],
                 "validation/predicted_image": [wandb.Image(predicted_image)],
-                # "validation/step":
+                "validation/actions": tab,
             }
         )
 
