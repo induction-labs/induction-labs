@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from pathlib import Path
+from functools import partial
 
 from accelerate import load_checkpoint_and_dispatch
 import lightning as L
@@ -27,6 +28,17 @@ logger = configure_logging(
     __file__,
     #    level=logging.DEBUG
 )
+
+
+def lr_lambda(
+    step: int, warmup_steps: int, end_steps: int, start_lr: float, end_lr: float
+):
+    if step < warmup_steps:
+        return step / warmup_steps  # scales 0 → 1
+    else:
+        progress = (step - warmup_steps) / max(1, end_steps - warmup_steps)
+        progress = min(progress, 1.0)  # clamp to 1.0
+        return 1 + (end_lr / start_lr - 1) * progress  # 1 → end_lr/start_lr
 
 
 class BaseModuleConfig(ModuleConfig):
@@ -233,6 +245,7 @@ class BaseLITModule(
             "train/step_time": elapsed,
             # "train/tokens_per_second": inputs["input_ids"].numel() / elapsed,
             "train/loss": loss,
+            "train/lr": self.optimizers().param_groups[0]["lr"],
             **memory_metrics,
         }
 
@@ -262,8 +275,23 @@ class BaseLITModule(
     def configure_optimizers(self):
         optimizer = torch.optim.AdamW(
             self.model.parameters(),
-            lr=self.run_config.lr,
+            lr=self.run_config.lr.peak_lr,
             # foreach=True,
             fused=True,
         )
-        return optimizer
+        return {
+            "optimizer": optimizer,
+            "lr_scheduler": {
+                "scheduler": torch.optim.lr_scheduler.LambdaLR(
+                    optimizer,
+                    partial(
+                        lr_lambda,
+                        warmup_steps=self.run_config.lr.warmup_steps,
+                        end_steps=self.run_config.lr.end_step,
+                        start_lr=self.run_config.lr.peak_lr,
+                        end_lr=self.run_config.lr.end_lr,
+                    ),
+                ),
+                "interval": "step",
+            },
+        }
