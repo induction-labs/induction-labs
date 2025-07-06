@@ -468,6 +468,7 @@ class ActionDataset(Dataset[ActionDataSample]):
         This method should be implemented to load the actual data from the paths.
         """
         # TODO: Handle case where index is out of bounds by returning a 0 sample and emitting a warning
+        index = 0
         path, stream_metadata = self.datas[index]
 
         # Placeholder implementation, replace with actual data loading logic

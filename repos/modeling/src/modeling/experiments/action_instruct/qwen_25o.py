@@ -5,28 +5,30 @@ from modeling.config import (
     DistributedConfig,
     ExperimentConfig,
     ExperimentMetadata,
+    GCSCheckpointConfig,
     RunConfig,
     WandbConfig,
 )
 from modeling.types import Accelerator, DType
 from modeling.data.video_action import RangeActionDatapackConfig
 from modeling.modules.action_instruct.qwen_25o import Qwen25OActionLITConfig
+from modeling.utils.cloud_path import CloudPath
 
 Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
     metadata=ExperimentMetadata(
         wandb=WandbConfig(
-            project="mouse_following", name="qwen25o_mouse_follow_unmask_actiontoken"
+            project="mouse_following", name="qwen25o_mouse_follow_overfit"
         ),
         output_dir="output",
-        checkpoint=None,
-        # checkpoint=GCSCheckpointConfig(
-        #     checkpoint_prefix=CloudPath.from_str(
-        #         "gs://induction-labs/checkpoints/qwen25o_mouse_follow/test_big_mlp",
-        #     ),
-        #     checkpoint_frequency=1000,  # Save every 1000 steps
-        #     checkpoint_first_step=False,  # Save the first step
-        #     checkpoint_last_step=True,  # Save the last step
-        # ),
+        # checkpoint=None,
+        checkpoint=GCSCheckpointConfig(
+            checkpoint_prefix=CloudPath.from_str(
+                "gs://induction-labs/checkpoints/qwen25o_mouse_follow/overfit",
+            ),
+            checkpoint_frequency=1000,  # Save every 1000 steps
+            checkpoint_first_step=False,  # Save the first step
+            checkpoint_last_step=True,  # Save the last step
+        ),
     ),
     module=Qwen25OActionLITConfig(
         # checkpoint_path=CloudPath.from_str(
@@ -37,16 +39,16 @@ Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
         # prefix="gs://induction-labs/jonathan/synth/garbage_cursor_follow_v1/sample_",
         prefix="gs://induction-labs/jonathan/synth/cursor_follow_v3/sample_",
         # prefix="gs://induction-labs/jonathan/synth/noise_cursor_follow_v1/sample_",
-        end_index=60000,  # 60k samples
+        end_index=5000,  # 60k samples
     ),
     run=RunConfig(
         lr=1e-4,
         sequence_length=4096,
-        batch_size=4,
-        steps_per_epoch=60000 / 4,
-        validation_every_n_steps=2,
+        batch_size=1,
+        steps_per_epoch=5000,
+        validation_every_n_steps=10,
         distributed=DistributedConfig(
-            devices_per_node=8,
+            devices_per_node=1,
         ),
         attn_impl=AttentionImplementation.SDPA,
         accelerator=Accelerator.CUDA,

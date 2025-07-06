@@ -17,6 +17,7 @@ from transformers.masking_utils import (
     create_causal_mask,
     create_sliding_window_causal_mask,
 )
+from dataclasses import dataclass
 
 
 class Qwen2_5OmniThinkerActionConfig(Qwen2_5OmniThinkerConfig):
@@ -34,6 +35,11 @@ class Qwen2_5OmniThinkerActionConfig(Qwen2_5OmniThinkerConfig):
         self.freeze_action_embedding = freeze_action_embedding
 
         super().__init__(**kwargs)
+
+
+@dataclass
+class Qwen2_5OmniActionCausalLMOutputWithPast(Qwen2_5OmniThinkerCausalLMOutputWithPast):
+    action_outputs: Optional[torch.FloatTensor] = None
 
 
 class Qwen2_5OmniThinkerForActionModelling(
@@ -215,7 +221,7 @@ class Qwen2_5OmniThinkerForActionModelling(
         use_audio_in_video: Optional[bool] = None,
         cache_position: Optional[torch.LongTensor] = None,
         video_second_per_grid: Optional[torch.LongTensor] = None,
-    ) -> Union[tuple, Qwen2_5OmniThinkerCausalLMOutputWithPast]:
+    ) -> Union[tuple, Qwen2_5OmniActionCausalLMOutputWithPast]:
         r"""
         input_features (`torch.FloatTensor` of shape `(batch_size, feature_size, feature_sequence_length)`):
             Float values mel features extracted from the raw speech waveform. Raw speech waveform can be obtained by
@@ -458,13 +464,14 @@ class Qwen2_5OmniThinkerForActionModelling(
             output = (logits,) + outputs
             return (loss,) + output if loss is not None else output
 
-        return Qwen2_5OmniThinkerCausalLMOutputWithPast(
+        return Qwen2_5OmniActionCausalLMOutputWithPast(
             loss=loss,
             logits=logits,
             past_key_values=outputs.past_key_values,
             hidden_states=outputs.hidden_states,
             attentions=outputs.attentions,
             rope_deltas=self.rope_deltas,
+            action_outputs=action_outputs,
         )
 
     def prepare_inputs_for_generation(

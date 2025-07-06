@@ -106,15 +106,31 @@ class Qwen25OActionLIT(
         # print(outputs.logits[inputs.action_tokens])
         # print(outputs.logits[inputs.action_tokens].shape)
 
-        predicted_image = self.visualize_action(outputs.logits[inputs.action_tokens])
+        predicted_image = self.visualize_action(
+            outputs.action_outputs[inputs.action_tokens]
+        )
         real_image = self.visualize_action(
             inputs.cursor_path[inputs.action_tokens].reshape(-1, 6)
+        )
+        self.log_dict(
+            {
+                "validation/action_outputs": [
+                    outputs.action_outputs[inputs.action_tokens]
+                    .to(dtype=torch.float32)
+                    .cpu()
+                    .numpy()
+                ],
+                "validation/real_action": [
+                    inputs.action_tokens.to(dtype=torch.float32).cpu().numpy()
+                ],
+            }
         )
 
         wandb.log(
             {
                 "validation/real_image": [wandb.Image(real_image)],
                 "validation/predicted_image": [wandb.Image(predicted_image)],
+                # "validation/step":
             }
         )
 
@@ -127,7 +143,6 @@ class Qwen25OActionLIT(
     ):
         predicted_cubics_x = []
         predicted_cubics_y = []
-        print(actions.shape)
         for value in actions:
             value = value.to(dtype=torch.float32).cpu().numpy()
             predicted_cubics_x.append(Cubic(m=value[0], n=value[1], a=value[2]))
