@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import functools
 from typing import Any, cast
 
 from modeling.checkpoints.save import Path
@@ -9,6 +10,7 @@ from modeling.modules.base_module import BaseLITModule, BaseModuleConfig
 from .qwen_25o_actions import (
     Qwen2_5OmniThinkerForActionModelling,
     Qwen2_5OmniThinkerActionConfig,
+    Qwen2_5OmniActionCausalLMOutputWithPast,
 )
 from synapse.actions.mouse_movements import (
     Cubic,
@@ -21,8 +23,68 @@ import wandb
 from torch.distributed.fsdp import fully_shard
 from torch.distributed.device_mesh import DeviceMesh
 import torch
+from synapse.utils.logging import configure_logging, logging
+import numpy as np
+
+logger = configure_logging(__name__, level=logging.DEBUG)
 
 MODEL_TYPE = Qwen2_5OmniThinkerForActionModelling
+
+
+def __call__(self, x: float):
+    """Evaluate the cubic at x (scalar or array)."""
+    c3, c2, c1 = self.coeffs()
+    return ((c3 * x + c2) * x + c1) * x  # Horner form
+
+
+def cubics_to_points_torch(
+    coeffs: torch.Tensor,  # [seq, 3]
+    num_points: int = 100,
+) -> torch.Tensor:
+    x = torch.linspace(0, 1, num_points, device=coeffs.device).unsqueeze(
+        0
+    )  # [1, num_points]
+    m, n, a = coeffs.unbind(dim=1)  # shape: [seq, 3]
+    c3 = m + n - 2 * a
+    c2 = 3 * a - 2 * m - n
+    c1 = m
+
+    c3 = c3.unsqueeze(1)  # shape: [seq, 1]
+    c2 = c2.unsqueeze(1)  # shape: [seq, 1]
+    c1 = c1.unsqueeze(1)  # shape: [seq, 1]
+    y = ((c3 * x + c2) * x + c1) * x  # [seq, num_points]
+    return y
+
+
+SCREEN_SIZE = (854, 480)
+
+
+def to_numpy_clean(tensor: torch.Tensor, dtype=torch.float32) -> np.ndarray:
+    """
+    Convert a PyTorch tensor to a NumPy array, ensuring it is on CPU and detached.
+    """
+    return tensor.to(dtype=dtype, device="cpu").detach().numpy()
+
+
+stupid_wandb_table = None
+
+
+@functools.lru_cache(maxsize=1)
+def get_stupid_wandb_table() -> wandb.Table:
+    """
+    Create a dummy wandb.Table for testing purposes.
+    This is used to avoid issues with empty tables in the validation step.
+    """
+    # I Can't believe wandb is real fucking company
+    # https://github.com/wandb/wandb/issues/2981#issuecomment-2922700231
+    global stupid_wandb_table
+    if stupid_wandb_table is None:
+        stupid_wandb_table = wandb.Table(
+            columns=["actual", "predicted"],
+            data=[],
+            log_mode="INCREMENTAL",
+        )
+    return stupid_wandb_table
 
 
 class Qwen25OActionLIT(
@@ -76,15 +138,66 @@ class Qwen25OActionLIT(
     def run_training_step(self, inputs: ActionDataSample):
         # Forward pass through the model
         outputs = self.model(
-            cursor_path=inputs.cursor_path,
+            # cursor_path=inputs.cursor_path,
             action_tokens=inputs.action_tokens,
             **inputs.qwen_inputs.model_dump(),
         )
-        assert isinstance(outputs.loss, torch.Tensor), (
+        return self.compute_loss(outputs, inputs)[0]
+
+    def compute_loss(
+        self, outputs: Qwen2_5OmniActionCausalLMOutputWithPast, inputs: ActionDataSample
+    ):
+        """
+        Compute the loss for the training step.
+        This method is called by run_training_step after the forward pass.
+        """
+        # print(f"{self.device=}")
+        output_actions = outputs.action_outputs[inputs.action_tokens].reshape(
+            -1, 2, 3
+        )  # [k, 2,3]
+        cursor_path = inputs.cursor_path[inputs.action_tokens].reshape(
+            -1, 2, 3
+        )  # [k, 2,3]
+        assert output_actions.shape == cursor_path.shape, (
+            f"Expected output_actions shape {output_actions.shape} to match "
+            f"cursor_path shape {cursor_path.shape}"
+        )
+        actual_xs, actual_ys = (
+            cubics_to_points_torch(
+                coeffs=cursor_path[:, 0, :].to(device=self.device, dtype=self._dtype)
+            ),
+            cubics_to_points_torch(
+                coeffs=cursor_path[:, 1, :].to(device=self.device, dtype=self._dtype)
+            ),
+        )  # [k, num_points]
+
+        predicted_xs, predicted_ys = (
+            cubics_to_points_torch(
+                coeffs=output_actions[:, 0, :].to(device=self.device, dtype=self._dtype)
+            ),
+            cubics_to_points_torch(
+                coeffs=output_actions[:, 1, :].to(device=self.device, dtype=self._dtype)
+            ),
+        )
+
+        # if inputs.cursor_path is not None:
+        loss = self.model.l2_loss(actual_xs, predicted_xs) + self.model.l2_loss(
+            actual_ys, predicted_ys
+        )
+        loss = loss.sum() / inputs.action_tokens.sum().clamp(min=1.0)
+        assert isinstance(loss, torch.Tensor), (
             f"Expected outputs.loss to be a Tensor, got {type(outputs.loss)}"
         )
 
-        return outputs.loss
+        return (
+            loss,
+            predicted_xs,
+            predicted_ys,
+            actual_xs,
+            actual_ys,
+            output_actions,
+            cursor_path,
+        )
 
     def run_validation_step(self, inputs: ActionDataSample):
         # Forward pass through the model
@@ -93,53 +206,59 @@ class Qwen25OActionLIT(
             action_tokens=inputs.action_tokens,
             **inputs.qwen_inputs.model_dump(),
         )
-        assert isinstance(outputs.loss, torch.Tensor), (
-            f"Expected outputs.loss to be a Tensor, got {type(outputs.loss)}"
+        (
+            loss,
+            predicted_xs,
+            predicted_ys,
+            actual_xs,
+            actual_ys,
+            output_actions,
+            cursor_path,
+        ) = self.compute_loss(outputs, inputs)
+
+        computed_predicted_image = generate_image_from_segments(
+            to_numpy_clean(predicted_xs[0]) + 0.5,
+            to_numpy_clean(predicted_ys[0]) + 0.5,
+            SCREEN_SIZE,
         )
 
-        # print(outputs.logits)
-        # print(outputs.logits.shape)
-        # print("---------")
-        # print(inputs.cursor_path[inputs.action_tokens])
-        # print(inputs.cursor_path[inputs.action_tokens].shape)
-        # print("---------")
-        # print(outputs.logits[inputs.action_tokens])
-        # print(outputs.logits[inputs.action_tokens].shape)
+        computed_real_image = generate_image_from_segments(
+            to_numpy_clean(actual_xs[0]) + 0.5,
+            to_numpy_clean(actual_ys[0]) + 0.5,
+            SCREEN_SIZE,
+        )
+        action_outputs = outputs.action_outputs[inputs.action_tokens]
+        cursor_path = inputs.cursor_path[inputs.action_tokens].reshape(-1, 6)
 
-        predicted_image = self.visualize_action(
-            outputs.action_outputs[inputs.action_tokens]
-        )
-        real_image = self.visualize_action(
-            inputs.cursor_path[inputs.action_tokens].reshape(-1, 6)
-        )
-        self.log_dict(
-            {
-                "validation/action_outputs": [
-                    outputs.action_outputs[inputs.action_tokens]
-                    .to(dtype=torch.float32)
-                    .cpu()
-                    .numpy()
-                ],
-                "validation/real_action": [
-                    inputs.action_tokens.to(dtype=torch.float32).cpu().numpy()
-                ],
-            }
-        )
+        np_predicted_xs, np_predicted_ys = self.visualize_action(action_outputs)
+        np_actual_xs, np_actual_ys = self.visualize_action(cursor_path)
 
-        wandb.log(
-            {
-                "validation/real_image": [wandb.Image(real_image)],
-                "validation/predicted_image": [wandb.Image(predicted_image)],
-                # "validation/step":
-            }
+        real_image = generate_image_from_segments(
+            np_actual_xs, np_actual_ys, SCREEN_SIZE
         )
+        predicted_image = generate_image_from_segments(
+            np_predicted_xs, np_predicted_ys, SCREEN_SIZE
+        )
+        table = get_stupid_wandb_table()
+        # table.add_data(
+        #     [paths.to_list() for paths in to_numpy_clean(cursor_path)],
+        #     [paths.to_list() for paths in to_numpy_clean(action_outputs)],
+        # )
 
-        return outputs.loss, {}
+        metrics = {
+            "validation/cubics": table,
+            "validation/real_image": [wandb.Image(real_image)],
+            "validation/predicted_image": [wandb.Image(predicted_image)],
+            "validation/computed_predicted_image": [
+                wandb.Image(computed_predicted_image)
+            ],
+            "validation/computed_real_image": [wandb.Image(computed_real_image)],
+        }
+        return loss, metrics
 
     def visualize_action(
         self,
         actions: torch.Tensor,  # [n, 6]
-        resolution: tuple[int, int] = (854, 480),
     ):
         predicted_cubics_x = []
         predicted_cubics_y = []
@@ -148,13 +267,11 @@ class Qwen25OActionLIT(
             predicted_cubics_x.append(Cubic(m=value[0], n=value[1], a=value[2]))
             predicted_cubics_y.append(Cubic(m=value[3], n=value[4], a=value[5]))
 
-        SCREEN_SIZE = (854, 480)
         ts, all_poly_x, all_poly_y = cubics_to_points(
             0.5, 0.5, predicted_cubics_x, predicted_cubics_y
         )
-        base_image = generate_image_from_segments(
-            ts, all_poly_x, all_poly_y, SCREEN_SIZE
-        )
+        return all_poly_x, all_poly_y
+        base_image = generate_image_from_segments(all_poly_x, all_poly_y, SCREEN_SIZE)
 
         return base_image
 

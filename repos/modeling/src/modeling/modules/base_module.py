@@ -15,10 +15,13 @@ from transformers.configuration_utils import PretrainedConfig
 
 from torch.distributed.fsdp import FSDPModule, MixedPrecisionPolicy, fully_shard
 from transformers.modeling_utils import PreTrainedModel
-from typing import Generic, TypeVar, cast, final
+from typing import Any, Generic, TypeVar, cast, final
 from synapse.utils.logging import configure_logging
 import os
 from modeling.checkpoints.load import download_model_checkpoint
+from wandb.sdk.wandb_run import Run
+from lightning.pytorch.loggers import WandbLogger
+
 
 logger = configure_logging(
     __file__,
@@ -157,10 +160,33 @@ class BaseLITModule(
         )
         return cast(MODEL_TYPE, loaded_model)
 
+    @final
+    def wandb_log(self, metrics: dict[str, Any]) -> None:
+        """
+        Log metrics to Wandb if available.
+        This method is a wrapper around the logger's log_dict method.
+        """
+        if self.wandb is not None:
+            self.wandb.log(metrics, step=self.global_step)
+
+    @final
+    @property
+    def wandb(self) -> Run | None:
+        """
+        Returns the Wandb experiment instance if available, otherwise None.
+        This is useful for logging and tracking experiments.
+        """
+        if isinstance(self.logger, WandbLogger) and isinstance(
+            self.logger.experiment, Run
+        ):
+            return self.logger.experiment
+        return None
+
     @abstractmethod
     def run_validation_step(
-        self, inputs: DATA_TYPE
-    ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
+        self,
+        inputs: DATA_TYPE,
+    ) -> tuple[torch.Tensor, dict[str, Any]]:
         """
         Abstract method to be implemented by subclasses for the evaluation step.
         This method should handle the forward pass and return the loss and metrics.
@@ -210,18 +236,19 @@ class BaseLITModule(
             **memory_metrics,
         }
 
-        self.log_dict(
+        self.wandb_log(
             metrics,
-            logger=True,
         )
         return loss
 
     @final
-    def validation_step(self, inputs: DATA_TYPE):
+    def validation_step(
+        self,
+        inputs: DATA_TYPE,
+    ):
         # Forward pass through the model
         with elapsed_timer() as timer:
             loss, val_metrics = self.run_validation_step(inputs)
-            loss = self.check_loss(loss)
             elapsed = timer()
 
         metrics = {
@@ -229,25 +256,8 @@ class BaseLITModule(
             "val/loss": loss,
             **val_metrics,
         }
-
+        self.wandb_log(metrics)
         return metrics
-
-    # def validation_epoch_end(self, validation_step_outputs):
-    #     metrics = {}
-    #     for output in validation_step_outputs:
-    #         for key, value in output.items():
-    #             if key not in metrics:
-    #                 metrics[key] = []
-    #             metrics[key].append(value)
-    #     # Average the metrics across all validation steps
-    #     for key, value in metrics.items():
-    #         metrics[key] = torch.tensor(value).mean()
-
-    #     self.log_dict(
-    #         metrics,
-    #         logger=True,
-    #         sync_dist=True,
-    #     )
 
     def configure_optimizers(self):
         optimizer = torch.optim.AdamW(

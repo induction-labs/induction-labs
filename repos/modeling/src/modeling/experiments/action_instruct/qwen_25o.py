@@ -56,7 +56,9 @@ Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
     ),
 )
 
-Qwen25OActionGPU_Test = Qwen25OActionExperimentConfig_GPU.testing_config(num_steps=10)
+Qwen25OActionGPU_Test = Qwen25OActionExperimentConfig_GPU.testing_config(
+    num_steps=1, enable_wandb=True
+)
 
 Qwen25OActionExperimentConfig_CPU = Qwen25OActionExperimentConfig_GPU.model_copy(
     update={"run": Qwen25OActionExperimentConfig_GPU.run.cpu_config()}

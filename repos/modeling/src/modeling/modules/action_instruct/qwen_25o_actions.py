@@ -45,6 +45,12 @@ class Qwen2_5OmniActionCausalLMOutputWithPast(Qwen2_5OmniThinkerCausalLMOutputWi
 class Qwen2_5OmniThinkerForActionModelling(
     Qwen2_5OmniPreTrainedModelForConditionalGeneration, GenerationMixin
 ):
+    def __call__(self, *args, **kwargs) -> Qwen2_5OmniActionCausalLMOutputWithPast:
+        """
+        Override the __call__ method to return the custom output type.
+        """
+        return super().__call__(*args, **kwargs)
+
     config_class = Qwen2_5OmniThinkerActionConfig
     base_model_prefix = "thinker"
     _no_split_modules = ["Qwen2_5OmniAudioEncoder", "Qwen2_5OmniVisionEncoder"]
@@ -451,21 +457,10 @@ class Qwen2_5OmniThinkerForActionModelling(
         logits = self.lm_head(hidden_states)  # [B, S, V]
         action_outputs = self.action_head(hidden_states)  # [B, S, 6]
 
-        loss = None
-        if cursor_path is not None:
-            loss = self.l2_loss(
-                action_outputs, cursor_path.reshape(*cursor_path.shape[:2], 6)
-            )  # [B, S, 6]
-            loss = torch.sum(loss, dim=-1)
-            loss *= action_tokens
-            loss = loss.sum() / action_tokens.sum().clamp(min=1.0)
-
         if not return_dict:
-            output = (logits,) + outputs
-            return (loss,) + output if loss is not None else output
+            raise NotImplementedError("bruh what is hf doing")
 
         return Qwen2_5OmniActionCausalLMOutputWithPast(
-            loss=loss,
             logits=logits,
             past_key_values=outputs.past_key_values,
             hidden_states=outputs.hidden_states,

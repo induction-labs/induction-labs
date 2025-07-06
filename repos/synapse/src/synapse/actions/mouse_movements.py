@@ -432,15 +432,11 @@ def cubics_to_points(
 
 
 def generate_image_from_segments(
-    t: np.ndarray, x_norm: np.ndarray, y_norm: np.ndarray, screen_size: tuple[int, int]
+    x_norm: np.ndarray, y_norm: np.ndarray, screen_size: tuple[int, int]
 ) -> Image.Image:
     x = x_norm * screen_size[0]
     y = y_norm * screen_size[1]
-    norm = plt.Normalize(t.min(), t.max())
-    colors = cm.viridis(norm(t))
-
-    # pick a colormap and normalize t to [0,1]
-    norm = (t - t.min()) / (t.max() - t.min())
+    norm = np.linspace(0, 1, len(x))
     colors = (cm.viridis(norm)[:, :3] * 255).astype(np.uint8)
 
     # make a blank RGBA image
