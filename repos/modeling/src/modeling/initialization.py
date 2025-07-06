@@ -13,6 +13,7 @@ from lightning.pytorch.loggers import Logger
 from modeling.checkpoints.save import GCSCheckpointCallback
 from synapse.utils.logging import configure_logging
 from modeling.utils.tmpdir import TmpDirContext
+from synapse.elapsed_timer import elapsed_timer
 
 logger = configure_logging(
     __name__,
@@ -64,6 +65,7 @@ class Initializer:
         """
         Initialize the experiment configuration from a given path.
         """
+        global_timer = elapsed_timer("Experiment.Global").__enter__()
         tmpdir_context = TmpDirContext().__enter__()
 
         loggers = Initializer.init_wandb(exp_config)
@@ -106,22 +108,19 @@ class Initializer:
             default_root_dir=exp_config.metadata.output_dir,
             log_every_n_steps=1,
         )
-        logger.debug("Trainer initialized with config:")
-
-        # Create temporary directory for module initialization
 
         try:
-            datapack = exp_config.datapack.create_datapack(exp_config)
-            assert tmpdir_context.tmpdir is not None
-            lit_module = exp_config.module.create_module(
-                exp_config.run, tmpdir_context.tmpdir
-            )
-            logger.debug("Data pack and module initialized.")
+            with elapsed_timer("Experiment.Init") as trainer_timer:
+                datapack = exp_config.datapack.create_datapack(exp_config)
+                assert tmpdir_context.tmpdir is not None
+                lit_module = exp_config.module.create_module(
+                    exp_config.run, tmpdir_context.tmpdir
+                )
 
+            trainer_timer.print_timing_tree(logger)
             yield trainer, datapack, lit_module
         finally:
             # Clean up temporary directory
             tmpdir_context.__exit__(None, None, None)
-
-
-#
+            global_timer.__exit__(None, None, None)
+            global_timer.print_timing_tree(logger)

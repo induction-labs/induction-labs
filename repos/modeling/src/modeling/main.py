@@ -89,8 +89,6 @@ def run(
             datapack,
             lit_module,
         ):
-            logger.debug("Experiment initialized successfully.")
-
             trainer.fit(
                 lit_module,
                 datamodule=datapack,

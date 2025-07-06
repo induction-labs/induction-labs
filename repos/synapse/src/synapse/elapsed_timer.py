@@ -8,6 +8,10 @@ from typing import Self
 
 from pydantic import BaseModel
 
+from synapse.utils.logging import configure_logging, logging
+
+timing_logger = configure_logging(__name__, level=logging.DEBUG)
+
 
 class TimingStats(BaseModel):
     total_duration: float
@@ -121,15 +125,19 @@ class TimingContext:
 
         return stats
 
-    def print_timing_tree(self) -> None:
+    def print_timing_tree(self, logger: logging.Logger | None = None) -> None:
         """Print the timing tree in a formatted way"""
-        print_timing_tree(self.get_timing_tree())
+        print_timing_tree(self.get_timing_tree(), logger=logger)
 
 
-def print_timing_tree(timing_tree: dict[str, TimingStats]) -> None:
+def print_timing_tree(
+    timing_tree: dict[str, TimingStats], logger: logging.Logger | None = None
+) -> None:
+    if logger is None:
+        logger = timing_logger
     """Print the timing tree in a formatted way"""
     if not timing_tree:
-        print("No timing data recorded")
+        logger.info("No timing data recorded")
         return
 
     # Calculate column widths
@@ -140,12 +148,12 @@ def print_timing_tree(timing_tree: dict[str, TimingStats]) -> None:
 
     # Print header
     header = f"{'Name':<{name_width}} | {'Duration':<{duration_width}} | {'First Enter':<{first_width}} | {'Last Exit':<{last_width}}"
-    print(header)
-    print("-" * len(header))
+    logger.info(header)
+    logger.info("-" * len(header))
 
     # Print data rows
     for name, stats in timing_tree.items():
-        print(
+        logger.info(
             f"{name:<{name_width}} | {stats.total_duration:<{duration_width}.6f} | {stats.first_enter:<{first_width}.6f} | {stats.last_exit:<{last_width}.6f}"
         )
 
