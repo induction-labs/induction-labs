@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from modeling.config import RunConfig
+from modeling.modules.base_module import GlobalState
 from torch.distributed.fsdp import fully_shard
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.fsdp import MixedPrecisionPolicy
@@ -10,9 +11,14 @@ from modeling.modules.text_pretrain.default import (
     TextPretrainLIT,
     TextPretrainLITConfig,
 )
+from modeling.utils.class_property import class_property
 
 
 class Llama3LIT(TextPretrainLIT[LlamaForCausalLM]):
+    @class_property
+    def model_cls(cls) -> type[LlamaForCausalLM]:
+        return LlamaForCausalLM
+
     def shard_model(
         self,
         *,
@@ -49,5 +55,7 @@ class Llama3LITConfig(TextPretrainLITConfig):
     model_name: str = "meta-llama/Meta-Llama-3-8B"
     tokenizer_name: str = "meta-llama/Meta-Llama-3-8B"
 
-    def create_module(self, run_config: RunConfig, tmp_dir: Path) -> Llama3LIT:
-        return Llama3LIT(self, run_config, tmp_dir)
+    def create_module(
+        self, run_config: RunConfig, tmp_dir: Path, global_state: GlobalState
+    ) -> Llama3LIT:
+        return Llama3LIT(self, run_config, tmp_dir, global_state)

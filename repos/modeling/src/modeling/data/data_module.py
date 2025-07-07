@@ -5,7 +5,7 @@ from pydantic import BaseModel, ConfigDict
 import torch
 
 
-class BaseDataSample(ABC, BaseModel):
+class BaseDataSample(BaseModel, ABC):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     @abstractmethod

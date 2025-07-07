@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import lightning as L
-from lightning.pytorch.loggers import WandbLogger
 from lightning.pytorch.profilers import PyTorchProfiler
 from transformers.modeling_utils import PreTrainedModel
 from wandb.sdk.wandb_run import Run
@@ -9,15 +8,14 @@ from contextlib import contextmanager
 from typing import Iterator
 
 from modeling.config import ExperimentConfig, GlobalState
-from lightning.fabric.loggers.logger import _DummyExperiment
 from lightning.pytorch.strategies import ModelParallelStrategy
-from lightning.pytorch.loggers import Logger
 from modeling.checkpoints.save import GCSCheckpointCallback
 from synapse.utils.logging import configure_logging
 from modeling.utils.tmpdir import TmpDirContext
 from synapse.elapsed_timer import elapsed_timer
 from modeling.data.data_module import BaseDataModule, BaseDataSample
 from modeling.modules.base_module import BaseLITModule, BaseModuleConfig
+import wandb
 
 logger = configure_logging(
     __name__,
@@ -32,34 +30,43 @@ class Initializer:
     """
 
     @staticmethod
-    def init_wandb(exp_config: ExperimentConfig) -> list[Logger]:
+    def init_wandb(exp_config: ExperimentConfig) -> Run | None:
         """
         Initialize a WandbLogger instance with the configuration.
         """
-        loggers: list[Logger] = []
         if wandb_config := exp_config.metadata.wandb:
-            logger.debug("Initializing WandbLogger with config: %s", wandb_config)
-            wandb_logger = WandbLogger(
+            wandb_run = wandb.init(
                 project=wandb_config.project,
                 name=wandb_config.name,
-                save_dir=exp_config.metadata.output_dir,
+                dir=exp_config.metadata.output_dir,
+                config=exp_config.model_dump(serialize_as_any=True),
+                # mode="disabled" if not exp_config.metadata.enable_wandb else None,
             )
-            wandb_experiment = wandb_logger.experiment
-            logger.debug(
-                "WandbLogger initialized with experiment: %s", wandb_experiment
-            )
-            assert isinstance(wandb_experiment, Run) or isinstance(
-                wandb_experiment, _DummyExperiment
-            ), f"{wandb_experiment=} should be an instance of wandb.sdk.wandb_run.Run"
-            if isinstance(wandb_experiment, Run):
-                wandb_experiment.config.update(
-                    exp_config.model_dump(serialize_as_any=True)
-                )
-            logger.debug(
-                "WandbLogger configuration updated with experiment config",
-            )
-            loggers.append(wandb_logger)
-        return loggers
+            return wandb_run
+            # logger.debug("Initializing WandbLogger with config: %s", wandb_config)
+            # wandb_logger = WandbLogger(
+            #     project=wandb_config.project,
+            #     name=wandb_config.name,
+            #     save_dir=exp_config.metadata.output_dir,
+            # )
+            # wandb_experiment = wandb_logger.experiment
+            # logger.debug(
+            #     "WandbLogger initialized with experiment: %s", wandb_experiment
+            # )
+            # assert isinstance(wandb_experiment, Run) or isinstance(
+            #     wandb_experiment, _DummyExperiment
+            # ), f"{wandb_experiment=} should be an instance of wandb.sdk.wandb_run.Run"
+            # if isinstance(wandb_experiment, Run):
+            #     wandb_experiment.config.update(
+            #         exp_config.model_dump(serialize_as_any=True)
+            #     )
+            #     logger.debug(
+            #         "WandbLogger configuration updated with experiment config",
+            #     )
+
+            #     return wandb_experiment
+            # loggers.append(wandb_logger)
+        return None
 
     @staticmethod
     @contextmanager
@@ -78,7 +85,9 @@ class Initializer:
         global_timer = elapsed_timer("Experiment.Global").__enter__()
         tmpdir_context = TmpDirContext().__enter__()
 
-        loggers = Initializer.init_wandb(exp_config)
+        wandb_run = Initializer.init_wandb(exp_config)
+        # This is so troll
+        global_state.wandb_run = wandb_run
         # https://lightning.ai/docs/pytorch/stable/api/lightning.pytorch.loggers.wandb.html#module-lightning.pytorch.loggers.wandb
 
         strategy = ModelParallelStrategy(  # <- uses FSDP2 under the hood
@@ -106,7 +115,7 @@ class Initializer:
             strategy=strategy,
             precision=exp_config.run.lightning_precision,
             # Logging and checkpointing
-            logger=loggers,
+            # logger=loggers,
             callbacks=(
                 [
                     GCSCheckpointCallback(
@@ -133,6 +142,9 @@ class Initializer:
             yield trainer, datapack, lit_module
         finally:
             # Clean up temporary directory
+            if wandb_run is not None:
+                wandb_run.finish()
+
             tmpdir_context.__exit__(None, None, None)
             global_timer.__exit__(None, None, None)
             global_timer.print_timing_tree(logger)

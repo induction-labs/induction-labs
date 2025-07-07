@@ -3,8 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, cast
 
-from modeling.config import DatapackConfig, RunConfig
-from modeling.data.text_train import TextPretrainDatapackConfig
+from modeling.config import DatapackConfig, GlobalState, RunConfig
+from modeling.data.text_train import TextPretrainDatapackConfig, TextPretrainDataSample
 from modeling.modules.text_module import TextLIT, TextLITConfig, MODEL_TYPE
 from transformers import (
     AutoConfig,
@@ -27,7 +27,9 @@ logger = configure_logging(
 )
 
 
-class TextPretrainLIT(TextLIT[MODEL_TYPE, dict, "TextPretrainLITConfig"]):
+class TextPretrainLIT(
+    TextLIT[MODEL_TYPE, TextPretrainDataSample, "TextPretrainLITConfig"]
+):
     def init_model_meta(self, *args) -> MODEL_TYPE:
         model_config = AutoConfig.from_pretrained(
             self.module_config.model_name, trust_remote_code=True
@@ -59,14 +61,14 @@ class TextPretrainLIT(TextLIT[MODEL_TYPE, dict, "TextPretrainLITConfig"]):
         fsdp_config = {"mesh": dp_mesh, "mp_policy": mp_policy}
         return fully_shard(self.model, **fsdp_config)
 
-    def run_training_step(self, inputs: dict) -> torch.Tensor:
+    def run_training_step(self, inputs: TextPretrainDataSample) -> torch.Tensor:
         """
         Run a training step with the provided inputs.
         The inputs should be a dictionary containing the necessary data for the model.
         """
         # Forward pass through the model
         outputs = self.model(
-            **inputs,  # inputs should contain the necessary model inputs
+            **inputs.model_dump(),  # inputs should contain the necessary model inputs
         )
         assert isinstance(outputs.loss, torch.Tensor), (
             f"Expected outputs.loss to be a Tensor, got {type(outputs.loss)}"
@@ -74,7 +76,7 @@ class TextPretrainLIT(TextLIT[MODEL_TYPE, dict, "TextPretrainLITConfig"]):
         return outputs.loss
 
     def run_validation_step(
-        self, inputs: dict
+        self, inputs: TextPretrainDataSample
     ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
         """
         Run a training step with the provided inputs.
@@ -82,7 +84,7 @@ class TextPretrainLIT(TextLIT[MODEL_TYPE, dict, "TextPretrainLITConfig"]):
         """
         # Forward pass through the model
         outputs = self.model(
-            **inputs,  # inputs should contain the necessary model inputs
+            **inputs.model_dump(),  # inputs should contain the necessary model inputs
         )
 
         assert isinstance(outputs.loss, torch.Tensor), (
@@ -142,5 +144,7 @@ class TextPretrainLITConfig(TextLITConfig):
         )
         return datapack_config
 
-    def create_module(self, run_config: RunConfig, tmp_dir: Path) -> TextPretrainLIT:
-        return TextPretrainLIT(self, run_config, tmp_dir)
+    def create_module(
+        self, run_config: RunConfig, tmp_dir: Path, global_state: GlobalState
+    ) -> TextPretrainLIT:
+        return TextPretrainLIT(self, run_config, tmp_dir, global_state)

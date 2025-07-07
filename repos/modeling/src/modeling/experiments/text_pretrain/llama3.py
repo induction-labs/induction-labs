@@ -22,8 +22,8 @@ Llama3PretrainExperimentConfig = ExperimentConfig(
         checkpoint=None,
     ),
     module=Llama3LITConfig(
-        model_name="meta-llama/Llama-3.1-8B",
-        tokenizer_name="meta-llama/Llama-3.1-8B",
+        model_name="meta-llama/Meta-Llama-3-8B",
+        tokenizer_name="meta-llama/Meta-Llama-3-8B",
     ),
     datapack=TextPretrainDatapackConfig(),
     run=RunConfig(
@@ -34,10 +34,10 @@ Llama3PretrainExperimentConfig = ExperimentConfig(
             end_step=500,  # 10k steps
         ),
         sequence_length=1024,
-        batch_size=8,
+        batch_size=1,
         steps_per_epoch=5000,
         distributed=DistributedConfig(
-            devices_per_node=8,
+            devices_per_node=1,
         ),
         attn_impl=AttentionImplementation.SDPA,
         accelerator=Accelerator.CUDA,
@@ -45,7 +45,7 @@ Llama3PretrainExperimentConfig = ExperimentConfig(
     ),
 )
 Llama3PretrainTest = Llama3PretrainExperimentConfig.testing_config(
-    num_steps=100, enable_wandb=True
+    num_steps=5, enable_wandb=False
 )
 
 # mdl export modeling.experiments.text_pretrain.llama3.Llama3PretrainExperimentConfig

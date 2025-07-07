@@ -4,8 +4,8 @@ from abc import ABC, abstractmethod
 from datetime import UTC, datetime
 from typing import Any, Generic, Self, TypeVar
 
-import lightning as L
 from pydantic import BaseModel, ConfigDict, Field, computed_field, model_validator
+
 
 from modeling.utils.git import get_git_commit_sha, get_git_commit_sha_short
 from modeling.types import Accelerator, DType, AttentionImplementation
@@ -20,6 +20,7 @@ from lightning.fabric.plugins.precision.precision import (
     _PRECISION_INPUT,
 )
 
+from dataclasses import dataclass
 from synapse.utils.logging import configure_logging
 import logging
 from typing import TYPE_CHECKING
@@ -28,6 +29,7 @@ if TYPE_CHECKING:
     from modeling.modules.base_module import BaseLITModule
     from modeling.data.data_module import BaseDataModule
     import torch
+    from wandb.sdk.wandb_run import Run
 
 logger = configure_logging(__name__, logging.DEBUG)
 # _T = TypeVar("_T")
@@ -158,16 +160,16 @@ class ExperimentMetadata(BaseModel):
     commit_short: str = Field(default_factory=get_git_commit_sha_short)
 
 
-class GlobalState(BaseModel):
+@dataclass
+class GlobalState:
     """
     Global state for the module, used to store shared information across different parts of the module.
     This can include things like the current step, global loss, etc.
     """
 
-    model_config = {"arbitrary_types_allowed": True}
-
     global_step: int
     device: "torch.device"
+    wandb_run: Optional["Run"] = None
 
 
 class ModuleConfig(ABC, BaseModel):

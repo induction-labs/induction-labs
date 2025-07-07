@@ -6,6 +6,7 @@ from modeling.checkpoints.save import Path
 from modeling.config import DatapackConfig, RunConfig
 from modeling.data.video_action import ActionDataSample, ActionDatapackConfig
 from modeling.modules.base_module import BaseLITModule, BaseModuleConfig
+from modeling.utils.class_property import class_property
 from .qwen_25o_actions import (
     Qwen2_5OmniThinkerForActionModelling,
     Qwen2_5OmniThinkerActionConfig,
@@ -73,7 +74,11 @@ class Qwen25OActionLIT(
     Inherits from TextPretrainLIT and uses the Qwen-2.5O model.
     """
 
-    def init_model_meta(
+    @class_property
+    def model_cls(cls) -> type[MODEL_TYPE]:
+        return MODEL_TYPE
+
+    def init_modei_meta(
         self,
     ):
         module_config = self.module_config
@@ -111,10 +116,11 @@ class Qwen25OActionLIT(
             config=self.model.config,
             torch_dtype=self.dtype,
             device_map={
-                "": self.device
+                "": self.device  # Use the device index for the model
             },  # Ensure model is loaded on the correct device
             attn_implementation=self.attn_impl,
         ).train()
+
         return cast(MODEL_TYPE, loaded_model)
 
     def run_training_step(self, inputs: ActionDataSample):
@@ -233,7 +239,7 @@ class Qwen25OActionLIT(
         )
 
         metrics = {
-            # f"validation/cubics/{self.trainer.global_step}": table,
+            f"validation/cubics/{self.global_state.global_step}": table,
             "validation/real_image": [wandb.Image(real_image)],
             "validation/predicted_image": [wandb.Image(predicted_image)],
             "validation/computed_predicted_image": [

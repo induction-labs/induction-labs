@@ -4,7 +4,6 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from functools import partial
 
-from accelerate import load_checkpoint_and_dispatch
 from modeling.utils.cloud_path import CloudPath
 import torch
 from modeling.config import ModuleConfig, RunConfig, GlobalState
@@ -23,6 +22,8 @@ from pydantic import BaseModel
 from torch.optim import Optimizer
 from torch.optim.lr_scheduler import LRScheduler
 import logging
+from modeling.utils.class_property import class_property
+from wandb.sdk.wandb_run import Run
 
 
 logger = configure_logging(
@@ -95,6 +96,15 @@ class OptimizerConfig(BaseModel):
 class BaseLITModule(ABC, Generic[MODEL_TYPE, DATA_TYPE, CONFIG_TYPE]):
     model: MODEL_TYPE
 
+    @class_property
+    @abstractmethod
+    def model_cls(cls) -> type[MODEL_TYPE]:
+        """
+        Class property that should return the model class type.
+        This is used to instantiate the model in meta mode and load weights.
+        """
+        raise NotImplementedError("Subclasses must implement this method.")
+
     @property
     def device(self) -> torch.device:
         """
@@ -155,6 +165,7 @@ class BaseLITModule(ABC, Generic[MODEL_TYPE, DATA_TYPE, CONFIG_TYPE]):
         if isinstance(self.model, FSDPModule):
             return  # already configured
         self.model = self.load_weights(self.tmp_dir)
+        # self.model = torch.compile(self.model, fullgraph=True)
 
         # assert isinstance(self.device_mesh, DeviceMesh), (
         #     f"Expected device_mesh to be a DeviceMesh, got {type(self.device_mesh)}"
@@ -194,35 +205,45 @@ class BaseLITModule(ABC, Generic[MODEL_TYPE, DATA_TYPE, CONFIG_TYPE]):
         logger.debug(f"Loading model weights from {tmpdir} to device {self.device}")
         # Load the model weights and dispatch them to the appropriate devices
         self.model.to_empty(device=self.device)
-        loaded_model = load_checkpoint_and_dispatch(
-            self.model,
-            checkpoint=tmpdir,  # hub ID or local folder
-            device_map={"": self.device},
-            dtype=self.model.dtype,
-        )
+        # For now we load from hf only bc load_checkpoint_and_dispatch is broken
+        # safetensors_rust.SafetensorError: device cuda is invalid
+
+        loaded_model = self.model_cls.from_pretrained(
+            self.module_config.model_name,
+            config=self.model.config,
+            torch_dtype=self.dtype,
+            device_map={
+                "": self.device  # Use the device index for the model
+            },  # Ensure model is loaded on the correct device
+            attn_implementation=self.attn_impl,
+        ).train()
+        # loaded_model = load_checkpoint_and_dispatch(
+        #     self.model,
+        #     checkpoint=tmpdir,  # hub ID or local folder
+        #     device_map={"": self.device},
+        #     dtype=self.model.dtype,
+        # )
+
         return cast(MODEL_TYPE, loaded_model)
 
-    # @final
-    # def wandb_log(self, metrics: dict[str, Any]) -> None:
-    #     """
-    #     Log metrics to Wandb if available.
-    #     This method is a wrapper around the logger's log_dict method.
-    #     """
-    #     if self.wandb is not None:
-    #         self.wandb.log(metrics, step=self.global_step)
+    @final
+    def wandb_log(self, metrics: dict[str, Any]) -> None:
+        """
+        Log metrics to Wandb if available.
+        This method is a wrapper around the logger's log_dict method.
+        """
+        # logger.debug(metrics)
+        if self.wandb is not None:
+            self.wandb.log(metrics)
 
-    # @final
-    # @property
-    # def wandb(self) -> Run | None:
-    #     """
-    #     Returns the Wandb experiment instance if available, otherwise None.
-    #     This is useful for logging and tracking experiments.
-    #     """
-    #     if isinstance(self.logger, WandbLogger) and isinstance(
-    #         self.logger.experiment, Run
-    #     ):
-    #         return self.logger.experiment
-    #     return None
+    @final
+    @property
+    def wandb(self) -> Run | None:
+        """
+        Returns the Wandb experiment instance if available, otherwise None.
+        This is useful for logging and tracking experiments.
+        """
+        return self.global_state.wandb_run
 
     @abstractmethod
     def run_validation_step(
@@ -279,7 +300,7 @@ class BaseLITModule(ABC, Generic[MODEL_TYPE, DATA_TYPE, CONFIG_TYPE]):
             **memory_metrics,
         }
 
-        # self.log_dict(metrics, logger=True)
+        self.wandb_log(metrics)
         return loss
 
     @final
@@ -297,7 +318,7 @@ class BaseLITModule(ABC, Generic[MODEL_TYPE, DATA_TYPE, CONFIG_TYPE]):
             "val/loss": loss,
             **val_metrics,
         }
-        # self.wandb_log(metrics)
+        self.wandb_log(metrics)
         return metrics
 
     def configure_optimizers(self) -> OptimizerConfig:

@@ -13,9 +13,14 @@ from modeling.modules.text_pretrain.default import (
     TextPretrainLIT,
     TextPretrainLITConfig,
 )
+from modeling.utils.class_property import class_property
 
 
 class Qwen3LIT(TextPretrainLIT[Qwen3ForCausalLM]):
+    @class_property
+    def model_cls(cls) -> type[Qwen3ForCausalLM]:
+        return Qwen3ForCausalLM
+
     def shard_model(
         self,
         *,
@@ -52,5 +57,7 @@ class Qwen3LITConfig(TextPretrainLITConfig):
     model_name: str = "Qwen/Qwen3-0.6B"
     tokenizer_name: str = "Qwen/Qwen3-0.6B"
 
-    def create_module(self, run_config: RunConfig, tmp_dir: Path) -> Qwen3LIT:
-        return Qwen3LIT(self, run_config, tmp_dir)
+    def create_module(
+        self, run_config: RunConfig, tmp_dir: Path, global_state
+    ) -> Qwen3LIT:
+        return Qwen3LIT(self, run_config, tmp_dir, global_state)

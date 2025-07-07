@@ -3,23 +3,46 @@ from __future__ import annotations
 from typing import Any
 
 import datasets
-import lightning as L
 from modeling.config import DatapackConfig, ExperimentConfig, ModuleConfig
 from modeling.modules.text_module import TextLITConfig
 from pydantic import BaseModel, ConfigDict
 from torch.utils.data import DataLoader
-from transformers.data.data_collator import default_data_collator
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 
 import torch
 from torch.utils.data import Dataset
 from typing import List, Callable, Optional
 from synapse.utils.logging import configure_logging
+from modeling.data.data_module import BaseDataModule, BaseDataSample
 
 logger = configure_logging(__name__)
 
 
-class GenericSFTDataset(Dataset):
+class TextPretrainDataSample(BaseDataSample):
+    """
+    A data sample for text pretraining tasks.
+    This class extends BaseDataSample to include input IDs and labels.
+    """
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    input_ids: torch.Tensor
+    labels: torch.Tensor
+
+    def to_device(
+        self, device: torch.device, non_blocking: bool = False
+    ) -> TextPretrainDataSample:
+        """
+        Move the data sample to the specified device.
+        This is used to ensure that the data is on the correct device for training or evaluation.
+        """
+        return TextPretrainDataSample(
+            input_ids=self.input_ids.to(device, non_blocking=non_blocking),
+            labels=self.labels.to(device, non_blocking=non_blocking),
+        )
+
+
+class GenericSFTDataset(Dataset[TextPretrainDataSample]):
     """
     A generic PyTorch Dataset for sequence fine-tuning (SFT) tasks.
 
@@ -59,17 +82,29 @@ class GenericSFTDataset(Dataset):
     def __len__(self) -> int:
         return len(self.examples)
 
-    def __getitem__(self, idx: int) -> dict:
+    def __getitem__(self, idx: int) -> TextPretrainDataSample:
         input_ids = self.examples[idx]
         # For SFT, labels are the same as inputs (language modeling)
         labels = input_ids.copy()
-        return {
-            "input_ids": torch.tensor(input_ids, dtype=torch.long),
-            "labels": torch.tensor(labels, dtype=torch.long),
-        }
+        return TextPretrainDataSample(
+            input_ids=torch.tensor(input_ids, dtype=torch.long),
+            labels=torch.tensor(labels, dtype=torch.long),
+        )
+
+    @classmethod
+    def combine_batch(
+        cls, batch: list[TextPretrainDataSample]
+    ) -> TextPretrainDataSample:
+        """
+        Combine a batch of TextPretrainDataSamples into a single TextPretrainDataSample.
+        This is used to prepare the data for training or evaluation.
+        """
+        input_ids = torch.stack([sample.input_ids for sample in batch])
+        labels = torch.stack([sample.labels for sample in batch])
+        return TextPretrainDataSample(input_ids=input_ids, labels=labels)
 
 
-class TextPretrainDataModule(L.LightningDataModule):
+class TextPretrainDataModule(BaseDataModule[TextPretrainDataSample]):
     def __init__(
         self,
         config: TextPretrainDatapackConfig,
@@ -104,7 +139,7 @@ class TextPretrainDataModule(L.LightningDataModule):
             batch_size=self.extra_args.batch_size,
             shuffle=True,
             drop_last=True,
-            collate_fn=default_data_collator,
+            collate_fn=GenericSFTDataset.combine_batch,  # type: ignore
         )
 
     def val_dataloader(self) -> DataLoader:
@@ -114,7 +149,7 @@ class TextPretrainDataModule(L.LightningDataModule):
             batch_size=self.extra_args.batch_size,
             shuffle=False,
             drop_last=False,
-            collate_fn=default_data_collator,
+            collate_fn=GenericSFTDataset.combine_batch,  # type: ignore
         )
 
 
