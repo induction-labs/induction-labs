@@ -52,7 +52,7 @@ Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
         sequence_length=4096,
         batch_size=1,
         steps_per_epoch=1000,
-        validation_every_n_steps=32,
+        validation_every_n_steps=-1,
         distributed=DistributedConfig(
             devices_per_node=1,
         ),
@@ -63,7 +63,7 @@ Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
 )
 
 Qwen25OActionGPU_Test = Qwen25OActionExperimentConfig_GPU.testing_config(
-    num_steps=1, enable_wandb=True
+    num_steps=10, enable_wandb=False
 )
 
 Qwen25OActionExperimentConfig_CPU = Qwen25OActionExperimentConfig_GPU.model_copy(

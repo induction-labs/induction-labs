@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from modeling.data.data_module import BaseDataSample
 import typer
 from synapse.utils.logging import configure_logging
 
@@ -71,6 +72,7 @@ def run(
         from modeling.config.serde import (
             build_experiment_config,
         )
+        from modeling.config import GlobalState
         from modeling.initialization import Initializer
         import torch
 
@@ -82,17 +84,75 @@ def run(
         # Here you would typically initialize and run your model training or evaluation
         logger.info("Running with config")
         logger.info(experiment_config.model_dump_json(serialize_as_any=True, indent=2))
+        global_state = GlobalState(
+            global_step=0,
+            device=torch.device("cuda" if torch.cuda.is_available() else "cpu"),
+        )
+        logger.debug(f"Global state initialized with device: {global_state.device=}")
 
         # Initialize the experiment configuration
-        with Initializer.init_experiment(experiment_config) as (
-            trainer,
+        with Initializer.init_experiment(experiment_config, global_state) as (
+            _,  # trainer (unused in custom training loop)
             datapack,
             lit_module,
         ):
-            trainer.fit(
-                lit_module,
-                datamodule=datapack,
+            # Setup data and model
+            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            datapack.setup("fit")
+            lit_module.configure_model()
+
+            # Get training dataloader
+            train_dataloader = datapack.train_dataloader()
+
+            # Configure optimizer and scheduler
+            optimizer_config = lit_module.configure_optimizers()
+            optimizer = optimizer_config.optimizer
+            lr_scheduler = optimizer_config.lr_scheduler.scheduler
+
+            # Move model to device
+
+            # Training loop
+
+            num_epochs = experiment_config.run.num_epochs
+            steps_per_epoch = experiment_config.run.steps_per_epoch
+
+            logger.info(
+                f"Starting training: {num_epochs} epochs, {steps_per_epoch} steps per epoch"
             )
+
+            for epoch in range(num_epochs):
+                lit_module.model.train()
+
+                for step, batch in enumerate(train_dataloader):
+                    assert isinstance(batch, BaseDataSample)
+                    if step >= steps_per_epoch:
+                        break
+
+                    # Move batch to device
+                    batch = batch.to_device(device)
+                    # Zero gradients
+                    optimizer.zero_grad()
+
+                    # Forward pass
+                    loss = lit_module.training_step(batch)
+
+                    # Backward pass
+                    loss.backward()
+
+                    # Update weights
+                    optimizer.step()
+                    lr_scheduler.step()
+
+                    global_state.global_step += 1
+
+                    if global_state.global_step % 10 == 0:
+                        logger.info(
+                            f"Epoch {epoch}, Step {step}, Global Step {global_state.global_step}, Loss: {loss.item():.4f}"
+                        )
+
+                logger.info(f"Completed epoch {epoch}/{num_epochs}")
+
+            logger.info(f"Training completed. Total steps: {global_state.global_step}")
     except Exception as e:
         if get_rank() == 0:
             raise e

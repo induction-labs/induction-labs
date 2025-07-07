@@ -104,11 +104,15 @@ class Qwen25OActionLIT(
         """
         # logger.debug(f"Loading model weights from {tmpdir}")
         # Load the model weights and dispatch them to the appropriate devices
-        self.model.to_empty(device=torch.cuda.current_device())
+        logger.debug(f"Loading model weights from {tmpdir} to device {self.device}")
+        self.model.to_empty(device=self.device)
         loaded_model = MODEL_TYPE.from_pretrained(
             self.module_config.model_name,
             config=self.model.config,
             torch_dtype=self.dtype,
+            device_map={
+                "": self.device
+            },  # Ensure model is loaded on the correct device
             attn_implementation=self.attn_impl,
         ).train()
         return cast(MODEL_TYPE, loaded_model)
@@ -142,19 +146,19 @@ class Qwen25OActionLIT(
         )
         actual_xs, actual_ys = (
             cubics_to_points_torch(
-                coeffs=cursor_path[:, 0, :].to(device=self.device, dtype=self._dtype)
+                coeffs=cursor_path[:, 0, :].to(device=self.device, dtype=self.dtype)
             ),
             cubics_to_points_torch(
-                coeffs=cursor_path[:, 1, :].to(device=self.device, dtype=self._dtype)
+                coeffs=cursor_path[:, 1, :].to(device=self.device, dtype=self.dtype)
             ),
         )  # [k, num_points]
 
         predicted_xs, predicted_ys = (
             cubics_to_points_torch(
-                coeffs=output_actions[:, 0, :].to(device=self.device, dtype=self._dtype)
+                coeffs=output_actions[:, 0, :].to(device=self.device, dtype=self.dtype)
             ),
             cubics_to_points_torch(
-                coeffs=output_actions[:, 1, :].to(device=self.device, dtype=self._dtype)
+                coeffs=output_actions[:, 1, :].to(device=self.device, dtype=self.dtype)
             ),
         )
 
@@ -229,7 +233,7 @@ class Qwen25OActionLIT(
         )
 
         metrics = {
-            f"validation/cubics/{self.trainer.global_step}": table,
+            # f"validation/cubics/{self.trainer.global_step}": table,
             "validation/real_image": [wandb.Image(real_image)],
             "validation/predicted_image": [wandb.Image(predicted_image)],
             "validation/computed_predicted_image": [
@@ -315,5 +319,7 @@ class Qwen25OActionLITConfig(BaseModuleConfig):
         )
         return datapack_config
 
-    def create_module(self, run_config: RunConfig, tmp_dir: Path) -> Qwen25OActionLIT:
-        return Qwen25OActionLIT(self, run_config, tmp_dir)
+    def create_module(
+        self, run_config: RunConfig, tmp_dir: Path, global_state
+    ) -> Qwen25OActionLIT:
+        return Qwen25OActionLIT(self, run_config, tmp_dir, global_state)

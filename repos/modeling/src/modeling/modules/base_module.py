@@ -5,10 +5,9 @@ from pathlib import Path
 from functools import partial
 
 from accelerate import load_checkpoint_and_dispatch
-import lightning as L
 from modeling.utils.cloud_path import CloudPath
 import torch
-from modeling.config import ModuleConfig, RunConfig
+from modeling.config import ModuleConfig, RunConfig, GlobalState
 from modeling.utils.elapsed_timer import elapsed_timer
 from modeling.utils.get_attn_impl import check_attn_impl
 from torch.distributed.device_mesh import DeviceMesh
@@ -20,13 +19,15 @@ from typing import Any, Generic, TypeVar, cast, final
 from synapse.utils.logging import configure_logging
 import os
 from modeling.checkpoints.load import download_model_checkpoint
-from wandb.sdk.wandb_run import Run
-from lightning.pytorch.loggers import WandbLogger
+from pydantic import BaseModel
+from torch.optim import Optimizer
+from torch.optim.lr_scheduler import LRScheduler
+import logging
 
 
 logger = configure_logging(
     __file__,
-    #    level=logging.DEBUG
+    level=logging.DEBUG,  # Set to DEBUG for more verbose output
 )
 
 
@@ -52,7 +53,7 @@ class BaseModuleConfig(ModuleConfig):
 
     @abstractmethod
     def create_module(
-        self, run_config: RunConfig, tmp_dir: Path
+        self, run_config: RunConfig, tmp_dir: Path, global_state: GlobalState
     ) -> "BaseLITModule": ...
 
 
@@ -73,10 +74,34 @@ def get_mem_stats(device=None):
     }
 
 
-class BaseLITModule(
-    ABC, L.LightningModule, Generic[MODEL_TYPE, DATA_TYPE, CONFIG_TYPE]
-):
+class LRSchedulerConfig(BaseModel):
+    """Configuration for learning rate scheduler."""
+
+    model_config = {"arbitrary_types_allowed": True}
+
+    scheduler: LRScheduler
+    interval: str = "step"  # "step" or "epoch"
+
+
+class OptimizerConfig(BaseModel):
+    """Configuration for optimizer and learning rate scheduler."""
+
+    model_config = {"arbitrary_types_allowed": True}
+
+    optimizer: Optimizer
+    lr_scheduler: LRSchedulerConfig
+
+
+class BaseLITModule(ABC, Generic[MODEL_TYPE, DATA_TYPE, CONFIG_TYPE]):
     model: MODEL_TYPE
+
+    @property
+    def device(self) -> torch.device:
+        """
+        Returns the current device of the model.
+        This is useful for ensuring that the model and data are on the same device.
+        """
+        return self.global_state.device
 
     @property
     def model_config(self) -> PretrainedConfig:
@@ -84,13 +109,17 @@ class BaseLITModule(
 
     @final
     def __init__(
-        self, module_config: CONFIG_TYPE, run_config: RunConfig, tmp_dir: Path
+        self,
+        module_config: CONFIG_TYPE,
+        run_config: RunConfig,
+        tmp_dir: Path,
+        global_state: GlobalState,
     ):
-        super().__init__()
+        self.global_state = global_state
         self.module_config = module_config
         self.run_config = run_config
         self.attn_impl = run_config.attn_impl
-        self._dtype = run_config.precision.torch_dtype
+        self.dtype = run_config.precision.torch_dtype
         self.tmp_dir = tmp_dir
         os.makedirs(self.tmp_dir, exist_ok=True)
 
@@ -113,9 +142,10 @@ class BaseLITModule(
         This method should handle the Fully Sharded Data Parallel (FSDP) setup.
         Returns FSDPModule
         """
-        dp_mesh = device_mesh["data_parallel"]  # provided by ModelParallelStrategy
-        fsdp_config = {"mesh": dp_mesh, "mp_policy": mp_policy}
-        return fully_shard(self.model, **fsdp_config)
+        # dp_mesh = device_mesh["data_parallel"]  # provided by ModelParallelStrategy
+        # fsdp_config = {"mesh": dp_mesh, "mp_policy": mp_policy}
+        # return fully_shard(self.model, **fsdp_config)
+        return fully_shard(self.model)
 
     @final
     def configure_model(self) -> None:
@@ -126,17 +156,17 @@ class BaseLITModule(
             return  # already configured
         self.model = self.load_weights(self.tmp_dir)
 
-        assert isinstance(self.device_mesh, DeviceMesh), (
-            f"Expected device_mesh to be a DeviceMesh, got {type(self.device_mesh)}"
-        )
-        self.model = self.shard_model(
-            mp_policy=self.run_config.mp_policy,
-            device_mesh=self.device_mesh,
-        )  # type: ignore[assignment]
-        logger.debug(f"Sharded model {self.model} with dtype {self.dtype}")
-        assert isinstance(self.model, FSDPModule), (
-            f"Expected self.model to be a FullyShardedDataParallel, got {type(self.model)}"
-        )
+        # assert isinstance(self.device_mesh, DeviceMesh), (
+        #     f"Expected device_mesh to be a DeviceMesh, got {type(self.device_mesh)}"
+        # )
+        # self.model = self.shard_model(
+        #     mp_policy=self.run_config.mp_policy,
+        #     device_mesh=self.device_mesh,
+        # )  # type: ignore[assignment]
+        # logger.debug(f"Sharded model {self.model} with dtype {self.dtype}")
+        # assert isinstance(self.model, FSDPModule), (
+        #     f"Expected self.model to be a FullyShardedDataParallel, got {type(self.model)}"
+        # )
 
     @abstractmethod
     def init_model_meta(self) -> MODEL_TYPE:
@@ -161,38 +191,38 @@ class BaseLITModule(
         Load the model weights from the specified checkpoint directory.
         This method should handle the loading of pre-trained weights or checkpoint files.
         """
-        logger.debug(f"Loading model weights from {tmpdir}")
+        logger.debug(f"Loading model weights from {tmpdir} to device {self.device}")
         # Load the model weights and dispatch them to the appropriate devices
-        self.model.to_empty(device=torch.cuda.current_device())
+        self.model.to_empty(device=self.device)
         loaded_model = load_checkpoint_and_dispatch(
             self.model,
             checkpoint=tmpdir,  # hub ID or local folder
-            device_map={"": torch.cuda.current_device()},
+            device_map={"": self.device},
             dtype=self.model.dtype,
         )
         return cast(MODEL_TYPE, loaded_model)
 
-    @final
-    def wandb_log(self, metrics: dict[str, Any]) -> None:
-        """
-        Log metrics to Wandb if available.
-        This method is a wrapper around the logger's log_dict method.
-        """
-        if self.wandb is not None:
-            self.wandb.log(metrics, step=self.global_step)
+    # @final
+    # def wandb_log(self, metrics: dict[str, Any]) -> None:
+    #     """
+    #     Log metrics to Wandb if available.
+    #     This method is a wrapper around the logger's log_dict method.
+    #     """
+    #     if self.wandb is not None:
+    #         self.wandb.log(metrics, step=self.global_step)
 
-    @final
-    @property
-    def wandb(self) -> Run | None:
-        """
-        Returns the Wandb experiment instance if available, otherwise None.
-        This is useful for logging and tracking experiments.
-        """
-        if isinstance(self.logger, WandbLogger) and isinstance(
-            self.logger.experiment, Run
-        ):
-            return self.logger.experiment
-        return None
+    # @final
+    # @property
+    # def wandb(self) -> Run | None:
+    #     """
+    #     Returns the Wandb experiment instance if available, otherwise None.
+    #     This is useful for logging and tracking experiments.
+    #     """
+    #     if isinstance(self.logger, WandbLogger) and isinstance(
+    #         self.logger.experiment, Run
+    #     ):
+    #         return self.logger.experiment
+    #     return None
 
     @abstractmethod
     def run_validation_step(
@@ -245,13 +275,11 @@ class BaseLITModule(
             "train/step_time": elapsed,
             # "train/tokens_per_second": inputs["input_ids"].numel() / elapsed,
             "train/loss": loss,
-            "train/lr": self.optimizers().param_groups[0]["lr"],
+            # "train/lr": self.optimizers().param_groups[0]["lr"],
             **memory_metrics,
         }
 
-        self.wandb_log(
-            metrics,
-        )
+        # self.log_dict(metrics, logger=True)
         return loss
 
     @final
@@ -269,29 +297,29 @@ class BaseLITModule(
             "val/loss": loss,
             **val_metrics,
         }
-        self.wandb_log(metrics)
+        # self.wandb_log(metrics)
         return metrics
 
-    def configure_optimizers(self):
+    def configure_optimizers(self) -> OptimizerConfig:
         optimizer = torch.optim.AdamW(
             self.model.parameters(),
             lr=self.run_config.lr.peak_lr,
             # foreach=True,
             fused=True,
         )
-        return {
-            "optimizer": optimizer,
-            "lr_scheduler": {
-                "scheduler": torch.optim.lr_scheduler.LambdaLR(
-                    optimizer,
-                    partial(
-                        lr_lambda,
-                        warmup_steps=self.run_config.lr.warmup_steps,
-                        end_steps=self.run_config.lr.end_step,
-                        start_lr=self.run_config.lr.peak_lr,
-                        end_lr=self.run_config.lr.end_lr,
-                    ),
-                ),
-                "interval": "step",
-            },
-        }
+
+        lr_scheduler = torch.optim.lr_scheduler.LambdaLR(
+            optimizer,
+            partial(
+                lr_lambda,
+                warmup_steps=self.run_config.lr.warmup_steps,
+                end_steps=self.run_config.lr.end_step,
+                start_lr=self.run_config.lr.peak_lr,
+                end_lr=self.run_config.lr.end_lr,
+            ),
+        )
+
+        return OptimizerConfig(
+            optimizer=optimizer,
+            lr_scheduler=LRSchedulerConfig(scheduler=lr_scheduler, interval="step"),
+        )

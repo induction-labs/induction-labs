@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import lightning as L
 from lightning.pytorch.loggers import WandbLogger
+from lightning.pytorch.profilers import PyTorchProfiler
+from transformers.modeling_utils import PreTrainedModel
 from wandb.sdk.wandb_run import Run
 from contextlib import contextmanager
 from typing import Iterator
 
-from modeling.config import ExperimentConfig
+from modeling.config import ExperimentConfig, GlobalState
 from lightning.fabric.loggers.logger import _DummyExperiment
 from lightning.pytorch.strategies import ModelParallelStrategy
 from lightning.pytorch.loggers import Logger
@@ -14,6 +16,8 @@ from modeling.checkpoints.save import GCSCheckpointCallback
 from synapse.utils.logging import configure_logging
 from modeling.utils.tmpdir import TmpDirContext
 from synapse.elapsed_timer import elapsed_timer
+from modeling.data.data_module import BaseDataModule, BaseDataSample
+from modeling.modules.base_module import BaseLITModule, BaseModuleConfig
 
 logger = configure_logging(
     __name__,
@@ -60,8 +64,14 @@ class Initializer:
     @staticmethod
     @contextmanager
     def init_experiment(
-        exp_config: ExperimentConfig,
-    ) -> Iterator[tuple[L.Trainer, L.LightningDataModule, L.LightningModule]]:
+        exp_config: ExperimentConfig, global_state: GlobalState
+    ) -> Iterator[
+        tuple[
+            L.Trainer,
+            BaseDataModule[BaseDataSample],
+            BaseLITModule[PreTrainedModel, BaseDataSample, BaseModuleConfig],
+        ]
+    ]:
         """
         Initialize the experiment configuration from a given path.
         """
@@ -77,6 +87,7 @@ class Initializer:
             # save_distributed_checkpoint=True,  # write one shard per rank
         )
         logger.debug("Initializing trainer:")
+        profiler = PyTorchProfiler(dirpath="output/profiler", emit_nvtx=True)
 
         trainer = L.Trainer(
             max_epochs=exp_config.run.num_epochs,
@@ -90,6 +101,7 @@ class Initializer:
             accelerator=exp_config.run.accelerator,
             devices=exp_config.run.distributed.devices_per_node,
             num_nodes=exp_config.run.distributed.num_nodes,
+            profiler=profiler,
             # Precision and parallel
             strategy=strategy,
             precision=exp_config.run.lightning_precision,
@@ -114,7 +126,7 @@ class Initializer:
                 datapack = exp_config.datapack.create_datapack(exp_config)
                 assert tmpdir_context.tmpdir is not None
                 lit_module = exp_config.module.create_module(
-                    exp_config.run, tmpdir_context.tmpdir
+                    exp_config.run, tmpdir_context.tmpdir, global_state
                 )
 
             trainer_timer.print_timing_tree(logger)

@@ -3,8 +3,8 @@ from __future__ import annotations
 import asyncio
 from typing import Any, Self
 
-import lightning as L
 from modeling.config import DatapackConfig, ExperimentConfig, ModuleConfig
+from modeling.data.data_module import BaseDataModule, BaseDataSample
 from pydantic import BaseModel, ConfigDict, model_validator
 from abc import abstractmethod
 from synapse.video_loader.read_frames import fetch_metadata_from_zarr
@@ -88,16 +88,36 @@ type FramesArray = np.ndarray[
 type PaddingArray = np.ndarray[tuple[int], np.dtype[np.bool]]
 
 
-class ActionDataSample(BaseModel):
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-
-    class QwenInputs(BaseModel):
+class ActionDataSample(BaseDataSample):
+    class QwenInputs(BaseDataSample):
         model_config = ConfigDict(arbitrary_types_allowed=True)
         input_ids: torch.Tensor  # [batch, seq_length, ]
         attention_mask: torch.Tensor  # [batch, seq_length, ]
         pixel_values_videos: torch.Tensor  # [num_video_patches, 1176]
         video_grid_thw: torch.Tensor  # [num_videos, 3]
         video_second_per_grid: torch.Tensor  # [nun_videos,]
+
+        def to_device(
+            self, device: torch.device | str, non_blocking: bool = False
+        ) -> Self:
+            """
+            Move the QwenInputs to the specified device.
+            This method is used to ensure that the inputs are on the correct device for training.
+            """
+            self.input_ids = self.input_ids.to(device, non_blocking=non_blocking)
+            self.attention_mask = self.attention_mask.to(
+                device, non_blocking=non_blocking
+            )
+            self.pixel_values_videos = self.pixel_values_videos.to(
+                device, non_blocking=non_blocking
+            )
+            self.video_grid_thw = self.video_grid_thw.to(
+                device, non_blocking=non_blocking
+            )
+            self.video_second_per_grid = self.video_second_per_grid.to(
+                device, non_blocking=non_blocking
+            )
+            return self
 
         @model_validator(mode="after")
         def check_dimensions(self) -> Self:
@@ -111,6 +131,16 @@ class ActionDataSample(BaseModel):
     qwen_inputs: QwenInputs
     cursor_path: torch.Tensor  # [seq_length, (x,y), (m,n,a)]
     action_tokens: torch.Tensor  # [seq_length], dtype=bool
+
+    def to_device(self, device: torch.device | str, non_blocking: bool = False) -> Self:
+        """
+        Move the ActionDataSample to the specified device.
+        This method is used to ensure that the sample is on the correct device for training.
+        """
+        self.qwen_inputs = self.qwen_inputs.to_device(device, non_blocking)
+        self.cursor_path = self.cursor_path.to(device, non_blocking=non_blocking)
+        self.action_tokens = self.action_tokens.to(device, non_blocking=non_blocking)
+        return self
 
     @classmethod
     def combine_batch(cls, batch: list[ActionDataSample]) -> ActionDataSample:
@@ -491,7 +521,7 @@ class ActionDataset(Dataset[ActionDataSample]):
         return len(self.datas)
 
 
-class ActionDataModule(L.LightningDataModule):
+class ActionDataModule(BaseDataModule[ActionDataSample]):
     def __init__(
         self,
         config: ActionDatapackConfig,

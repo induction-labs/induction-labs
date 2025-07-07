@@ -22,13 +22,19 @@ from lightning.fabric.plugins.precision.precision import (
 
 from synapse.utils.logging import configure_logging
 import logging
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from modeling.modules.base_module import BaseLITModule
+    from modeling.data.data_module import BaseDataModule
+    import torch
 
 logger = configure_logging(__name__, logging.DEBUG)
 # _T = TypeVar("_T")
 # _T_co = TypeVar("_T_co", covariaint=True)
 
-# _LitModule = TypeVar("_LitModule", bound="L.LightningModule", covariant=True)
-_LITDataModule = TypeVar("_LITDataModule", bound="L.LightningDataModule")
+# _LitModule = TypeVar("_LitModule", bound="BaseLITModule", covariant=True)
+_LITDataModule = TypeVar("_LITDataModule", bound="BaseDataModule")
 
 
 # TODO: Make checkpoint config use different backends and have it dynamically loaded and stuff
@@ -152,6 +158,18 @@ class ExperimentMetadata(BaseModel):
     commit_short: str = Field(default_factory=get_git_commit_sha_short)
 
 
+class GlobalState(BaseModel):
+    """
+    Global state for the module, used to store shared information across different parts of the module.
+    This can include things like the current step, global loss, etc.
+    """
+
+    model_config = {"arbitrary_types_allowed": True}
+
+    global_step: int
+    device: "torch.device"
+
+
 class ModuleConfig(ABC, BaseModel):
     config_path: str
 
@@ -181,7 +199,9 @@ class ModuleConfig(ABC, BaseModel):
         raise NotImplementedError("Subclasses must implement this method.")
 
     @abstractmethod
-    def create_module(self, run_config: RunConfig, tmp_dir: Path) -> L.LightningModule:
+    def create_module(
+        self, run_config: RunConfig, tmp_dir: Path, global_state: GlobalState
+    ) -> "BaseLITModule":
         """
         Create a Lightning module instance.
         This method should be implemented by subclasses to return an instance of the Lightning module.
@@ -198,7 +218,7 @@ class SerializedModuleConfig(ModuleConfig):
     # Explicity allow extra config to go through, because this will be used to initialize the module
     model_config = ConfigDict(extra="allow")
 
-    def check_config_path(self) -> Self:
+    def check_config_path(self) -> Self:  # type: ignore[override]
         # SerializedModuleConfig does not need to check the config_path,
         # as it is expected to be loaded from a path specified in the config.
         return self
@@ -214,7 +234,9 @@ class SerializedModuleConfig(ModuleConfig):
         )
         return datapack_config
 
-    def create_module(self, run_config: RunConfig, tmp_dir: Path) -> L.LightningModule:
+    def create_module(
+        self, run_config: RunConfig, tmp_dir: Path, global_state: GlobalState
+    ) -> "BaseLITModule":
         """
         Create a Lightning module instance by loading it from the specified path.
         """
@@ -262,7 +284,7 @@ class DatapackConfig(ABC, BaseModel, Generic[_LITDataModule]):
         raise NotImplementedError("Subclasses must implement this method.")
 
 
-class SerializedDatapackConfig(DatapackConfig[L.LightningDataModule]):
+class SerializedDatapackConfig(DatapackConfig[_LITDataModule]):
     """
     Configuration for a serialized Lightning data module.
     This class is used to load a Lightning data module from a specified path.
@@ -271,7 +293,7 @@ class SerializedDatapackConfig(DatapackConfig[L.LightningDataModule]):
     # Explicity allow extra config to go through, because this will be used to initialize the module
     model_config = ConfigDict(extra="allow")
 
-    def check_config_path(self) -> Self:
+    def check_config_path(self) -> Self:  # type: ignore[override]
         # SerializedDatapackConfig does not need to check the config_path,
         # as it is expected to be loaded from a path specified in the config.
         return self
@@ -289,7 +311,7 @@ class SerializedDatapackConfig(DatapackConfig[L.LightningDataModule]):
 
     def create_datapack(
         self, full_config: ExperimentConfig[_LITDataModule]
-    ) -> L.LightningDataModule:
+    ) -> _LITDataModule:
         """
         Create a Lightning data module instance by loading it from the specified path.
         """
@@ -311,6 +333,19 @@ class LinearLRSchedule(BaseModel):
     end_step: int = Field(
         description="Total number of steps for the learning rate schedule."
     )
+
+    @classmethod
+    def constant_lr(cls, lr: float) -> LinearLRSchedule:
+        """
+        Create a constant learning rate schedule.
+        This is useful for testing or when a constant learning rate is desired.
+        """
+        return cls(
+            peak_lr=lr,
+            end_lr=lr,
+            warmup_steps=0,
+            end_step=1,  # Only one step for constant LR
+        )
 
 
 class RunConfig(BaseModel):
@@ -415,7 +450,7 @@ class RunConfig(BaseModel):
             seed=42,
             sequence_length=1024,
             batch_size=4,
-            lr=1e-3,
+            lr=LinearLRSchedule.constant_lr(1e-3),
             distributed=DistributedConfig.mock_data(),
             attn_impl=AttentionImplementation.SDPA,
             accelerator=Accelerator.CUDA,
@@ -488,6 +523,6 @@ class ExperimentConfig(BaseModel, Generic[_LITDataModule]):
         )
 
 
-class SerializedExperimentConfig(ExperimentConfig[L.LightningDataModule]):
-    module: SerializedModuleConfig
-    datapack: SerializedDatapackConfig
+class SerializedExperimentConfig(ExperimentConfig["BaseDataModule"]):
+    module: SerializedModuleConfig  # type: ignore[override]
+    datapack: SerializedDatapackConfig  # type: ignore[override]
