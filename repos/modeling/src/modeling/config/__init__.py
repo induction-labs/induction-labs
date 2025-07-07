@@ -5,7 +5,14 @@ from abc import ABC, abstractmethod
 from datetime import UTC, datetime
 from typing import Annotated, Any, Generic, Self, TypeVar
 
-from pydantic import BaseModel, ConfigDict, Field, computed_field, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    computed_field,
+    field_serializer,
+    model_validator,
+)
 
 
 from modeling.utils.git import get_git_commit_sha, get_git_commit_sha_short
@@ -127,6 +134,12 @@ class GCSCheckpointConfig(BaseModel):
 
 class ExperimentMetadata(BaseModel):
     wandb: Optional[WandbConfig]
+
+    # TODO: Write a dedicated class for serializing paths to strings
+    @field_serializer("output_dir")
+    def serialize_output_dir(self, output_dir: Path, _info):
+        return output_dir.as_posix()
+
     output_dir: Annotated[Path, BeforeValidator(path_validator)]
     checkpoint: Optional[GCSCheckpointConfig]
 
@@ -512,7 +525,7 @@ class ExperimentConfig(BaseModel, Generic[_LITDataModule]):
                 "metadata": self.metadata.model_copy(
                     update={
                         "wandb": updated_wandb_config,
-                        "output_dir": "/tmp/test_output",
+                        "output_dir": Path("/tmp") / self.metadata.output_dir.name,
                         "checkpoint": None,
                     }
                 ),
