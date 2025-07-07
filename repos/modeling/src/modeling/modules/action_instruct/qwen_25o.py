@@ -78,7 +78,7 @@ class Qwen25OActionLIT(
     def model_cls(cls) -> type[MODEL_TYPE]:
         return MODEL_TYPE
 
-    def init_modei_meta(
+    def init_model_meta(
         self,
     ):
         module_config = self.module_config
