@@ -12,13 +12,13 @@ from modeling.data.text_train import TextPretrainDatapackConfig
 
 from modeling.modules.text_pretrain.qwen3 import Qwen3LITConfig
 from modeling.types import AttentionImplementation
-
+from pathlib import Path
 from modeling.types import Accelerator, DType
 
 Qwen3PretrainExperimentConfig = ExperimentConfig(
     metadata=ExperimentMetadata(
         wandb=WandbConfig(project="testing", name="qwen3_4B_text_pretrain"),
-        output_dir="output/text_pretrain",
+        output_dir=Path("./output/qwen3_text_pretrain"),
         checkpoint=None,
     ),
     module=Qwen3LITConfig(

@@ -1,8 +1,9 @@
 from __future__ import annotations
+from modeling.utils.cloud_path import path_validator
 
 from abc import ABC, abstractmethod
 from datetime import UTC, datetime
-from typing import Any, Generic, Self, TypeVar
+from typing import Annotated, Any, Generic, Self, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field, model_validator
 
@@ -15,7 +16,7 @@ from .wandb import WandbConfig
 from typing import Optional
 from torch.distributed.fsdp import MixedPrecisionPolicy
 from pathlib import Path
-from modeling.utils.cloud_path import CloudPath
+from modeling.utils.cloud_path import BeforeValidator, CloudPath
 from lightning.fabric.plugins.precision.precision import (
     _PRECISION_INPUT,
 )
@@ -126,7 +127,7 @@ class GCSCheckpointConfig(BaseModel):
 
 class ExperimentMetadata(BaseModel):
     wandb: Optional[WandbConfig]
-    output_dir: str
+    output_dir: Annotated[Path, BeforeValidator(path_validator)]
     checkpoint: Optional[GCSCheckpointConfig]
 
     @classmethod
@@ -136,7 +137,7 @@ class ExperimentMetadata(BaseModel):
         """
         return cls(
             wandb=WandbConfig.mock_data(),
-            output_dir="/tmp/experiment_output",
+            output_dir=Path("/tmp/experiment_output"),
             checkpoint=GCSCheckpointConfig.mock_data(),
         )
 

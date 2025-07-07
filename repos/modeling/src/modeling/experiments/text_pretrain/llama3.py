@@ -8,6 +8,7 @@ from modeling.config import (
     WandbConfig,
     LinearLRSchedule,
 )
+from pathlib import Path
 from modeling.data.text_train import TextPretrainDatapackConfig
 
 from modeling.modules.text_pretrain.llama3 import Llama3LITConfig
@@ -18,7 +19,7 @@ from modeling.types import Accelerator, DType
 Llama3PretrainExperimentConfig = ExperimentConfig(
     metadata=ExperimentMetadata(
         wandb=WandbConfig(project="testing", name="llama3_4B_text_pretrain"),
-        output_dir="output/text_pretrain",
+        output_dir=Path("./output/llama3_text_pretrain"),
         checkpoint=None,
     ),
     module=Llama3LITConfig(

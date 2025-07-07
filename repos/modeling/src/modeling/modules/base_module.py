@@ -103,7 +103,7 @@ class BaseLITModule(ABC, Generic[MODEL_TYPE, DATA_TYPE, CONFIG_TYPE]):
         Class property that should return the model class type.
         This is used to instantiate the model in meta mode and load weights.
         """
-        raise NotImplementedError("Subclasses must implement this method.")
+        pass
 
     @property
     def device(self) -> torch.device:

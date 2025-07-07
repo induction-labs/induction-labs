@@ -10,6 +10,7 @@ from modeling.config import (
     WandbConfig,
     LinearLRSchedule,
 )
+from pathlib import Path
 from modeling.types import Accelerator, DType
 from modeling.data.video_action import RangeActionDatapackConfig
 from modeling.modules.action_instruct.qwen_25o import Qwen25OActionLITConfig
@@ -20,7 +21,7 @@ Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
         wandb=WandbConfig(
             project="mouse_following", name="qwen25o_mouse_follow_overfit"
         ),
-        output_dir="output",
+        output_dir=Path("./output/qwen25o_mouse_follow_overfit"),
         # checkpoint=None,
         checkpoint=GCSCheckpointConfig(
             checkpoint_prefix=CloudPath.from_str(
@@ -63,7 +64,7 @@ Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
 )
 
 Qwen25OActionGPU_Test = Qwen25OActionExperimentConfig_GPU.testing_config(
-    num_steps=10, enable_wandb=False
+    num_steps=1, enable_wandb=False
 )
 
 Qwen25OActionExperimentConfig_CPU = Qwen25OActionExperimentConfig_GPU.model_copy(
