@@ -313,7 +313,12 @@ class Qwen2_5OmniThinkerForActionModelling(
             inputs_embeds = self.get_input_embeddings()(input_ids)  # [B, S, D]
             # If we are in decode
             if action_tokens.shape[1] == inputs_embeds.shape[1]:
-                inputs_embeds[action_tokens] = self.action_token_embedding.weight[0]
+                # Otherwise this breaks torch.compile graph
+                mask = action_tokens.unsqueeze(-1)  # [B, L, 1]
+                action_vec = self.action_token_embedding.weight[0]  # [hidden_size]
+                action_vec = action_vec.view(1, 1, -1).expand_as(inputs_embeds)
+                inputs_embeds = torch.where(mask, action_vec, inputs_embeds)
+                # inputs_embeds[action_tokens] = self.action_token_embedding.weight[0]
 
         # 2. Merge text , audios , image and video
         if input_ids is not None and input_ids.shape[1] != 1:  # Prefill stage

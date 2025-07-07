@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from typing import TypeVar
 from pathlib import Path
 from typing import Any, cast
 
 from modeling.config import DatapackConfig, GlobalState, RunConfig
 from modeling.data.text_train import TextPretrainDatapackConfig, TextPretrainDataSample
 from modeling.modules.text_module import TextLIT, TextLITConfig, MODEL_TYPE
+from modeling.utils.class_property import class_property
 from transformers import (
     AutoConfig,
     AutoModelForCausalLM,
@@ -27,9 +29,18 @@ logger = configure_logging(
 )
 
 
-class TextPretrainLIT(
-    TextLIT[MODEL_TYPE, TextPretrainDataSample, "TextPretrainLITConfig"]
-):
+ConfigType = TypeVar("ConfigType", bound="TextPretrainLITConfig")
+
+
+class TextPretrainLIT(TextLIT[MODEL_TYPE, TextPretrainDataSample, ConfigType]):
+    @class_property
+    def model_cls(cls) -> type[PreTrainedModel]:
+        """
+        Return the class of the model that this module will use.
+        This should be overridden in subclasses to return the specific model class.
+        """
+        return PreTrainedModel
+
     def init_model_meta(self, *args) -> MODEL_TYPE:
         model_config = AutoConfig.from_pretrained(
             self.module_config.model_name, trust_remote_code=True

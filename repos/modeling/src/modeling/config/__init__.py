@@ -186,7 +186,7 @@ class GlobalState:
     wandb_run: Optional["Run"] = None
 
 
-class ModuleConfig(ABC, BaseModel):
+class ModuleConfig(BaseModel, ABC):
     config_path: str
 
     @model_validator(mode="after")

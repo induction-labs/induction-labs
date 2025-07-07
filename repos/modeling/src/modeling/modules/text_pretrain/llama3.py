@@ -9,12 +9,13 @@ from torch.distributed.fsdp import MixedPrecisionPolicy
 from transformers.models.llama.modeling_llama import LlamaForCausalLM
 from modeling.modules.text_pretrain.default import (
     TextPretrainLIT,
+    ConfigType,
     TextPretrainLITConfig,
 )
 from modeling.utils.class_property import class_property
 
 
-class Llama3LIT(TextPretrainLIT[LlamaForCausalLM]):
+class Llama3LIT(TextPretrainLIT[LlamaForCausalLM, ConfigType]):
     @class_property
     def model_cls(cls) -> type[LlamaForCausalLM]:
         return LlamaForCausalLM

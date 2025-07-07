@@ -12,11 +12,12 @@ from transformers.models.qwen3.modeling_qwen3 import (
 from modeling.modules.text_pretrain.default import (
     TextPretrainLIT,
     TextPretrainLITConfig,
+    ConfigType,
 )
 from modeling.utils.class_property import class_property
 
 
-class Qwen3LIT(TextPretrainLIT[Qwen3ForCausalLM]):
+class Qwen3LIT(TextPretrainLIT[Qwen3ForCausalLM, ConfigType]):
     @class_property
     def model_cls(cls) -> type[Qwen3ForCausalLM]:
         return Qwen3ForCausalLM

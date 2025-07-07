@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from enum import Enum
 from pathlib import Path
 from functools import partial
 
@@ -43,6 +44,16 @@ def lr_lambda(
         return 1 + (end_lr / start_lr - 1) * progress  # 1 → end_lr/start_lr
 
 
+class CompileConfig(BaseModel):
+    class CompileMode(str, Enum):
+        DEFAULT = "default"
+        REDUCE_OVERHEAD = "reduce-overhead"
+        MAX_AUTOTUNE = "max-autotune"
+
+    mode: CompileMode = CompileMode.DEFAULT
+    fullgraph: bool = False
+
+
 class BaseModuleConfig(ModuleConfig):
     """
     Base configuration class for modules.
@@ -51,6 +62,7 @@ class BaseModuleConfig(ModuleConfig):
 
     model_name: str
     checkpoint_path: CloudPath | None = None
+    compile: CompileConfig | None = None
 
     @abstractmethod
     def create_module(
@@ -165,7 +177,23 @@ class BaseLITModule(ABC, Generic[MODEL_TYPE, DATA_TYPE, CONFIG_TYPE]):
         if isinstance(self.model, FSDPModule):
             return  # already configured
         self.model = self.load_weights(self.tmp_dir)
-        # self.model = torch.compile(self.model, fullgraph=True)
+
+        # self.model.gradient_checkpointing_enable()
+
+        # for layer_id, transformer_block in enumerate(self.model.model.layers):
+        #     # Apply activation checkpointing
+
+        #     # For now this is broken with HF models https://github.com/huggingface/transformers/issues/34928
+
+        #     transformer_block = checkpoint_wrapper(transformer_block)
+        #     self.model.model.layers[layer_id] = transformer_block
+
+        if self.module_config.compile is not None:
+            self.model = torch.compile(
+                self.model,
+                mode=self.module_config.compile.mode,
+                fullgraph=self.module_config.compile.fullgraph,
+            )  # type: ignore[assignment]
 
         # assert isinstance(self.device_mesh, DeviceMesh), (
         #     f"Expected device_mesh to be a DeviceMesh, got {type(self.device_mesh)}"
