@@ -108,6 +108,9 @@ class ExperimentInstance:
                     batch = batch.to_device(device)
                     # Zero gradients
                     optimizer.zero_grad(set_to_none=True)
+                    # Note: Need to call this or gradient checkpointing won't work
+                    # And it will silently fail
+                    self.module.model.train()
 
                     # Forward pass
                     with torch.profiler.record_function("training_step"):
@@ -121,6 +124,12 @@ class ExperimentInstance:
                     with torch.profiler.record_function("optimizer_step"):
                         optimizer.step()
                         lr_scheduler.step()
+
+                    self.module.model.eval()
+
+                    with torch.no_grad():
+                        # Run eval
+                        pass
 
                     self.state.global_step += 1
 
@@ -235,6 +244,8 @@ class ExperimentInstance:
                     record_shapes=True,
                     with_stack=True,
                     with_flops=True,
+                    profile_memory=True,
+                    with_modules=True,
                 ) as prof:
                     # prof.start()
                     yield prof

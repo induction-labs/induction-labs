@@ -4,6 +4,7 @@ from modeling.config import (
     DistributedConfig,
     ExperimentConfig,
     ExperimentMetadata,
+    ProfileConfig,
     RunConfig,
     WandbConfig,
     LinearLRSchedule,
@@ -13,7 +14,7 @@ from modeling.data.text_train import TextPretrainDatapackConfig
 from modeling.modules.text_pretrain.qwen3 import Qwen3LITConfig
 from modeling.types import AttentionImplementation
 from pathlib import Path
-from modeling.types import Accelerator, DType
+from modeling.types import Accelerator
 
 Qwen3PretrainExperimentConfig = ExperimentConfig(
     metadata=ExperimentMetadata(
@@ -24,6 +25,7 @@ Qwen3PretrainExperimentConfig = ExperimentConfig(
     module=Qwen3LITConfig(
         model_name="Qwen/Qwen3-4B",
         tokenizer_name="Qwen/Qwen3-4B",
+        # activation_checkpointing=None,  # Optional activation checkpointing config
         # compile=CompileConfig(),  # Uncomment if you want to use compilation
     ),
     datapack=TextPretrainDatapackConfig(),
@@ -37,7 +39,7 @@ Qwen3PretrainExperimentConfig = ExperimentConfig(
         ),
         attn_impl=AttentionImplementation.SDPA,
         accelerator=Accelerator.CUDA,
-        precision=DType.bf16,
+        profile=ProfileConfig(),
     ),
 )
 Qwen3PretrainTest = Qwen3PretrainExperimentConfig.testing_config(

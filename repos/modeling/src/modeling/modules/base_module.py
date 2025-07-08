@@ -59,6 +59,15 @@ class CompileConfig(BaseModel):
     fullgraph: bool = False
 
 
+class ActivationCheckpointConfig(BaseModel):
+    """
+    Configuration for activation checkpointing.
+    This class is used to configure the activation checkpointing settings for an experiment.
+    """
+
+    pass
+
+
 class BaseModuleConfig(ModuleConfig):
     """
     Base configuration class for modules.
@@ -68,6 +77,9 @@ class BaseModuleConfig(ModuleConfig):
     model_name: str
     checkpoint_path: CloudPath | None = None
     compile: CompileConfig | None = None
+    activation_checkpointing: ActivationCheckpointConfig | None = (
+        ActivationCheckpointConfig()
+    )
 
     @abstractmethod
     def create_module(
@@ -194,8 +206,12 @@ class BaseLITModule(ABC, Generic[MODEL_TYPE, DATA_TYPE, CONFIG_TYPE]):
         if isinstance(self.model, FSDPModule):
             return  # already configured
         self.model = self.load_weights(self.tmp_dir)
+        if self.module_config.activation_checkpointing is not None:
+            logger.debug("Enabling activation checkpointing...")
+            # Enable activation checkpointing if configured
+        # self.model.gradient_checkpointing_enable()  # Hypothetical method, replace with actual implementation
 
-        # self.model.gradient_checkpointing_enable()
+        self.model.gradient_checkpointing_enable()
 
         # for layer_id, transformer_block in enumerate(self.model.model.layers):
         #     # Apply activation checkpointing
@@ -321,6 +337,9 @@ class BaseLITModule(ABC, Generic[MODEL_TYPE, DATA_TYPE, CONFIG_TYPE]):
         global_state: GlobalState,
     ):
         # Forward pass through the model
+        assert self.model.training, (
+            f"Expected model to be in training mode, got {self.model.training}"
+        )
         with elapsed_timer() as timer:
             loss = self.run_training_step(inputs)
             loss = self.check_loss(loss)
@@ -351,6 +370,10 @@ class BaseLITModule(ABC, Generic[MODEL_TYPE, DATA_TYPE, CONFIG_TYPE]):
         global_state: GlobalState,
     ):
         # Forward pass through the model
+        assert not self.model.training, (
+            f"Expected model to be in evaluation mode, got {self.model.training}"
+        )
+
         with elapsed_timer() as timer:
             loss, val_metrics = self.run_validation_step(inputs)
             elapsed = timer()
