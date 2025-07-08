@@ -83,8 +83,8 @@ def tensorboard_trace_handler(
     return handler_fn
 
 
-@app.async_command()
-async def run(
+@app.command()
+def run(
     config_path: str = typer.Argument(
         ..., help="Path to experiment configuration toml file"
     ),
@@ -115,7 +115,7 @@ async def run(
         with ExperimentInstance.init_experiment(
             exp_config=experiment_config,
         ) as experiment:
-            await experiment.run()
+            experiment.run()
 
     except Exception as e:
         if get_rank() == 0:

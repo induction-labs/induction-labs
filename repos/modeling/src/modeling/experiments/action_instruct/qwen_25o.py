@@ -9,15 +9,16 @@ from modeling.config import (
     RunConfig,
     WandbConfig,
     LinearLRSchedule,
+    # ProfileConfig
 )
 from pathlib import Path
 from modeling.types import Accelerator, DType
 from modeling.data.video_action import RangeActionDatapackConfig
 from modeling.modules.action_instruct.qwen_25o import Qwen25OActionLITConfig
 from modeling.utils.cloud_path import CloudPath
-from modeling.modules.base_module import CompileConfig
+# from modeling.modules.base_module import CompileConfig
 
-run_name = "qwen25o_mouse_follow_overfit"
+run_name = "qwen25o_actions"
 Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
     metadata=ExperimentMetadata(
         wandb=WandbConfig(project="mouse_following", name=run_name),
@@ -36,38 +37,39 @@ Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
         # checkpoint_path=CloudPath.from_str(
         #     "gs://induction-labs/checkpoints/qwen25o_mouse_follow/test_noise_2/2025-07-04T04-05-09/step_-1"
         # )
-        # freeze_action_embedding=True,
+        freeze_vision=False,
         # compile=None,
-        compile=CompileConfig(),
+        # compile=CompileConfig(),
     ),
     datapack=RangeActionDatapackConfig(
         # prefix="gs://induction-labs/jonathan/synth/garbage_cursor_follow_v1/sample_",
         prefix="gs://induction-labs/jonathan/synth/cursor_follow_v3/sample_",
         # prefix="gs://induction-labs/jonathan/synth/noise_cursor_follow_v1/sample_",
-        end_index=4000,  # 60k samples
+        end_index=10000,  # 60k samples
     ),
     run=RunConfig(
         lr=LinearLRSchedule(
             peak_lr=1e-3,
             end_lr=1e-5,
             warmup_steps=16,
-            end_step=500,  # 10k steps
+            end_step=3000,  # 10k steps
         ),
-        sequence_length=1024,
-        batch_size=1,
-        steps_per_epoch=1000,
-        validation_every_n_steps=-1,
+        sequence_length=2800,
+        batch_size=2,
+        steps_per_epoch=5000,
+        validation_every_n_steps=100,
         distributed=DistributedConfig(
             devices_per_node=1,
         ),
         attn_impl=AttentionImplementation.SDPA,
         accelerator=Accelerator.CUDA,
         precision=DType.bf16,
+        # profile=ProfileConfig(),
     ),
 )
 
 Qwen25OActionGPU_Test = Qwen25OActionExperimentConfig_GPU.testing_config(
-    num_steps=5, enable_wandb=False
+    num_steps=5, enable_wandb=True
 )
 
 Qwen25OActionExperimentConfig_CPU = Qwen25OActionExperimentConfig_GPU.model_copy(

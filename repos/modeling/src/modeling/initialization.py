@@ -69,7 +69,8 @@ class ExperimentInstance:
     module: BaseLITModule[PreTrainedModel, BaseDataSample, BaseModuleConfig]
     datapack: BaseDataModule[BaseDataSample]
 
-    async def run(self) -> None:
+    # TODO: Make this async
+    def run(self) -> None:
         """
         Run the experiment instance.
         This method is a placeholder for the actual run logic.
@@ -81,6 +82,7 @@ class ExperimentInstance:
 
         # Get training dataloader
         train_dataloader = self.datapack.train_dataloader()
+        validation_dataloader = iter(self.datapack.val_dataloader())
 
         # Configure optimizer and scheduler
         optimizer_config = self.module.configure_optimizers()
@@ -125,11 +127,26 @@ class ExperimentInstance:
                         optimizer.step()
                         lr_scheduler.step()
 
-                    self.module.model.eval()
-
-                    with torch.no_grad():
-                        # Run eval
-                        pass
+                    if (
+                        self.exp_config.run.validation_every_n_steps > 0
+                        and (self.state.global_step)
+                        % self.exp_config.run.validation_every_n_steps
+                        == 0
+                    ):
+                        logger.debug(
+                            f"Running validation at step {self.state.global_step}"
+                        )
+                        self.module.model.eval()
+                        with torch.no_grad():
+                            val_batch = next(validation_dataloader)
+                            assert isinstance(val_batch, BaseDataSample), (
+                                f"{val_batch=}"
+                            )
+                            val_batch = val_batch.to_device(device)
+                            # Forward pass for validation
+                            self.module.validation_step(
+                                val_batch, global_state=self.state
+                            )
 
                     self.state.global_step += 1
 
@@ -183,7 +200,9 @@ class ExperimentInstance:
                 name=wandb_config.name,
                 id=exp_config.runtime_config.id,
                 dir=exp_config.metadata.output_dir,
-                config=exp_config.model_dump(serialize_as_any=True),
+                config=exp_config.model_dump(
+                    serialize_as_any=True, exclude_defaults=False
+                ),
             )
             return wandb_run
         return None

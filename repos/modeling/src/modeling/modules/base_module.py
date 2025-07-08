@@ -21,7 +21,7 @@ from transformers.configuration_utils import PretrainedConfig
 
 from torch.distributed.fsdp import FSDPModule, MixedPrecisionPolicy, fully_shard
 from transformers.modeling_utils import PreTrainedModel
-from typing import Any, Generic, TypeVar, cast, final
+from typing import Any, Generic, Literal, TypeVar, cast, final
 from synapse.utils.logging import configure_logging
 import os
 from modeling.checkpoints.load import download_model_checkpoint
@@ -65,7 +65,8 @@ class ActivationCheckpointConfig(BaseModel):
     This class is used to configure the activation checkpointing settings for an experiment.
     """
 
-    pass
+    # Need to include a field so that it serializes
+    layers: Literal["all"] = "all"
 
 
 class BaseModuleConfig(ModuleConfig):
@@ -209,9 +210,7 @@ class BaseLITModule(ABC, Generic[MODEL_TYPE, DATA_TYPE, CONFIG_TYPE]):
         if self.module_config.activation_checkpointing is not None:
             logger.debug("Enabling activation checkpointing...")
             # Enable activation checkpointing if configured
-        # self.model.gradient_checkpointing_enable()  # Hypothetical method, replace with actual implementation
-
-        self.model.gradient_checkpointing_enable()
+            self.model.gradient_checkpointing_enable()  # Hypothetical method, replace with actual implementation
 
         # for layer_id, transformer_block in enumerate(self.model.model.layers):
         #     # Apply activation checkpointing
@@ -302,6 +301,7 @@ class BaseLITModule(ABC, Generic[MODEL_TYPE, DATA_TYPE, CONFIG_TYPE]):
     def run_validation_step(
         self,
         inputs: DATA_TYPE,
+        global_step: int,
     ) -> tuple[torch.Tensor, dict[str, Any]]:
         """
         Abstract method to be implemented by subclasses for the evaluation step.
@@ -375,7 +375,9 @@ class BaseLITModule(ABC, Generic[MODEL_TYPE, DATA_TYPE, CONFIG_TYPE]):
         )
 
         with elapsed_timer() as timer:
-            loss, val_metrics = self.run_validation_step(inputs)
+            loss, val_metrics = self.run_validation_step(
+                inputs, global_state.global_step
+            )
             elapsed = timer()
 
         metrics = {

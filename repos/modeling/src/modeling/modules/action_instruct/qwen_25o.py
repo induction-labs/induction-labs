@@ -187,7 +187,7 @@ class Qwen25OActionLIT(
             cursor_path,
         )
 
-    def run_validation_step(self, inputs: ActionDataSample):
+    def run_validation_step(self, inputs: ActionDataSample, global_step: int):
         # Forward pass through the model
         outputs = self.model(
             cursor_path=inputs.cursor_path,
@@ -239,7 +239,7 @@ class Qwen25OActionLIT(
         )
 
         metrics = {
-            f"validation/cubics/{self.global_state.global_step}": table,
+            f"validation/cubics/{global_step}": table,
             "validation/real_image": [wandb.Image(real_image)],
             "validation/predicted_image": [wandb.Image(predicted_image)],
             "validation/computed_predicted_image": [
