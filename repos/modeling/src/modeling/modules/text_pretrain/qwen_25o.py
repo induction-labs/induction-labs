@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-from modeling.config import RunConfig, RuntimeConfig, DistributedInstanceConfig
+from modeling.config import RunConfig, RuntimeConfig, InstanceConfig
 from modeling.modules.text_pretrain.default import TextPretrainLITConfig
-from torch.distributed.device_mesh import DeviceMesh
-from torch.distributed.fsdp import MixedPrecisionPolicy
 from transformers.models.qwen2_5_omni import (
     Qwen2_5OmniProcessor,
     Qwen2_5OmniThinkerForConditionalGeneration,
@@ -20,38 +18,6 @@ class Qwen25OLIT(
     @class_property
     def model_cls(cls) -> type[Qwen2_5OmniThinkerForConditionalGeneration]:
         return Qwen2_5OmniThinkerForConditionalGeneration
-
-    def shard_model(
-        self,
-        *,
-        mp_policy: MixedPrecisionPolicy,
-        device_mesh: DeviceMesh,
-    ):
-        """
-        Shard the model using Fully Sharded Data Parallel (FSDP).
-        This method is called during the model configuration phase.
-        """
-        # dp_mesh = device_mesh["data_parallel"]
-        # fsdp_config = {"mesh": dp_mesh, "mp_policy": mp_policy}
-        # for layer_id, transformer_block in enumerate(self.model.model.layers):
-        #     # Apply activation checkpointing
-
-        #     # For now this is broken with HF models https://github.com/huggingface/transformers/issues/34928
-        #     from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
-        #         checkpoint_wrapper,
-        #     )
-
-        #     transformer_block = checkpoint_wrapper(transformer_block)
-
-        #     # reshard_after_forward = int(layer_id) < len(self.model.model.layers) - 1
-        #     # fully_shard(
-        #     #     transformer_block,
-        #     #     **fsdp_config,
-        #     #     reshard_after_forward=reshard_after_forward,
-        #     # )
-        #     self.model.model.layers[layer_id] = transformer_block
-        return self.model
-        # return fully_shard(self.model, **fsdp_config)
 
     def init_model_meta(self, *args) -> Qwen2_5OmniThinkerForConditionalGeneration:
         return Qwen2_5OmniThinkerForConditionalGeneration.from_pretrained(
@@ -82,6 +48,6 @@ class Qwen25OLITConfig(TextPretrainLITConfig):
         self,
         run_config: RunConfig,
         runtime_config: RuntimeConfig,
-        instance_config: DistributedInstanceConfig,
+        instance_config: InstanceConfig,
     ) -> Qwen25OLIT:
         return Qwen25OLIT(self, run_config, runtime_config, instance_config)

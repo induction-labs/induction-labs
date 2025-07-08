@@ -8,7 +8,7 @@ from functools import partial
 from modeling.utils.cloud_path import CloudPath
 import torch
 from modeling.config import (
-    DistributedInstanceConfig,
+    InstanceConfig,
     ModuleConfig,
     RunConfig,
     GlobalState,
@@ -34,7 +34,7 @@ from modeling.utils.class_property import class_property
 
 logger = configure_logging(
     __file__,
-    level=logging.DEBUG,  # Set to DEBUG for more verbose output
+    level=logging.INFO,  # Set to DEBUG for more verbose output
 )
 
 
@@ -87,7 +87,7 @@ class BaseModuleConfig(ModuleConfig):
         self,
         run_config: RunConfig,
         runtime_config: RuntimeConfig,
-        instance_config: DistributedInstanceConfig,
+        instance_config: InstanceConfig,
     ) -> "BaseLITModule": ...
 
 
@@ -164,7 +164,7 @@ class BaseLITModule(ABC, Generic[MODEL_TYPE, DATA_TYPE, CONFIG_TYPE]):
         module_config: CONFIG_TYPE,
         run_config: RunConfig,
         runtime_config: RuntimeConfig,
-        instance_config: DistributedInstanceConfig,
+        instance_config: InstanceConfig,
     ):
         self.runtime_config = runtime_config
         self.instance_config = instance_config
@@ -200,7 +200,7 @@ class BaseLITModule(ABC, Generic[MODEL_TYPE, DATA_TYPE, CONFIG_TYPE]):
         return fully_shard(self.model)
 
     @final
-    def configure_model(self) -> None:
+    def configure_model(self, device_mesh: DeviceMesh) -> None:
         # We need to ensure that all models are fsdp because that is we use by default
         logger.debug("Configuring model for FSDP sharding...")
 
@@ -220,24 +220,21 @@ class BaseLITModule(ABC, Generic[MODEL_TYPE, DATA_TYPE, CONFIG_TYPE]):
         #     transformer_block = checkpoint_wrapper(transformer_block)
         #     self.model.model.layers[layer_id] = transformer_block
 
+        self.model = self.shard_model(
+            mp_policy=self.run_config.mp_policy,
+            device_mesh=device_mesh,
+        )  # type: ignore[assignment]
+        logger.debug(f"Sharded model {self.model} with dtype {self.dtype}")
+        assert isinstance(self.model, FSDPModule), (
+            f"Expected self.model to be a FullyShardedDataParallel, got {type(self.model)}"
+        )
+
         if self.module_config.compile is not None:
             self.model = torch.compile(
                 self.model,
                 mode=self.module_config.compile.mode,
                 fullgraph=self.module_config.compile.fullgraph,
             )  # type: ignore[assignment]
-
-        # assert isinstance(self.device_mesh, DeviceMesh), (
-        #     f"Expected device_mesh to be a DeviceMesh, got {type(self.device_mesh)}"
-        # )
-        # self.model = self.shard_model(
-        #     mp_policy=self.run_config.mp_policy,
-        #     device_mesh=self.device_mesh,
-        # )  # type: ignore[assignment]
-        # logger.debug(f"Sharded model {self.model} with dtype {self.dtype}")
-        # assert isinstance(self.model, FSDPModule), (
-        #     f"Expected self.model to be a FullyShardedDataParallel, got {type(self.model)}"
-        # )
 
     @abstractmethod
     def init_model_meta(self) -> MODEL_TYPE:

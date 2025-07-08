@@ -6,12 +6,13 @@ from typing import Any, cast
 from modeling.config import (
     DatapackConfig,
     RunConfig,
-    DistributedInstanceConfig,
+    InstanceConfig,
     RuntimeConfig,
 )
 from modeling.data.text_train import TextPretrainDatapackConfig, TextPretrainDataSample
 from modeling.modules.text_module import TextLIT, TextLITConfig, MODEL_TYPE
 from modeling.utils.class_property import class_property
+from torch import nn
 from transformers import (
     AutoConfig,
     AutoModelForCausalLM,
@@ -26,6 +27,7 @@ from torch.distributed.fsdp import MixedPrecisionPolicy, fully_shard
 
 from synapse.utils.logging import configure_logging
 from accelerate import init_empty_weights
+from modeling.config.distributed import MeshAxis
 
 logger = configure_logging(
     __name__,
@@ -72,8 +74,30 @@ class TextPretrainLIT(TextLIT[MODEL_TYPE, TextPretrainDataSample, ConfigType]):
         mp_policy: MixedPrecisionPolicy,
         device_mesh: DeviceMesh,
     ):
-        dp_mesh = device_mesh["data_parallel"]  # provided by ModelParallelStrategy
-        fsdp_config = {"mesh": dp_mesh, "mp_policy": mp_policy}
+        """
+        Shard the model using Fully Sharded Data Parallel (FSDP).
+        This method is called during the model configuration phase.
+        """
+        fsdp_config = {"mesh": device_mesh[MeshAxis.FSDP], "mp_policy": mp_policy}
+        assert isinstance(self.model.model, PreTrainedModel) and isinstance(
+            self.model.model.layers, nn.ModuleList
+        )
+        for layer_id, transformer_block in enumerate(self.model.model.layers):
+            # Apply activation checkpointing
+
+            # For now this is broken with HF models https://github.com/huggingface/transformers/issues/34928
+            # from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
+            #     checkpoint_wrapper,
+            # )
+            # transformer_block = checkpoint_wrapper(transformer_block)
+
+            reshard_after_forward = int(layer_id) < len(self.model.model.layers) - 1
+            fully_shard(
+                transformer_block,
+                **fsdp_config,
+                reshard_after_forward=reshard_after_forward,
+            )
+            self.model.model.layers[layer_id] = transformer_block
         return fully_shard(self.model, **fsdp_config)
 
     def run_training_step(self, inputs: TextPretrainDataSample) -> torch.Tensor:
@@ -91,7 +115,7 @@ class TextPretrainLIT(TextLIT[MODEL_TYPE, TextPretrainDataSample, ConfigType]):
         return outputs.loss
 
     def run_validation_step(
-        self, inputs: TextPretrainDataSample
+        self, inputs: TextPretrainDataSample, global_step: int
     ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
         """
         Run a training step with the provided inputs.
@@ -163,6 +187,6 @@ class TextPretrainLITConfig(TextLITConfig):
         self,
         run_config: RunConfig,
         runtime_config: RuntimeConfig,
-        instance_config: DistributedInstanceConfig,
+        instance_config: InstanceConfig,
     ) -> TextPretrainLIT:
         return TextPretrainLIT(self, run_config, runtime_config, instance_config)

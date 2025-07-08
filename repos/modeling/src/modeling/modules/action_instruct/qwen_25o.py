@@ -7,7 +7,7 @@ from modeling.config import (
     DatapackConfig,
     RunConfig,
     RuntimeConfig,
-    DistributedInstanceConfig,
+    InstanceConfig,
 )
 from modeling.data.video_action import ActionDataSample, ActionDatapackConfig
 from modeling.modules.base_module import BaseLITModule, BaseModuleConfig
@@ -334,6 +334,6 @@ class Qwen25OActionLITConfig(BaseModuleConfig):
         self,
         run_config: RunConfig,
         runtime_config: RuntimeConfig,
-        instance_config: DistributedInstanceConfig,
+        instance_config: InstanceConfig,
     ) -> Qwen25OActionLIT:
         return Qwen25OActionLIT(self, run_config, runtime_config, instance_config)

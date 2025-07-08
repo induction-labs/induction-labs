@@ -9,6 +9,8 @@ from modeling.config import (
     WandbConfig,
     LinearLRSchedule,
 )
+
+# from modeling.config.distributed import DistributedConfig, ShardingConfig
 from modeling.data.text_train import TextPretrainDatapackConfig
 
 from modeling.modules.text_pretrain.qwen3 import Qwen3LITConfig
@@ -25,13 +27,13 @@ Qwen3PretrainExperimentConfig = ExperimentConfig(
     module=Qwen3LITConfig(
         model_name="Qwen/Qwen3-4B",
         tokenizer_name="Qwen/Qwen3-4B",
-        # activation_checkpointing=None,  # Optional activation checkpointing config
+        activation_checkpointing=None,  # Optional activation checkpointing config
         # compile=CompileConfig(),  # Uncomment if you want to use compilation
     ),
     datapack=TextPretrainDatapackConfig(),
     run=RunConfig(
         lr=LinearLRSchedule.constant_lr(1e-5),
-        sequence_length=4096,
+        sequence_length=1024,
         batch_size=1,
         steps_per_epoch=5000,
         distributed=DistributedConfig(
@@ -43,7 +45,7 @@ Qwen3PretrainExperimentConfig = ExperimentConfig(
     ),
 )
 Qwen3PretrainTest = Qwen3PretrainExperimentConfig.testing_config(
-    num_steps=5, enable_wandb=True
+    num_steps=5, enable_wandb=False
 )
 
 # mdl export modeling.experiments.text_pretrain.qwen3.Qwen3PretrainExperimentConfig

@@ -18,7 +18,7 @@ from pydantic import (
 from modeling.utils.git import get_git_commit_sha, get_git_commit_sha_short
 from modeling.types import Accelerator, DType, AttentionImplementation
 
-from .distributed import DistributedConfig
+from .distributed import DistributedConfig, InstanceConfig
 from .wandb import WandbConfig
 from typing import Optional
 from torch.distributed.fsdp import MixedPrecisionPolicy
@@ -48,14 +48,6 @@ _LITDataModule = TypeVar("_LITDataModule", bound="BaseDataModule")
 
 # TODO: Make this not import torch at load, right now im jsut going to do it like this but like ya
 # For distributed stuffs
-
-
-class DistributedInstanceConfig(BaseModel):
-    # TODO: Serialize + deserialize torch.device
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-    device: torch.device
-    node_rank: int  # [0, num_nodes)
-    device_rank: int  # [0, 8)
 
 
 class RuntimeConfig(BaseModel):
@@ -199,6 +191,7 @@ class GlobalState:
     """
 
     global_step: int
+    mesh: "torch.distributed.device_mesh.DeviceMesh"
     wandb: Optional["Run"] = None
 
 
@@ -235,7 +228,7 @@ class ModuleConfig(BaseModel, ABC):
         self,
         run_config: RunConfig,
         runtime_config: RuntimeConfig,
-        instance_config: DistributedInstanceConfig,
+        instance_config: InstanceConfig,
     ) -> "BaseLITModule":
         """
         Create a Lightning module instance.
@@ -273,7 +266,7 @@ class SerializedModuleConfig(ModuleConfig):
         self,
         run_config: RunConfig,
         runtime_config: RuntimeConfig,
-        instance_config: DistributedInstanceConfig,
+        instance_config: InstanceConfig,
     ) -> "BaseLITModule":
         """
         Create a Lightning module instance by loading it from the specified path.

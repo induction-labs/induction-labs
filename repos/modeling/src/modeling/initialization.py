@@ -14,7 +14,7 @@ from modeling.modules.base_module import (
     BaseLITModule,
     BaseModuleConfig,
     RuntimeConfig,
-    DistributedInstanceConfig,
+    InstanceConfig,
 )
 import wandb
 from modeling.callbacks.profiler import profiler_context
@@ -63,9 +63,9 @@ class ExperimentInstance:
         This method is a placeholder for the actual run logic.
         """
         # Setup data and model
-        device = self.module.instance_config.device
+
         self.datapack.setup("fit")
-        self.module.configure_model()
+        self.module.configure_model(self.state.mesh)
 
         # Get training dataloader
         train_dataloader = self.datapack.train_dataloader()
@@ -89,6 +89,7 @@ class ExperimentInstance:
             )
             for step, batch in pbar:
                 with elapsed_timer("training_step"):
+                    device = self.module.instance_config.device
                     assert isinstance(batch, BaseDataSample), f"{batch=}"
                     if step >= steps_per_epoch:
                         break
@@ -147,7 +148,7 @@ class ExperimentInstance:
             logger.info(f"Training completed. Total steps: {self.state.global_step}")
 
     @staticmethod
-    def get_instance_config() -> DistributedInstanceConfig:
+    def get_instance_config() -> InstanceConfig:
         """
         Get the instance configuration for the experiment.
         This is used to configure the instance-specific settings.
@@ -156,8 +157,7 @@ class ExperimentInstance:
         # local_rank = int(os.environ["LOCAL_RANK"])
         # node_rank = int(os.environ["GROUP_RANK"])
         local_rank = node_rank = 0
-        return DistributedInstanceConfig(
-            device=torch.device("cuda" if torch.cuda.is_available() else "cpu"),
+        return InstanceConfig(
             node_rank=node_rank,
             device_rank=local_rank,
         )
@@ -197,6 +197,7 @@ class ExperimentInstance:
     @staticmethod
     def init_global_state(
         exp_config: UnifiedExperimentConfig,
+        mesh: torch.distributed.device_mesh.DeviceMesh,
     ) -> GlobalState:
         """
         Initialize a WandbLogger instance with the configuration.
@@ -204,6 +205,7 @@ class ExperimentInstance:
         wandb_run = ExperimentInstance.init_wandb(exp_config)
         return GlobalState(
             global_step=0,
+            mesh=mesh,
             wandb=wandb_run,
         )
 
@@ -245,70 +247,70 @@ class ExperimentInstance:
                 run=exp_config.run,
                 metadata=exp_config.metadata,
             )
-            init_distributed(unified_config.run.distributed)
-            global_state = ExperimentInstance.init_global_state(unified_config)
-            # This is so troll
-            # https://lightning.ai/docs/pytorch/stable/api/lightning.pytorch.loggers.wandb.html#module-lightning.pytorch.loggers.wandb
 
-            # strategy = ModelParallelStrategy(  # <- uses FSDP2 under the hood
-            #     data_parallel_size=exp_config.run.distributed.devices_per_node,  # shard across all 8 GPUs
-            #     tensor_parallel_size=1,  # (= no TP)  just pure FSDP2
-            #     # save_distributed_checkpoint=True,  # write one shard per rank
-            # )
-            logger.debug("Initializing trainer:")
-
-            # trainer = L.Trainer(
-            #     max_epochs=exp_config.run.num_epochs,
-            #     val_check_interval=exp_config.run.validation_every_n_steps
-            #     if exp_config.run.validation_every_n_steps > 0
-            #     else None,
-            #     limit_val_batches=1,
-            #     # Distributed training configuration
-            #     limit_train_batches=exp_config.run.num_epochs
-            #     * exp_config.run.steps_per_epoch,
-            #     accelerator=exp_config.run.accelerator,
-            #     devices=exp_config.run.distributed.devices_per_node,
-            #     num_nodes=exp_config.run.distributed.num_nodes,
-            #     profiler=profiler,
-            #     # Precision and parallel
-            #     strategy=strategy,
-            #     precision=exp_config.run.lightning_precision,
-            #     # Logging and checkpointing
-            #     # logger=loggers,
-            #     callbacks=(
-            #         [
-            #             GCSCheckpointCallback(
-            #                 exp_config=exp_config,
-            #             )
-            #         ]
-            #         if exp_config.metadata.checkpoint
-            #         else []
-            #     ),
-            #     enable_checkpointing=False,
-            #     default_root_dir=exp_config.metadata.output_dir,
-            #     log_every_n_steps=1,
-            # )
-
-            try:
-                with elapsed_timer("Experiment.Init") as trainer_timer:
-                    datapack = unified_config.datapack.create_datapack(unified_config)
-                    assert tmpdir_context.tmpdir is not None
-                    lit_module = unified_config.module.create_module(
-                        unified_config.run,
-                        unified_config.runtime_config,
-                        instance_config=instance_config,
-                    )
-
-                trainer_timer.print_timing_tree(logger)
-                yield ExperimentInstance(
-                    exp_config=unified_config,
-                    state=global_state,
-                    module=lit_module,
-                    datapack=datapack,
+            with init_distributed(
+                unified_config.run.distributed, instance_config
+            ) as device_mesh:
+                global_state = ExperimentInstance.init_global_state(
+                    unified_config, device_mesh
                 )
-            finally:
-                # Clean up temporary directory
-                if global_state.wandb is not None:
-                    global_state.wandb.finish()
-                global_timer.__exit__(None, None, None)
-                global_timer.print_timing_tree(logger)
+
+                logger.debug("Initializing trainer:")
+
+                # trainer = L.Trainer(
+                #     max_epochs=exp_config.run.num_epochs,
+                #     val_check_interval=exp_config.run.validation_every_n_steps
+                #     if exp_config.run.validation_every_n_steps > 0
+                #     else None,
+                #     limit_val_batches=1,
+                #     # Distributed training configuration
+                #     limit_train_batches=exp_config.run.num_epochs
+                #     * exp_config.run.steps_per_epoch,
+                #     accelerator=exp_config.run.accelerator,
+                #     devices=exp_config.run.distributed.devices_per_node,
+                #     num_nodes=exp_config.run.distributed.num_nodes,
+                #     profiler=profiler,
+                #     # Precision and parallel
+                #     strategy=strategy,
+                #     precision=exp_config.run.lightning_precision,
+                #     # Logging and checkpointing
+                #     # logger=loggers,
+                #     callbacks=(
+                #         [
+                #             GCSCheckpointCallback(
+                #                 exp_config=exp_config,
+                #             )
+                #         ]
+                #         if exp_config.metadata.checkpoint
+                #         else []
+                #     ),
+                #     enable_checkpointing=False,
+                #     default_root_dir=exp_config.metadata.output_dir,
+                #     log_every_n_steps=1,
+                # )
+
+                try:
+                    with elapsed_timer("Experiment.Init") as trainer_timer:
+                        datapack = unified_config.datapack.create_datapack(
+                            unified_config
+                        )
+                        assert tmpdir_context.tmpdir is not None
+                        lit_module = unified_config.module.create_module(
+                            unified_config.run,
+                            unified_config.runtime_config,
+                            instance_config=instance_config,
+                        )
+
+                    trainer_timer.print_timing_tree(logger)
+                    yield ExperimentInstance(
+                        exp_config=unified_config,
+                        state=global_state,
+                        module=lit_module,
+                        datapack=datapack,
+                    )
+                finally:
+                    # Clean up temporary directory
+                    if global_state.wandb is not None:
+                        global_state.wandb.finish()
+                    global_timer.__exit__(None, None, None)
+                    global_timer.print_timing_tree(logger)
