@@ -81,9 +81,9 @@ def init_distributed(
     finally:
         # Clean up the process group
         if dist.is_initialized():
-            logger.info(f"Destroying process group on rank {dist.get_rank()}")
+            logger.debug(f"Destroying process group on rank {dist.get_rank()}")
             dist.destroy_process_group()
-            logger.info("Process group destroyed successfully")
+            logger.debug("Process group destroyed successfully")
 
 
 def is_distributed() -> bool:

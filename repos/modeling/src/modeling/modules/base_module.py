@@ -183,6 +183,16 @@ class BaseLITModule(ABC, Generic[MODEL_TYPE, DATA_TYPE, CONFIG_TYPE]):
         self.download_weights(self.tmp_dir)
 
     @abstractmethod
+    def activation_checkpoint_model(self) -> MODEL_TYPE:
+        """
+        !!! IMPORTANT - use torch.distributed.algorithms._checkpoint.checkpoint_wrapper, NOT HF self.model.gradient_checkpointing_enable()
+        !!! HF gradient_checkpointing_enable() does not work with FSDP - once sharded, no activation checkpointing is applied
+        Abstract method to be implemented by subclasses for enabling activation checkpointing.
+        This method should return the model with activation checkpointing enabled.
+        """
+        return self.model
+
+    @abstractmethod
     def shard_model(
         self,
         *,
@@ -209,8 +219,9 @@ class BaseLITModule(ABC, Generic[MODEL_TYPE, DATA_TYPE, CONFIG_TYPE]):
         self.model = self.load_weights(self.tmp_dir)
         if self.module_config.activation_checkpointing is not None:
             logger.debug("Enabling activation checkpointing...")
-            # Enable activation checkpointing if configured
-            self.model.gradient_checkpointing_enable()  # Hypothetical method, replace with actual implementation
+            self.model = self.activation_checkpoint_model()  # type: ignore[assignment]
+            # # Enable activation checkpointing if configured
+            # self.model.gradient_checkpointing_enable()  # Hypothetical method, replace with actual implementation
 
         # for layer_id, transformer_block in enumerate(self.model.model.layers):
         #     # Apply activation checkpointing
@@ -225,10 +236,11 @@ class BaseLITModule(ABC, Generic[MODEL_TYPE, DATA_TYPE, CONFIG_TYPE]):
             device_mesh=device_mesh,
         )  # type: ignore[assignment]
         logger.debug(f"Sharded model {self.model} with dtype {self.dtype}")
-        assert isinstance(self.model, FSDPModule), (
-            f"Expected self.model to be a FullyShardedDataParallel, got {type(self.model)}"
-        )
+        # assert isinstance(self.model, FSDPModule), (
+        #     f"Expected self.model to be a FullyShardedDataParallel, got {type(self.model)}"
+        # )
 
+        # We can only compile *after* sharding and gradient checkpointing, otherwise it doesn't trace through.
         if self.module_config.compile is not None:
             self.model = torch.compile(
                 self.model,
@@ -290,7 +302,7 @@ class BaseLITModule(ABC, Generic[MODEL_TYPE, DATA_TYPE, CONFIG_TYPE]):
         Log metrics to Wandb if available.
         This method is a wrapper around the logger's log_dict method.
         """
-        # logger.debug(metrics)
+        logger.debug(metrics)
         if global_state.wandb is not None:
             global_state.wandb.log(metrics)
 

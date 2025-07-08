@@ -28,6 +28,9 @@ from torch.distributed.fsdp import MixedPrecisionPolicy, fully_shard
 from synapse.utils.logging import configure_logging
 from accelerate import init_empty_weights
 from modeling.config.distributed import MeshAxis
+from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
+    checkpoint_wrapper,
+)
 
 logger = configure_logging(
     __name__,
@@ -68,6 +71,24 @@ class TextPretrainLIT(TextLIT[MODEL_TYPE, TextPretrainDataSample, ConfigType]):
         )
         return cast(MODEL_TYPE, model)
 
+    def activation_checkpoint_model(self) -> MODEL_TYPE:
+        """
+        Enable activation checkpointing for the model.
+        This method is called during the model configuration phase.
+        """
+        assert isinstance(self.model.model, PreTrainedModel) and isinstance(
+            self.model.model.layers, nn.ModuleList
+        )
+        for layer_id, transformer_block in enumerate(self.model.model.layers):
+            # Apply activation checkpointing
+
+            # For now this is broken with HF models https://github.com/huggingface/transformers/issues/34928
+
+            transformer_block = checkpoint_wrapper(transformer_block)
+            self.model.model.layers[layer_id] = transformer_block
+
+        return self.model
+
     def shard_model(
         self,
         *,
@@ -86,10 +107,11 @@ class TextPretrainLIT(TextLIT[MODEL_TYPE, TextPretrainDataSample, ConfigType]):
             # Apply activation checkpointing
 
             # For now this is broken with HF models https://github.com/huggingface/transformers/issues/34928
-            # from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
-            #     checkpoint_wrapper,
-            # )
-            # transformer_block = checkpoint_wrapper(transformer_block)
+            from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
+                checkpoint_wrapper,
+            )
+
+            transformer_block = checkpoint_wrapper(transformer_block)
 
             reshard_after_forward = int(layer_id) < len(self.model.model.layers) - 1
             fully_shard(

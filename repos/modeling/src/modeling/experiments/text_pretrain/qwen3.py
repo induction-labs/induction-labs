@@ -4,7 +4,6 @@ from modeling.config import (
     DistributedConfig,
     ExperimentConfig,
     ExperimentMetadata,
-    ProfileConfig,
     RunConfig,
     WandbConfig,
     LinearLRSchedule,
@@ -27,13 +26,13 @@ Qwen3PretrainExperimentConfig = ExperimentConfig(
     module=Qwen3LITConfig(
         model_name="Qwen/Qwen3-4B",
         tokenizer_name="Qwen/Qwen3-4B",
-        activation_checkpointing=None,  # Optional activation checkpointing config
+        # activation_checkpointing=None,  # Optional activation checkpointing config
         # compile=CompileConfig(),  # Uncomment if you want to use compilation
     ),
     datapack=TextPretrainDatapackConfig(),
     run=RunConfig(
         lr=LinearLRSchedule.constant_lr(1e-5),
-        sequence_length=1024,
+        sequence_length=4096,
         batch_size=1,
         steps_per_epoch=5000,
         distributed=DistributedConfig(
@@ -41,11 +40,11 @@ Qwen3PretrainExperimentConfig = ExperimentConfig(
         ),
         attn_impl=AttentionImplementation.SDPA,
         accelerator=Accelerator.CUDA,
-        profile=ProfileConfig(),
+        # profile=ProfileConfig(),
     ),
 )
 Qwen3PretrainTest = Qwen3PretrainExperimentConfig.testing_config(
-    num_steps=5, enable_wandb=False
+    num_steps=5, enable_wandb=True
 )
 
 # mdl export modeling.experiments.text_pretrain.qwen3.Qwen3PretrainExperimentConfig
