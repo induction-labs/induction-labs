@@ -50,7 +50,7 @@ _LITDataModule = TypeVar("_LITDataModule", bound="BaseDataModule")
 # For distributed stuffs
 
 
-class InstanceConfig(BaseModel):
+class DistributedInstanceConfig(BaseModel):
     # TODO: Serialize + deserialize torch.device
     model_config = ConfigDict(arbitrary_types_allowed=True)
     device: torch.device
@@ -235,7 +235,7 @@ class ModuleConfig(BaseModel, ABC):
         self,
         run_config: RunConfig,
         runtime_config: RuntimeConfig,
-        instance_config: InstanceConfig,
+        instance_config: DistributedInstanceConfig,
     ) -> "BaseLITModule":
         """
         Create a Lightning module instance.
@@ -273,7 +273,7 @@ class SerializedModuleConfig(ModuleConfig):
         self,
         run_config: RunConfig,
         runtime_config: RuntimeConfig,
-        instance_config: InstanceConfig,
+        instance_config: DistributedInstanceConfig,
     ) -> "BaseLITModule":
         """
         Create a Lightning module instance by loading it from the specified path.
@@ -392,6 +392,14 @@ class ProfileConfig(BaseModel):
     active: int = 3
     repeat: int = 0
 
+    @property
+    def total_steps(self) -> int:
+        """
+        Calculate the total number of steps for profiling.
+        This is the sum of wait, warmup, and active steps, multiplied by the repeat count.
+        """
+        return (self.wait + self.warmup + self.active) * (self.repeat + 1)
+
 
 class RunConfig(BaseModel):
     """
@@ -467,6 +475,14 @@ class RunConfig(BaseModel):
         # _ = self.process_batch_size  # Trigger the property to validate batch size
         return self
 
+    @model_validator(mode="after")
+    def check_profiler_num_steps(self) -> Self:
+        if self.profile:
+            assert self.steps_per_epoch >= self.profile.total_steps, (
+                f"{self.steps_per_epoch=} must be greater than or equal to {self.profile.total_steps=}"
+            )
+        return self
+
     def cpu_config(self) -> RunConfig:
         """
         Create a CPU-specific configuration for the run.
@@ -531,14 +547,15 @@ class ExperimentConfig(BaseModel, Generic[_LITDataModule]):
         return tomli_w.dumps(self.model_dump(serialize_as_any=True))
 
     def testing_config(
-        self,
-        num_steps: int = 1,
-        enable_wandb: bool = True,
+        self, num_steps: int = 1, enable_wandb: bool = True, profile: bool = False
     ) -> Self:
         """
         Create a testing configuration for the experiment.
         This is useful for unit tests to avoid running the full experiment.
         """
+        profile_config: Optional[ProfileConfig] = (
+            ProfileConfig() if profile else self.run.profile
+        )
 
         updated_wandb_config = (
             self.metadata.wandb.model_copy(
@@ -563,6 +580,7 @@ class ExperimentConfig(BaseModel, Generic[_LITDataModule]):
                     update={
                         "num_epochs": 1,
                         "steps_per_epoch": num_steps,
+                        "profile": profile_config,
                     }
                 ),
             }

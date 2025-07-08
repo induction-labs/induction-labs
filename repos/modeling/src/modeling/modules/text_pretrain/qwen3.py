@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from modeling.config import RunConfig, RuntimeConfig, InstanceConfig
+from modeling.config import RunConfig, RuntimeConfig, DistributedInstanceConfig
 from torch.distributed.fsdp import fully_shard
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.fsdp import MixedPrecisionPolicy
@@ -60,6 +60,6 @@ class Qwen3LITConfig(TextPretrainLITConfig):
         self,
         run_config: RunConfig,
         runtime_config: RuntimeConfig,
-        instance_config: InstanceConfig,
+        instance_config: DistributedInstanceConfig,
     ) -> Qwen3LIT:
         return Qwen3LIT(self, run_config, runtime_config, instance_config)

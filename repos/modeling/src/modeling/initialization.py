@@ -14,10 +14,11 @@ from modeling.modules.base_module import (
     BaseLITModule,
     BaseModuleConfig,
     RuntimeConfig,
-    InstanceConfig,
+    DistributedInstanceConfig,
 )
 import wandb
 from modeling.callbacks.profiler import profiler_context
+from modeling.distributed.distributed import init_distributed
 
 from datetime import UTC, datetime
 from pathlib import Path
@@ -146,7 +147,7 @@ class ExperimentInstance:
             logger.info(f"Training completed. Total steps: {self.state.global_step}")
 
     @staticmethod
-    def get_instance_config() -> InstanceConfig:
+    def get_instance_config() -> DistributedInstanceConfig:
         """
         Get the instance configuration for the experiment.
         This is used to configure the instance-specific settings.
@@ -155,7 +156,7 @@ class ExperimentInstance:
         # local_rank = int(os.environ["LOCAL_RANK"])
         # node_rank = int(os.environ["GROUP_RANK"])
         local_rank = node_rank = 0
-        return InstanceConfig(
+        return DistributedInstanceConfig(
             device=torch.device("cuda" if torch.cuda.is_available() else "cpu"),
             node_rank=node_rank,
             device_rank=local_rank,
@@ -235,7 +236,6 @@ class ExperimentInstance:
             TmpDirContext() as (tmpdir_context, tmp_dir),
         ):
             ExperimentInstance.do_random_torch_things()
-            # TODO: torch.distributed.init_process_group()
             runtime_config = ExperimentInstance.create_runtime_config(tmp_dir)
             instance_config = ExperimentInstance.get_instance_config()
             unified_config = UnifiedExperimentConfig(
@@ -245,6 +245,7 @@ class ExperimentInstance:
                 run=exp_config.run,
                 metadata=exp_config.metadata,
             )
+            init_distributed(unified_config.run.distributed)
             global_state = ExperimentInstance.init_global_state(unified_config)
             # This is so troll
             # https://lightning.ai/docs/pytorch/stable/api/lightning.pytorch.loggers.wandb.html#module-lightning.pytorch.loggers.wandb

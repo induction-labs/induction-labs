@@ -8,7 +8,7 @@ from functools import partial
 from modeling.utils.cloud_path import CloudPath
 import torch
 from modeling.config import (
-    InstanceConfig,
+    DistributedInstanceConfig,
     ModuleConfig,
     RunConfig,
     GlobalState,
@@ -87,7 +87,7 @@ class BaseModuleConfig(ModuleConfig):
         self,
         run_config: RunConfig,
         runtime_config: RuntimeConfig,
-        instance_config: InstanceConfig,
+        instance_config: DistributedInstanceConfig,
     ) -> "BaseLITModule": ...
 
 
@@ -164,7 +164,7 @@ class BaseLITModule(ABC, Generic[MODEL_TYPE, DATA_TYPE, CONFIG_TYPE]):
         module_config: CONFIG_TYPE,
         run_config: RunConfig,
         runtime_config: RuntimeConfig,
-        instance_config: InstanceConfig,
+        instance_config: DistributedInstanceConfig,
     ):
         self.runtime_config = runtime_config
         self.instance_config = instance_config

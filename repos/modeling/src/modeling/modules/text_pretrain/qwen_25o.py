@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from modeling.config import RunConfig, RuntimeConfig, InstanceConfig
+from modeling.config import RunConfig, RuntimeConfig, DistributedInstanceConfig
 from modeling.modules.text_pretrain.default import TextPretrainLITConfig
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.fsdp import MixedPrecisionPolicy
@@ -82,6 +82,6 @@ class Qwen25OLITConfig(TextPretrainLITConfig):
         self,
         run_config: RunConfig,
         runtime_config: RuntimeConfig,
-        instance_config: InstanceConfig,
+        instance_config: DistributedInstanceConfig,
     ) -> Qwen25OLIT:
         return Qwen25OLIT(self, run_config, runtime_config, instance_config)

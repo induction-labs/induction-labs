@@ -6,7 +6,7 @@ from typing import Any, cast
 from modeling.config import (
     DatapackConfig,
     RunConfig,
-    InstanceConfig,
+    DistributedInstanceConfig,
     RuntimeConfig,
 )
 from modeling.data.text_train import TextPretrainDatapackConfig, TextPretrainDataSample
@@ -163,6 +163,6 @@ class TextPretrainLITConfig(TextLITConfig):
         self,
         run_config: RunConfig,
         runtime_config: RuntimeConfig,
-        instance_config: InstanceConfig,
+        instance_config: DistributedInstanceConfig,
     ) -> TextPretrainLIT:
         return TextPretrainLIT(self, run_config, runtime_config, instance_config)

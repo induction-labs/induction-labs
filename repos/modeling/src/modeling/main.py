@@ -21,7 +21,7 @@ logger = configure_logging(
 app = AsyncTyper(pretty_exceptions_show_locals=False, pretty_exceptions_enable=False)
 
 
-@functools.lru_cache(maxsize=None)
+@functools.lru_cache(maxsize=1)
 def get_rank():
     import torch.distributed as dist
 
