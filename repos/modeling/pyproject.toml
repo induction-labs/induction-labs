@@ -70,6 +70,7 @@ torchaudio = [{ index = "torch_12.8", marker = "sys_platform == 'linux'" }]
 synapse = { workspace = true }
 tomli-w = { git = "ssh://git@github.com/induction-labs/tomli-w-none.git" }
 tomli = { git = "ssh://git@github.com/induction-labs/tomli-none.git" }
+transformers = { git = "ssh://git@github.com/induction-labs/transformers.git", branch = "fix-qwen2vl-positionid-mask" }
 
 [[tool.uv.index]]
 name = "torch_general"
