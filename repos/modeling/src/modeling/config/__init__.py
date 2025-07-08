@@ -569,6 +569,10 @@ class ExperimentConfig(BaseModel, Generic[_LITDataModule]):
         )
 
 
+class UnifiedExperimentConfig(ExperimentConfig):
+    runtime_config: RuntimeConfig
+
+
 class SerializedExperimentConfig(ExperimentConfig["BaseDataModule"]):
     module: SerializedModuleConfig  # type: ignore[override]
     datapack: SerializedDatapackConfig  # type: ignore[override]

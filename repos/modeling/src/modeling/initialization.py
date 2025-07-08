@@ -5,7 +5,7 @@ from wandb.sdk.wandb_run import Run
 from contextlib import contextmanager
 from typing import Iterator
 
-from modeling.config import ExperimentConfig, GlobalState
+from modeling.config import ExperimentConfig, GlobalState, UnifiedExperimentConfig
 from synapse.utils.logging import configure_logging
 from modeling.utils.tmpdir import TmpDirContext
 from synapse.elapsed_timer import elapsed_timer
@@ -17,7 +17,7 @@ from modeling.modules.base_module import (
     InstanceConfig,
 )
 import wandb
-from modeling.callbacks.tensorboard_handler import tensorboard_trace_handler
+from modeling.callbacks.profiler import profiler_context
 
 from datetime import UTC, datetime
 from pathlib import Path
@@ -28,11 +28,6 @@ from dataclasses import dataclass
 import secrets
 import string
 
-from torch.profiler import (
-    profile,
-    ProfilerActivity,
-    schedule,
-)
 
 logger = configure_logging(
     __name__,
@@ -40,18 +35,9 @@ logger = configure_logging(
 )
 
 
-class UnifiedExperimentConfig(ExperimentConfig):
-    runtime_config: RuntimeConfig
-
-
 def gen_id(length: int = 8) -> str:
     alphabet = string.ascii_letters + string.digits
     return "".join(secrets.choice(alphabet) for _ in range(length))
-
-
-class DummyProfiler:
-    def step(self):
-        pass
 
 
 @dataclass
@@ -96,7 +82,7 @@ class ExperimentInstance:
         logger.info(
             f"Starting training: {num_epochs} epochs, {steps_per_epoch} steps per epoch"
         )
-        with ExperimentInstance.profiler_context(self.exp_config) as prof:  # type: ignore[assignment]
+        with profiler_context(self.exp_config) as prof:  # type: ignore[assignment]
             pbar = tqdm.tqdm(
                 enumerate(train_dataloader), desc="Training", total=steps_per_epoch
             )
@@ -233,47 +219,6 @@ class ExperimentInstance:
         torch.set_float32_matmul_precision("high")
 
     # TODO: Make this a callback instead of global
-    @staticmethod
-    @contextmanager
-    def profiler_context(
-        config: UnifiedExperimentConfig,
-    ) -> Iterator[DummyProfiler | profile]:
-        # TODO: Wrap profiler in a class instead of union
-        """
-        Context manager to handle profiling during the experiment.
-        This is a placeholder for actual profiling logic.
-        """
-        try:
-            if config.run.profile is None:
-                yield DummyProfiler()  # Replace with actual profiling logic
-            else:
-                profile_dir = config.metadata.output_dir / "profiler"
-                profile_schedule = schedule(
-                    wait=config.run.profile.wait,
-                    warmup=config.run.profile.warmup,
-                    active=config.run.profile.active,
-                    repeat=config.run.profile.repeat,
-                )
-                with profile(
-                    activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
-                    schedule=profile_schedule,
-                    on_trace_ready=tensorboard_trace_handler(
-                        profile_dir,  # type: ignore[arg-type]
-                    ),
-                    record_shapes=True,
-                    with_stack=True,
-                    with_flops=True,
-                    profile_memory=True,
-                    with_modules=True,
-                ) as prof:
-                    # prof.start()
-                    yield prof
-                    # prof.stop()
-        except Exception as e:
-            logger.error(f"Profiling error: {e}")
-            raise e
-        finally:
-            pass
 
     @staticmethod
     @contextmanager
@@ -310,7 +255,6 @@ class ExperimentInstance:
             #     # save_distributed_checkpoint=True,  # write one shard per rank
             # )
             logger.debug("Initializing trainer:")
-            # profiler = PyTorchProfiler(dirpath="output/profiler", emit_nvtx=True)
 
             # trainer = L.Trainer(
             #     max_epochs=exp_config.run.num_epochs,
