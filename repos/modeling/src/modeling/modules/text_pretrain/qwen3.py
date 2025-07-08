@@ -1,8 +1,6 @@
 from __future__ import annotations
-from pathlib import Path
 
-
-from modeling.config import RunConfig
+from modeling.config import RunConfig, RuntimeConfig, InstanceConfig
 from torch.distributed.fsdp import fully_shard
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.fsdp import MixedPrecisionPolicy
@@ -59,6 +57,9 @@ class Qwen3LITConfig(TextPretrainLITConfig):
     tokenizer_name: str = "Qwen/Qwen3-0.6B"
 
     def create_module(
-        self, run_config: RunConfig, tmp_dir: Path, global_state
+        self,
+        run_config: RunConfig,
+        runtime_config: RuntimeConfig,
+        instance_config: InstanceConfig,
     ) -> Qwen3LIT:
-        return Qwen3LIT(self, run_config, tmp_dir, global_state)
+        return Qwen3LIT(self, run_config, runtime_config, instance_config)

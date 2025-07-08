@@ -41,7 +41,7 @@ Qwen3PretrainExperimentConfig = ExperimentConfig(
     ),
 )
 Qwen3PretrainTest = Qwen3PretrainExperimentConfig.testing_config(
-    num_steps=5, enable_wandb=False
+    num_steps=5, enable_wandb=True
 )
 
 # mdl export modeling.experiments.text_pretrain.qwen3.Qwen3PretrainExperimentConfig

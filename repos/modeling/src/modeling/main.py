@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from modeling.data.data_module import BaseDataSample
 import typer
 from synapse.utils.logging import configure_logging
 
@@ -12,12 +11,14 @@ import os
 
 import warnings
 import builtins
+from typing import Optional
+from synapse.video_loader.main import AsyncTyper
 
 logger = configure_logging(
     __name__,
     level=logging.DEBUG,  # Set to DEBUG for more verbose output
 )
-app = typer.Typer(pretty_exceptions_show_locals=False, pretty_exceptions_enable=False)
+app = AsyncTyper(pretty_exceptions_show_locals=False, pretty_exceptions_enable=False)
 
 
 @functools.lru_cache(maxsize=None)
@@ -49,8 +50,41 @@ if __name__ == "__main__":
         silence_everything()
 
 
-@app.command()
-def run(
+def tensorboard_trace_handler(
+    dir_name: str, worker_name: Optional[str] = None, use_gzip: bool = False
+):
+    """
+    Outputs tracing files to directory of ``dir_name``, then that directory can be
+    directly delivered to tensorboard as logdir.
+    ``worker_name`` should be unique for each worker in distributed scenario,
+    it will be set to '[hostname]_[pid]' by default.
+    """
+    import os
+    import socket
+    import time
+
+    def handler_fn(prof) -> None:
+        nonlocal worker_name
+        if not os.path.isdir(dir_name):
+            try:
+                os.makedirs(dir_name, exist_ok=True)
+            except Exception as e:
+                raise RuntimeError("Can't create directory: " + dir_name) from e
+        if not worker_name:
+            worker_name = f"{socket.gethostname()}_{os.getpid()}"
+        # Use nanosecond here to avoid naming clash when exporting the trace
+        file_name = f"{worker_name}.{time.time_ns()}.pt.trace.json"
+        if use_gzip:
+            file_name = file_name + ".gz"
+        output_path = os.path.join(dir_name, file_name)
+        prof.export_chrome_trace(output_path)
+        logger.info(f"Exported profiling trace to {output_path}")
+
+    return handler_fn
+
+
+@app.async_command()
+async def run(
     config_path: str = typer.Argument(
         ..., help="Path to experiment configuration toml file"
     ),
@@ -72,87 +106,17 @@ def run(
         from modeling.config.serde import (
             build_experiment_config,
         )
-        from modeling.config import GlobalState
-        from modeling.initialization import Initializer
-        import torch
-
-        logger.debug("Initializing the modeling application...")
-
-        torch.set_float32_matmul_precision("high")
+        from modeling.initialization import ExperimentInstance
+        # import os
 
         experiment_config = build_experiment_config(Path(config_path))
-        # Here you would typically initialize and run your model training or evaluation
         logger.info("Running with config")
         logger.info(experiment_config.model_dump_json(serialize_as_any=True, indent=2))
-        global_state = GlobalState(
-            global_step=0,
-            device=torch.device("cuda" if torch.cuda.is_available() else "cpu"),
-        )
-        logger.debug(f"Global state initialized with device: {global_state.device=}")
+        with ExperimentInstance.init_experiment(
+            exp_config=experiment_config,
+        ) as experiment:
+            await experiment.run()
 
-        # Initialize the experiment configuration
-        with Initializer.init_experiment(experiment_config, global_state) as (
-            _,  # trainer (unused in custom training loop)
-            datapack,
-            lit_module,
-        ):
-            # Setup data and model
-            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-            datapack.setup("fit")
-            lit_module.configure_model()
-
-            # Get training dataloader
-            train_dataloader = datapack.train_dataloader()
-
-            # Configure optimizer and scheduler
-            optimizer_config = lit_module.configure_optimizers()
-            optimizer = optimizer_config.optimizer
-            lr_scheduler = optimizer_config.lr_scheduler.scheduler
-
-            # Move model to device
-
-            # Training loop
-
-            num_epochs = experiment_config.run.num_epochs
-            steps_per_epoch = experiment_config.run.steps_per_epoch
-
-            logger.info(
-                f"Starting training: {num_epochs} epochs, {steps_per_epoch} steps per epoch"
-            )
-
-            for epoch in range(num_epochs):
-                lit_module.model.train()
-
-                for step, batch in enumerate(train_dataloader):
-                    assert isinstance(batch, BaseDataSample)
-                    if step >= steps_per_epoch:
-                        break
-
-                    # Move batch to device
-                    batch = batch.to_device(device)
-                    # Zero gradients
-                    optimizer.zero_grad()
-
-                    # Forward pass
-                    loss = lit_module.training_step(batch)
-
-                    # Backward pass
-                    loss.backward()
-
-                    # Update weights
-                    optimizer.step()
-                    lr_scheduler.step()
-
-                    global_state.global_step += 1
-
-                    if global_state.global_step % 10 == 0:
-                        logger.info(
-                            f"Epoch {epoch}, Step {step}, Global Step {global_state.global_step}, Loss: {loss.item():.4f}"
-                        )
-
-                logger.info(f"Completed epoch {epoch}/{num_epochs}")
-
-            logger.info(f"Training completed. Total steps: {global_state.global_step}")
     except Exception as e:
         if get_rank() == 0:
             raise e

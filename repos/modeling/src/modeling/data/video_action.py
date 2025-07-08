@@ -71,7 +71,7 @@ def qwen_processor() -> Qwen2_5OmniProcessor:
     """
     processor = Qwen2_5OmniProcessor.from_pretrained("Qwen/Qwen2.5-Omni-7B")
     assert isinstance(processor, Qwen2_5OmniProcessor)
-    processor.video_processor = RemoveKwargProxy(processor.video_processor, "images")
+    processor.video_processor = RemoveKwargProxy(processor.video_processor, "images")  # type: ignore[assignment]
     # Otherwise everytime we call it it prints "Unused or unrecognized kwargs: images." kms
 
     return processor

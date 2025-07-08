@@ -21,7 +21,7 @@ class TmpDirContext:
         self.tmpdir = Path(tempfile.mkdtemp())
         logger.debug(f"Created temporary directory: {self.tmpdir}")
         self._token = _tmp_dir_context.set(self.tmpdir)
-        return self
+        return self, self.tmpdir
 
     def __exit__(self, exc_type, exc, tb):
         # restore the previous value (or clear it if there wasn’t one)

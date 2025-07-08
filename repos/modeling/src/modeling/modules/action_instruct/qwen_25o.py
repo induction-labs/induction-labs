@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any, cast
 
 from modeling.checkpoints.save import Path
-from modeling.config import DatapackConfig, RunConfig
+from modeling.config import DatapackConfig, RunConfig, RuntimeConfig, InstanceConfig
 from modeling.data.video_action import ActionDataSample, ActionDatapackConfig
 from modeling.modules.base_module import BaseLITModule, BaseModuleConfig
 from modeling.utils.class_property import class_property
@@ -326,6 +326,9 @@ class Qwen25OActionLITConfig(BaseModuleConfig):
         return datapack_config
 
     def create_module(
-        self, run_config: RunConfig, tmp_dir: Path, global_state
+        self,
+        run_config: RunConfig,
+        runtime_config: RuntimeConfig,
+        instance_config: InstanceConfig,
     ) -> Qwen25OActionLIT:
-        return Qwen25OActionLIT(self, run_config, tmp_dir, global_state)
+        return Qwen25OActionLIT(self, run_config, runtime_config, instance_config)

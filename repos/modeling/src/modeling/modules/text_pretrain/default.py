@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 from typing import TypeVar
-from pathlib import Path
 from typing import Any, cast
 
-from modeling.config import DatapackConfig, GlobalState, RunConfig
+from modeling.config import (
+    DatapackConfig,
+    RunConfig,
+    InstanceConfig,
+    RuntimeConfig,
+)
 from modeling.data.text_train import TextPretrainDatapackConfig, TextPretrainDataSample
 from modeling.modules.text_module import TextLIT, TextLITConfig, MODEL_TYPE
 from modeling.utils.class_property import class_property
@@ -156,6 +160,9 @@ class TextPretrainLITConfig(TextLITConfig):
         return datapack_config
 
     def create_module(
-        self, run_config: RunConfig, tmp_dir: Path, global_state: GlobalState
+        self,
+        run_config: RunConfig,
+        runtime_config: RuntimeConfig,
+        instance_config: InstanceConfig,
     ) -> TextPretrainLIT:
-        return TextPretrainLIT(self, run_config, tmp_dir, global_state)
+        return TextPretrainLIT(self, run_config, runtime_config, instance_config)

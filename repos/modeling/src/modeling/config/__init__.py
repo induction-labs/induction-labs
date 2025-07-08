@@ -32,11 +32,11 @@ from dataclasses import dataclass
 from synapse.utils.logging import configure_logging
 import logging
 from typing import TYPE_CHECKING
+import torch
 
 if TYPE_CHECKING:
     from modeling.modules.base_module import BaseLITModule
     from modeling.data.data_module import BaseDataModule
-    import torch
     from wandb.sdk.wandb_run import Run
 
 logger = configure_logging(__name__, logging.DEBUG)
@@ -45,6 +45,23 @@ logger = configure_logging(__name__, logging.DEBUG)
 
 # _LitModule = TypeVar("_LitModule", bound="BaseLITModule", covariant=True)
 _LITDataModule = TypeVar("_LITDataModule", bound="BaseDataModule")
+
+# TODO: Make this not import torch at load, right now im jsut going to do it like this but like ya
+# For distributed stuffs
+
+
+class InstanceConfig(BaseModel):
+    # TODO: Serialize + deserialize torch.device
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+    device: torch.device
+    node_rank: int  # [0, num_nodes)
+    device_rank: int  # [0, 8)
+
+
+class RuntimeConfig(BaseModel):
+    id: str
+    start_time: datetime
+    tmp_dir: Path
 
 
 # TODO: Make checkpoint config use different backends and have it dynamically loaded and stuff
@@ -182,8 +199,7 @@ class GlobalState:
     """
 
     global_step: int
-    device: "torch.device"
-    wandb_run: Optional["Run"] = None
+    wandb: Optional["Run"] = None
 
 
 class ModuleConfig(BaseModel, ABC):
@@ -216,7 +232,10 @@ class ModuleConfig(BaseModel, ABC):
 
     @abstractmethod
     def create_module(
-        self, run_config: RunConfig, tmp_dir: Path, global_state: GlobalState
+        self,
+        run_config: RunConfig,
+        runtime_config: RuntimeConfig,
+        instance_config: InstanceConfig,
     ) -> "BaseLITModule":
         """
         Create a Lightning module instance.
@@ -251,7 +270,10 @@ class SerializedModuleConfig(ModuleConfig):
         return datapack_config
 
     def create_module(
-        self, run_config: RunConfig, tmp_dir: Path, global_state: GlobalState
+        self,
+        run_config: RunConfig,
+        runtime_config: RuntimeConfig,
+        instance_config: InstanceConfig,
     ) -> "BaseLITModule":
         """
         Create a Lightning module instance by loading it from the specified path.
@@ -364,6 +386,13 @@ class LinearLRSchedule(BaseModel):
         )
 
 
+class ProfileConfig(BaseModel):
+    wait: int = 1
+    warmup: int = 1
+    active: int = 3
+    repeat: int = 0
+
+
 class RunConfig(BaseModel):
     """
     Configuration for a run.
@@ -371,6 +400,7 @@ class RunConfig(BaseModel):
     """
 
     distributed: DistributedConfig
+    profile: Optional[ProfileConfig] = None
 
     num_epochs: int = 1
     steps_per_epoch: int  # Number of steps per epoch

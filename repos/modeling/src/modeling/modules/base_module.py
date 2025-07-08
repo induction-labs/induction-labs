@@ -7,7 +7,13 @@ from functools import partial
 
 from modeling.utils.cloud_path import CloudPath
 import torch
-from modeling.config import ModuleConfig, RunConfig, GlobalState
+from modeling.config import (
+    InstanceConfig,
+    ModuleConfig,
+    RunConfig,
+    GlobalState,
+    RuntimeConfig,
+)
 from modeling.utils.elapsed_timer import elapsed_timer
 from modeling.utils.get_attn_impl import check_attn_impl
 from torch.distributed.device_mesh import DeviceMesh
@@ -24,7 +30,6 @@ from torch.optim import Optimizer
 from torch.optim.lr_scheduler import LRScheduler
 import logging
 from modeling.utils.class_property import class_property
-from wandb.sdk.wandb_run import Run
 
 
 logger = configure_logging(
@@ -66,7 +71,10 @@ class BaseModuleConfig(ModuleConfig):
 
     @abstractmethod
     def create_module(
-        self, run_config: RunConfig, tmp_dir: Path, global_state: GlobalState
+        self,
+        run_config: RunConfig,
+        runtime_config: RuntimeConfig,
+        instance_config: InstanceConfig,
     ) -> "BaseLITModule": ...
 
 
@@ -123,26 +131,34 @@ class BaseLITModule(ABC, Generic[MODEL_TYPE, DATA_TYPE, CONFIG_TYPE]):
         Returns the current device of the model.
         This is useful for ensuring that the model and data are on the same device.
         """
-        return self.global_state.device
+        return self.instance_config.device
 
     @property
     def model_config(self) -> PretrainedConfig:
         return self.model.config
+
+    @property
+    def tmp_dir(self) -> Path:
+        """
+        Returns the temporary directory path where model weights and checkpoints are stored.
+        This is useful for downloading and loading model weights.
+        """
+        return self.runtime_config.tmp_dir / "module"
 
     @final
     def __init__(
         self,
         module_config: CONFIG_TYPE,
         run_config: RunConfig,
-        tmp_dir: Path,
-        global_state: GlobalState,
+        runtime_config: RuntimeConfig,
+        instance_config: InstanceConfig,
     ):
-        self.global_state = global_state
+        self.runtime_config = runtime_config
+        self.instance_config = instance_config
         self.module_config = module_config
         self.run_config = run_config
         self.attn_impl = run_config.attn_impl
         self.dtype = run_config.precision.torch_dtype
-        self.tmp_dir = tmp_dir
         os.makedirs(self.tmp_dir, exist_ok=True)
 
         check_attn_impl(self.attn_impl)
@@ -150,6 +166,7 @@ class BaseLITModule(ABC, Generic[MODEL_TYPE, DATA_TYPE, CONFIG_TYPE]):
         if self.run_config.accelerator == "cuda":
             torch.cuda.reset_peak_memory_stats()
         self.model = self.init_model_meta()
+        # TODO: Move this to a separate method
         self.download_weights(self.tmp_dir)
 
     @abstractmethod
@@ -244,7 +261,8 @@ class BaseLITModule(ABC, Generic[MODEL_TYPE, DATA_TYPE, CONFIG_TYPE]):
                 "": self.device  # Use the device index for the model
             },  # Ensure model is loaded on the correct device
             attn_implementation=self.attn_impl,
-        ).train()
+        )
+
         # loaded_model = load_checkpoint_and_dispatch(
         #     self.model,
         #     checkpoint=tmpdir,  # hub ID or local folder
@@ -255,23 +273,14 @@ class BaseLITModule(ABC, Generic[MODEL_TYPE, DATA_TYPE, CONFIG_TYPE]):
         return cast(MODEL_TYPE, loaded_model)
 
     @final
-    def wandb_log(self, metrics: dict[str, Any]) -> None:
+    def wandb_log(self, global_state: GlobalState, metrics: dict[str, Any]) -> None:
         """
         Log metrics to Wandb if available.
         This method is a wrapper around the logger's log_dict method.
         """
         # logger.debug(metrics)
-        if self.wandb is not None:
-            self.wandb.log(metrics)
-
-    @final
-    @property
-    def wandb(self) -> Run | None:
-        """
-        Returns the Wandb experiment instance if available, otherwise None.
-        This is useful for logging and tracking experiments.
-        """
-        return self.global_state.wandb_run
+        if global_state.wandb is not None:
+            global_state.wandb.log(metrics)
 
     @abstractmethod
     def run_validation_step(
@@ -306,7 +315,11 @@ class BaseLITModule(ABC, Generic[MODEL_TYPE, DATA_TYPE, CONFIG_TYPE]):
         return loss
 
     @final
-    def training_step(self, inputs: DATA_TYPE):
+    def training_step(
+        self,
+        inputs: DATA_TYPE,
+        global_state: GlobalState,
+    ):
         # Forward pass through the model
         with elapsed_timer() as timer:
             loss = self.run_training_step(inputs)
@@ -328,13 +341,14 @@ class BaseLITModule(ABC, Generic[MODEL_TYPE, DATA_TYPE, CONFIG_TYPE]):
             **memory_metrics,
         }
 
-        self.wandb_log(metrics)
+        self.wandb_log(global_state, metrics)
         return loss
 
     @final
     def validation_step(
         self,
         inputs: DATA_TYPE,
+        global_state: GlobalState,
     ):
         # Forward pass through the model
         with elapsed_timer() as timer:
@@ -346,7 +360,7 @@ class BaseLITModule(ABC, Generic[MODEL_TYPE, DATA_TYPE, CONFIG_TYPE]):
             "val/loss": loss,
             **val_metrics,
         }
-        self.wandb_log(metrics)
+        self.wandb_log(global_state, metrics)
         return metrics
 
     def configure_optimizers(self) -> OptimizerConfig:

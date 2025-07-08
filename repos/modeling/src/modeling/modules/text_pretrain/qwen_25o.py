@@ -1,8 +1,6 @@
 from __future__ import annotations
-from pathlib import Path
 
-
-from modeling.config import RunConfig
+from modeling.config import RunConfig, RuntimeConfig, InstanceConfig
 from modeling.modules.text_pretrain.default import TextPretrainLITConfig
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.fsdp import MixedPrecisionPolicy
@@ -81,6 +79,9 @@ class Qwen25OLITConfig(TextPretrainLITConfig):
         return tokenizer
 
     def create_module(
-        self, run_config: RunConfig, tmp_dir: Path, global_state
+        self,
+        run_config: RunConfig,
+        runtime_config: RuntimeConfig,
+        instance_config: InstanceConfig,
     ) -> Qwen25OLIT:
-        return Qwen25OLIT(self, run_config, tmp_dir, global_state)
+        return Qwen25OLIT(self, run_config, runtime_config, instance_config)

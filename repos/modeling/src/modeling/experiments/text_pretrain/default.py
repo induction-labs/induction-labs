@@ -6,14 +6,16 @@ from modeling.config import (
     ExperimentMetadata,
     RunConfig,
     WandbConfig,
+    LinearLRSchedule,
 )
 from modeling.data.text_train import TextPretrainDatapackConfig
 from modeling.modules.text_pretrain.default import TextPretrainLITConfig
+from pathlib import Path
 
 TextPretrainExperimentConfig = ExperimentConfig(
     metadata=ExperimentMetadata(
         wandb=WandbConfig(project="testing", name="text_pretrain"),
-        output_dir="output/text_pretrain",
+        output_dir=Path("./output/text_pretrain"),
         checkpoint=None,
     ),
     module=TextPretrainLITConfig(),
@@ -23,7 +25,7 @@ TextPretrainExperimentConfig = ExperimentConfig(
         batch_size=2,
         steps_per_epoch=1000,  # Number of steps per epoch
         distributed=DistributedConfig.mock_data(),
-        lr=1e-5,  # Learning rate
+        lr=LinearLRSchedule.constant_lr(1e-5),  # Constant learning rate
     ),
 )
 
