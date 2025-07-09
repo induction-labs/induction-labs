@@ -182,14 +182,26 @@ class BaseLITModule(ABC, Generic[MODEL_TYPE, DATA_TYPE, CONFIG_TYPE]):
         # TODO: Move this to a separate method
         self.download_weights(self.tmp_dir)
 
-    @abstractmethod
+    # @abstractmethod
+    @final
     def activation_checkpoint_model(self) -> MODEL_TYPE:
         """
         !!! IMPORTANT - use torch.distributed.algorithms._checkpoint.checkpoint_wrapper, NOT HF self.model.gradient_checkpointing_enable()
         !!! HF gradient_checkpointing_enable() does not work with FSDP - once sharded, no activation checkpointing is applied
+
+        !!! JUST KIDDING - checkpoint_wrapper is broken with qwen 25o for some reason - I think it is because
+        !!! HF Transformers relies on __call__ and i think that default checkpoint_wrapper only wraps forward so
+        !!! there are some bugs here https://github.com/huggingface/transformers/blob/0e1c2817455602d182bd8ebf5fba212e14fb187e/src/transformers/modeling_layers.py#L27
+
+
+        !!! So HF checkpoint_wrapper by default uses reentrant=True, which is what I think is broken with fsdp.
+        !!! For now just going to use HF's gradient_checkpointing_enable() method with reentrant=False which seems to work for now :/
         Abstract method to be implemented by subclasses for enabling activation checkpointing.
         This method should return the model with activation checkpointing enabled.
         """
+        self.model.gradient_checkpointing_enable(
+            gradient_checkpointing_kwargs={"use_reentrant": False}
+        )
         return self.model
 
     @abstractmethod
@@ -217,28 +229,25 @@ class BaseLITModule(ABC, Generic[MODEL_TYPE, DATA_TYPE, CONFIG_TYPE]):
         if isinstance(self.model, FSDPModule):
             return  # already configured
         self.model = self.load_weights(self.tmp_dir)
+
+        # Very specific order here:
+        # 1. Enable activation checkpointing if configured
+        # 2. Shard the model using FSDP
+        # 3. Compile the model if configured
+
         if self.module_config.activation_checkpointing is not None:
             logger.debug("Enabling activation checkpointing...")
             self.model = self.activation_checkpoint_model()  # type: ignore[assignment]
             # # Enable activation checkpointing if configured
-            # self.model.gradient_checkpointing_enable()  # Hypothetical method, replace with actual implementation
-
-        # for layer_id, transformer_block in enumerate(self.model.model.layers):
-        #     # Apply activation checkpointing
-
-        #     # For now this is broken with HF models https://github.com/huggingface/transformers/issues/34928
-
-        #     transformer_block = checkpoint_wrapper(transformer_block)
-        #     self.model.model.layers[layer_id] = transformer_block
 
         self.model = self.shard_model(
             mp_policy=self.run_config.mp_policy,
             device_mesh=device_mesh,
         )  # type: ignore[assignment]
         logger.debug(f"Sharded model {self.model} with dtype {self.dtype}")
-        # assert isinstance(self.model, FSDPModule), (
-        #     f"Expected self.model to be a FullyShardedDataParallel, got {type(self.model)}"
-        # )
+        assert isinstance(self.model, FSDPModule), (
+            f"Expected self.model to be a FullyShardedDataParallel, got {type(self.model)}"
+        )
 
         # We can only compile *after* sharding and gradient checkpointing, otherwise it doesn't trace through.
         if self.module_config.compile is not None:

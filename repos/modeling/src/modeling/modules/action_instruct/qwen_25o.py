@@ -9,6 +9,7 @@ from modeling.config import (
     RuntimeConfig,
     InstanceConfig,
 )
+from modeling.config.distributed import MeshAxis
 from modeling.data.video_action import ActionDataSample, ActionDatapackConfig
 from modeling.modules.base_module import BaseLITModule, BaseModuleConfig
 from modeling.utils.class_property import class_property
@@ -30,6 +31,7 @@ from torch.distributed.device_mesh import DeviceMesh
 import torch
 from synapse.utils.logging import configure_logging, logging
 import numpy as np
+
 
 logger = configure_logging(__name__, level=logging.DEBUG)
 
@@ -279,21 +281,15 @@ class Qwen25OActionLIT(
         mp_policy: MixedPrecisionPolicy,
         device_mesh: DeviceMesh,
     ):
-        # if self.model.device.type != "meta":
-        #     return  # already configured
-
-        dp_mesh = device_mesh["data_parallel"]  # provided by ModelParallelStrategy
-        fsdp_config = {"mesh": dp_mesh, "mp_policy": mp_policy}
-        fully_shard(self.model.visual, **fsdp_config)
+        """
+        Shard the model using Fully Sharded Data Parallel (FSDP).
+        This method is called during the model configuration phase.
+        """
+        fsdp_config = {"mesh": device_mesh[MeshAxis.FSDP], "mp_policy": mp_policy}
 
         for layer_id, transformer_block in enumerate(self.model.model.layers):
-            # Apply activation checkpointing
-
+            # Activation checkpointing kinda broken
             # For now this is broken with HF models https://github.com/huggingface/transformers/issues/34928
-            #             from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
-            #     checkpoint_wrapper,
-            # )
-            # transformer_block = checkpoint_wrapper(transformer_block)
 
             reshard_after_forward = int(layer_id) < len(self.model.model.layers) - 1
             fully_shard(

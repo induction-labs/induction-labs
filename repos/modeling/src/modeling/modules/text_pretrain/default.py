@@ -28,9 +28,6 @@ from torch.distributed.fsdp import MixedPrecisionPolicy, fully_shard
 from synapse.utils.logging import configure_logging
 from accelerate import init_empty_weights
 from modeling.config.distributed import MeshAxis
-from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
-    checkpoint_wrapper,
-)
 
 logger = configure_logging(
     __name__,
@@ -71,24 +68,6 @@ class TextPretrainLIT(TextLIT[MODEL_TYPE, TextPretrainDataSample, ConfigType]):
         )
         return cast(MODEL_TYPE, model)
 
-    def activation_checkpoint_model(self) -> MODEL_TYPE:
-        """
-        Enable activation checkpointing for the model.
-        This method is called during the model configuration phase.
-        """
-        assert isinstance(self.model.model, PreTrainedModel) and isinstance(
-            self.model.model.layers, nn.ModuleList
-        )
-        for layer_id, transformer_block in enumerate(self.model.model.layers):
-            # Apply activation checkpointing
-
-            # For now this is broken with HF models https://github.com/huggingface/transformers/issues/34928
-
-            transformer_block = checkpoint_wrapper(transformer_block)
-            self.model.model.layers[layer_id] = transformer_block
-
-        return self.model
-
     def shard_model(
         self,
         *,
@@ -104,15 +83,6 @@ class TextPretrainLIT(TextLIT[MODEL_TYPE, TextPretrainDataSample, ConfigType]):
             self.model.model.layers, nn.ModuleList
         )
         for layer_id, transformer_block in enumerate(self.model.model.layers):
-            # Apply activation checkpointing
-
-            # For now this is broken with HF models https://github.com/huggingface/transformers/issues/34928
-            from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
-                checkpoint_wrapper,
-            )
-
-            transformer_block = checkpoint_wrapper(transformer_block)
-
             reshard_after_forward = int(layer_id) < len(self.model.model.layers) - 1
             fully_shard(
                 transformer_block,
@@ -152,40 +122,6 @@ class TextPretrainLIT(TextLIT[MODEL_TYPE, TextPretrainDataSample, ConfigType]):
             f"Expected outputs.loss to be a Tensor, got {type(outputs.loss)}"
         )
         return outputs.loss, {}
-
-    # def configure_model(self) -> None:
-    #     # TODO(jl): make this work with cpu device (e.g. just skip it)
-    #     if self.model.device.type != "meta":
-    #         return  # already configured
-    #     assert isinstance(self.device_mesh, DeviceMesh), (
-    #         f"Expected device_mesh to be a DeviceMesh, got {type(self.device_mesh)}"
-    #     )
-    #     _dp_mesh = self.device_mesh[
-    #         "data_parallel"
-    #     ]  # provided by ModelParallelStrategy
-
-    #     self.model.to_empty(device=torch.cuda.current_device())
-    #     load_checkpoint_and_dispatch(
-    #         self.model,
-    #         checkpoint=self.ckpt_dir,  # hub ID or local folder
-    #         device_map={"": torch.cuda.current_device()},
-    #         dtype=self.model.dtype,
-    #     )
-    #     from accelerate import (
-    #         FullyShardedDataParallelPlugin,
-    #         Accelerator,
-    #     )
-    #     from accelerate.utils.fsdp_utils import (
-    #         fsdp2_prepare_model,
-    #     )
-
-    #     fsdp_plugin = FullyShardedDataParallelPlugin(fsdp_version=2)
-    #     accelerator = Accelerator(fsdp_plugin=fsdp_plugin)
-    #     # TODO: This doesn't fully work yet because it doens't handle the device mesh correctly
-    #     self.model = fsdp2_prepare_model(
-    #         accelerator=accelerator,
-    #         model=self.model,
-    #     )
 
 
 class TextPretrainLITConfig(TextLITConfig):
