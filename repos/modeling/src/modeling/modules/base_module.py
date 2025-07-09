@@ -307,7 +307,7 @@ class BaseLITModule(ABC, Generic[MODEL_TYPE, DATA_TYPE, CONFIG_TYPE]):
         Log metrics to Wandb if available.
         This method is a wrapper around the logger's log_dict method.
         """
-        logger.info(metrics)
+        # logger.info(metrics)
         if global_state.wandb is not None:
             global_state.wandb.log(metrics)
 

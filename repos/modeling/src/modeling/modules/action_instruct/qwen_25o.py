@@ -31,6 +31,7 @@ from torch.distributed.device_mesh import DeviceMesh
 import torch
 from synapse.utils.logging import configure_logging, logging
 import numpy as np
+import time
 
 
 logger = configure_logging(__name__, level=logging.DEBUG)
@@ -81,6 +82,8 @@ class Qwen25OActionLIT(
     Inherits from TextPretrainLIT and uses the Qwen-2.5O model.
     """
 
+    model: MODEL_TYPE
+
     @class_property
     def model_cls(cls) -> type[MODEL_TYPE]:
         return MODEL_TYPE
@@ -89,6 +92,8 @@ class Qwen25OActionLIT(
         self,
     ):
         module_config = self.module_config
+        delay = self.instance_config.device_rank * 0.5
+        time.sleep(delay)
         config = Qwen2_5OmniThinkerActionConfig.from_pretrained(
             module_config.model_name,
             freeze_network=module_config.freeze_network,
@@ -102,6 +107,7 @@ class Qwen25OActionLIT(
             config=config,
             torch_dtype=self.dtype,
             attn_implementation=self.attn_impl,
+            local_files_only=True,
         ).train()
         assert isinstance(model, MODEL_TYPE), (
             f"Expected model to be of type Qwen2_5OmniThinkerForActionModelling, "
@@ -118,6 +124,10 @@ class Qwen25OActionLIT(
         # Load the model weights and dispatch them to the appropriate devices
         logger.debug(f"Loading model weights from {tmpdir} to device {self.device}")
         self.model.to_empty(device=self.device)
+        # This is so stupid - but if you try to load the model on multiple devices fucking huggingface throws an error
+        # Huggingface for sure is real company :/
+        delay = self.instance_config.device_rank * 0.5
+        time.sleep(delay)
         loaded_model = MODEL_TYPE.from_pretrained(
             self.module_config.model_name,
             config=self.model.config,
@@ -126,6 +136,7 @@ class Qwen25OActionLIT(
                 "": self.device  # Use the device index for the model
             },  # Ensure model is loaded on the correct device
             attn_implementation=self.attn_impl,
+            local_files_only=True,
         ).train()
 
         return cast(MODEL_TYPE, loaded_model)
@@ -286,9 +297,10 @@ class Qwen25OActionLIT(
         This method is called during the model configuration phase.
         """
         fsdp_config = {
-            "mesh": device_mesh[MeshAxis.DP, MeshAxis.FSDP],
+            "mesh": device_mesh[MeshAxis.FSDP],
             "mp_policy": mp_policy,
         }
+        fully_shard(self.model.visual, **fsdp_config)
 
         for layer_id, transformer_block in enumerate(self.model.model.layers):
             # Activation checkpointing kinda broken
@@ -316,8 +328,8 @@ class Qwen25OActionLITConfig(BaseModuleConfig):
     model_name: str = "Qwen/Qwen2.5-Omni-3B"
     tokenizer_name: str = "Qwen/Qwen2.5-Omni-3B"
 
-    freeze_network: bool = True
-    freeze_vision: bool = True
+    freeze_network: bool = False
+    freeze_vision: bool = False
     freeze_action_head: bool = False
     freeze_action_embedding: bool = False
 

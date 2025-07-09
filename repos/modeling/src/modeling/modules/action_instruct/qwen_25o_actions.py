@@ -57,9 +57,6 @@ class Qwen2_5OmniThinkerForActionModelling(
 
     def __init__(self, config: Qwen2_5OmniThinkerActionConfig):
         super().__init__(config)
-        # self.audio_tower = Qwen2_5OmniAudioEncoder._from_config(
-        #     config.audio_config, attn_implementation=config._attn_implementation
-        # )
 
         self.visual = Qwen2_5OmniVisionEncoder._from_config(
             config.vision_config, attn_implementation=config._attn_implementation

@@ -528,6 +528,7 @@ class ExperimentConfig(BaseModel, Generic[_LITDataModule]):
         num_steps: int = 1,
         enable_wandb: bool = True,
         profile: bool = False,
+        with_val: bool = True,
     ) -> Self:
         """
         Create a testing configuration for the experiment.
@@ -536,6 +537,7 @@ class ExperimentConfig(BaseModel, Generic[_LITDataModule]):
         profile_config: Optional[ProfileConfig] = (
             ProfileConfig() if profile else self.run.profile
         )
+        validation_every_n_steps = self.run.validation_every_n_steps if with_val else -1
 
         updated_wandb_config = (
             self.metadata.wandb.model_copy(
@@ -561,6 +563,7 @@ class ExperimentConfig(BaseModel, Generic[_LITDataModule]):
                         "num_epochs": 1,
                         "steps_per_epoch": num_steps,
                         "profile": profile_config,
+                        "validation_every_n_steps": validation_every_n_steps,
                     }
                 ),
             }
