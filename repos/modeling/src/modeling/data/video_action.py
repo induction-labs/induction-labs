@@ -556,7 +556,7 @@ class ActionDataModule(BaseDataModule[ActionDataSample]):
         return DataLoader(
             self.train_data,
             batch_size=self.extra_args.batch_size,
-            shuffle=True,
+            shuffle=False,
             drop_last=True,
             collate_fn=ActionDataSample.combine_batch,
         )
