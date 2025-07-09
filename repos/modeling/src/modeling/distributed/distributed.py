@@ -8,8 +8,9 @@ import logging
 import torch
 from contextlib import contextmanager
 from typing import Iterator
+from synapse.elapsed_timer import elapsed_timer
 
-logger = configure_logging(__name__, level=logging.INFO)
+logger = configure_logging(__name__, level=logging.DEBUG)
 
 
 @contextmanager
@@ -34,50 +35,56 @@ def init_distributed(
     assert not dist.is_initialized(), "Distributed training is already initialized"
 
     torch.cuda.set_device(instance_config.device_rank)
+    global_rank = distributed_config.global_rank(instance_config)
 
     logger.info(
         f"Initializing distributed training on rank {distributed_config.global_rank(instance_config)}"
     )
 
     try:
-        # Use env:// for now
-        torch.distributed.init_process_group(
-            # backend=distributed_config.backend,
-            # init_method=distributed_config.init_method,
-            # world_size=distributed_config.world_size,
-            # rank=instance_config.device_rank,
-        )
+        with elapsed_timer(
+            f"Distributed training initialization on rank {distributed_config.global_rank(instance_config)}"
+        ) as timer:
+            # Use env:// for now
+            torch.distributed.init_process_group(
+                init_method="env://",
+                backend="nccl",
+                device_id=instance_config.device,
+                # backend=distributed_config.backend,
+                # init_method=distributed_config.init_method,
+                # world_size=distributed_config.world_size,
+                # rank=instance_config.device_rank,
+            )
+            logger.debug(f"Process group initialized on rank {dist.get_rank()}. ")
 
-        # Validate the initialized process group
-        assert dist.get_rank() == distributed_config.global_rank(instance_config), (
-            f"Expected rank {distributed_config.global_rank(instance_config)}, but got {dist.get_rank()}"
-        )
-        assert dist.get_world_size() == distributed_config.world_size, (
-            f"Expected world size {distributed_config.world_size}, but got {dist.get_world_size()}"
-        )
-        assert (
-            local_rank := torch.distributed.distributed_c10d.get_node_local_rank()
-        ) == instance_config.node_rank, (
-            f"Expected node rank {instance_config.node_rank}, but got {local_rank}"
-        )
+            # Validate the initialized process group
+            assert dist.get_rank() == global_rank, (
+                f"Expected rank {global_rank}, but got {dist.get_rank()}"
+            )
+            assert dist.get_world_size() == distributed_config.world_size, (
+                f"Expected world size {distributed_config.world_size}, but got {dist.get_world_size()}"
+            )
 
-        # Initialize device mesh
-        s = distributed_config.sharding
-        mesh = torch.distributed.device_mesh.init_device_mesh(
-            "cuda",
-            (s.DP, s.FSDP, s.TP),
-            mesh_dim_names=(MeshAxis.DP, MeshAxis.FSDP, MeshAxis.TP),
-        )
+            # Initialize device mesh
+            s = distributed_config.sharding
+            mesh = torch.distributed.device_mesh.init_device_mesh(
+                "cuda",
+                (s.DP, s.FSDP, s.TP),
+                mesh_dim_names=(MeshAxis.DP, MeshAxis.FSDP, MeshAxis.TP),
+            )
+            dist.barrier()
 
         logger.info(
-            f"Distributed training initialized successfully: rank {dist.get_rank()}/{dist.get_world_size()}"
+            f"Distributed training initialized in {timer.elapsed:.2f}s: rank {dist.get_rank()}/{dist.get_world_size()}"
         )
 
         yield mesh
 
     except Exception as e:
-        logger.error(f"Failed to initialize distributed training: {e}")
-        raise
+        logger.critical(
+            f"Failed to initialize distributed training on rank {global_rank}: {e}"
+        )
+        raise e
     finally:
         # Clean up the process group
         if dist.is_initialized():
@@ -86,45 +93,12 @@ def init_distributed(
             logger.debug("Process group destroyed successfully")
 
 
-def is_distributed() -> bool:
-    """
-    Check if distributed training is initialized and available.
-
-    Returns:
-        True if distributed training is initialized, False otherwise
-    """
-    return dist.is_available() and dist.is_initialized()
-
-
-def get_rank() -> int:
-    """
-    Get the rank of the current process in distributed training.
-
-    Returns:
-        Rank of the current process, or 0 if not in distributed mode
-    """
-    if is_distributed():
-        return dist.get_rank()
-    return 0
-
-
-def get_world_size() -> int:
-    """
-    Get the total number of processes in distributed training.
-
-    Returns:
-        Total number of processes, or 1 if not in distributed mode
-    """
-    if is_distributed():
-        return dist.get_world_size()
-    return 1
-
-
-def is_main_process() -> bool:
-    """
-    Check if the current process is the main process (rank 0).
-
-    Returns:
-        True if this is the main process, False otherwise
-    """
-    return get_rank() == 0
+@contextmanager
+def rank0_first():
+    rank = dist.get_rank()
+    if rank == 0:
+        yield
+    dist.barrier()
+    if rank > 0:
+        yield
+    dist.barrier()

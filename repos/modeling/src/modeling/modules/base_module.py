@@ -19,7 +19,7 @@ from modeling.utils.get_attn_impl import check_attn_impl
 from torch.distributed.device_mesh import DeviceMesh
 from transformers.configuration_utils import PretrainedConfig
 
-from torch.distributed.fsdp import FSDPModule, MixedPrecisionPolicy, fully_shard
+from torch.distributed.fsdp import FSDPModule, MixedPrecisionPolicy
 from transformers.modeling_utils import PreTrainedModel
 from typing import Any, Generic, Literal, TypeVar, cast, final
 from synapse.utils.logging import configure_logging
@@ -216,10 +216,6 @@ class BaseLITModule(ABC, Generic[MODEL_TYPE, DATA_TYPE, CONFIG_TYPE]):
         This method should handle the Fully Sharded Data Parallel (FSDP) setup.
         Returns FSDPModule
         """
-        # dp_mesh = device_mesh["data_parallel"]  # provided by ModelParallelStrategy
-        # fsdp_config = {"mesh": dp_mesh, "mp_policy": mp_policy}
-        # return fully_shard(self.model, **fsdp_config)
-        return fully_shard(self.model)
 
     @final
     def configure_model(self, device_mesh: DeviceMesh) -> None:
@@ -311,7 +307,7 @@ class BaseLITModule(ABC, Generic[MODEL_TYPE, DATA_TYPE, CONFIG_TYPE]):
         Log metrics to Wandb if available.
         This method is a wrapper around the logger's log_dict method.
         """
-        logger.debug(metrics)
+        logger.info(metrics)
         if global_state.wandb is not None:
             global_state.wandb.log(metrics)
 

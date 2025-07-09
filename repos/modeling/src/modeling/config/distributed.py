@@ -27,10 +27,16 @@ class MeshAxis(str, Enum):
 
 class InstanceConfig(BaseModel):
     # TODO: Serialize + deserialize torch.device
-    # model_config = ConfigDict(arbitrary_types_allowed=True)
-    # device: torch.device
     node_rank: int  # [0, num_nodes)
     device_rank: int  # [0, 8)
+
+    @property
+    def is_main(self) -> bool:
+        """
+        Check if this instance is the main instance in the distributed setup.
+        The main instance is typically the one with node_rank 0 and device_rank 0.
+        """
+        return self.node_rank == 0 and self.device_rank == 0
 
     @property
     def device(self) -> "torch.device":
@@ -45,28 +51,28 @@ class InstanceConfig(BaseModel):
         )
 
 
-class ShardingConfig(BaseModel):
-    DP: int
-    FSDP: int
-    TP: int
-
-    @classmethod
-    def default(cls, world_size: int) -> ShardingConfig:
-        """
-        Default not sharding configuration for distributed training.
-        """
-        return cls(
-            DP=world_size,  # Data parallelism across all devices
-            FSDP=1,  # Fully sharded data parallelism is not used by default
-            TP=1,  # Tensor parallelism is not used by default
-        )
-
-
 class DistributedConfig(BaseModel):
     devices_per_node: int = 1
     num_nodes: int = 1
-    sharding: ShardingConfig = Field(
-        default_factory=lambda data: ShardingConfig.default(
+
+    class ShardingConfig(BaseModel):
+        DP: int = 1
+        FSDP: int = 1
+        TP: int = 1
+
+        @classmethod
+        def default(cls, world_size: int) -> DistributedConfig.ShardingConfig:
+            """
+            Default not sharding configuration for distributed training.
+            """
+            return cls(
+                DP=world_size,  # Data parallelism across all devices
+                FSDP=1,  # Fully sharded data parallelism is not used by default
+                TP=1,  # Tensor parallelism is not used by default
+            )
+
+    sharding: DistributedConfig.ShardingConfig = Field(
+        default_factory=lambda data: DistributedConfig.ShardingConfig.default(
             data["devices_per_node"] * data["num_nodes"]
         )
     )

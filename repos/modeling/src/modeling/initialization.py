@@ -56,6 +56,14 @@ class ExperimentInstance:
     module: BaseLITModule[PreTrainedModel, BaseDataSample, BaseModuleConfig]
     datapack: BaseDataModule[BaseDataSample]
 
+    @property
+    def instance_config(self) -> InstanceConfig:
+        """
+        Get the instance configuration for the experiment.
+        This is used to configure the instance-specific settings.
+        """
+        return self.module.instance_config
+
     # TODO: Make this async
     def run(self) -> None:
         """
@@ -83,7 +91,10 @@ class ExperimentInstance:
         logger.info(
             f"Starting training: {num_epochs} epochs, {steps_per_epoch} steps per epoch"
         )
-        with profiler_context(self.exp_config) as prof:  # type: ignore[assignment]
+        with profiler_context(
+            self.exp_config,
+            self.instance_config,
+        ) as prof:
             pbar = tqdm.tqdm(
                 enumerate(train_dataloader), desc="Training", total=steps_per_epoch
             )
@@ -148,21 +159,6 @@ class ExperimentInstance:
             logger.info(f"Training completed. Total steps: {self.state.global_step}")
 
     @staticmethod
-    def get_instance_config() -> InstanceConfig:
-        """
-        Get the instance configuration for the experiment.
-        This is used to configure the instance-specific settings.
-        """
-        # TODO: Fix
-        # local_rank = int(os.environ["LOCAL_RANK"])
-        # node_rank = int(os.environ["GROUP_RANK"])
-        local_rank = node_rank = 0
-        return InstanceConfig(
-            node_rank=node_rank,
-            device_rank=local_rank,
-        )
-
-    @staticmethod
     def create_runtime_config(tmp_dir: Path) -> RuntimeConfig:
         """
         Initialize a WandbLogger instance with the configuration.
@@ -176,12 +172,12 @@ class ExperimentInstance:
 
     @staticmethod
     def init_wandb(
-        exp_config: UnifiedExperimentConfig,
+        exp_config: UnifiedExperimentConfig, instance_config: InstanceConfig
     ) -> Run | None:
         """
         Initialize a WandbLogger instance with the configuration.
         """
-        if wandb_config := exp_config.metadata.wandb:
+        if (wandb_config := exp_config.metadata.wandb) and instance_config.is_main:
             wandb_run = wandb.init(
                 project=wandb_config.project,
                 name=wandb_config.name,
@@ -198,11 +194,12 @@ class ExperimentInstance:
     def init_global_state(
         exp_config: UnifiedExperimentConfig,
         mesh: torch.distributed.device_mesh.DeviceMesh,
+        instance_config: InstanceConfig,
     ) -> GlobalState:
         """
         Initialize a WandbLogger instance with the configuration.
         """
-        wandb_run = ExperimentInstance.init_wandb(exp_config)
+        wandb_run = ExperimentInstance.init_wandb(exp_config, instance_config)
         return GlobalState(
             global_step=0,
             mesh=mesh,
@@ -226,7 +223,7 @@ class ExperimentInstance:
     @staticmethod
     @contextmanager
     def init_experiment(
-        exp_config: ExperimentConfig,
+        exp_config: ExperimentConfig, instance_config: InstanceConfig
     ) -> Iterator[ExperimentInstance]:
         """
         Initialize the experiment configuration from a given path.
@@ -239,7 +236,6 @@ class ExperimentInstance:
         ):
             ExperimentInstance.do_random_torch_things()
             runtime_config = ExperimentInstance.create_runtime_config(tmp_dir)
-            instance_config = ExperimentInstance.get_instance_config()
             unified_config = UnifiedExperimentConfig(
                 runtime_config=runtime_config,
                 datapack=exp_config.datapack,
@@ -252,7 +248,7 @@ class ExperimentInstance:
                 unified_config.run.distributed, instance_config
             ) as device_mesh:
                 global_state = ExperimentInstance.init_global_state(
-                    unified_config, device_mesh
+                    unified_config, device_mesh, instance_config
                 )
 
                 logger.debug("Initializing trainer:")

@@ -1,5 +1,6 @@
 from __future__ import annotations
 from typing import Any, Generator, Optional
+from modeling.distributed.distributed import InstanceConfig
 from modeling.initialization import UnifiedExperimentConfig
 from synapse.utils.logging import configure_logging
 import logging
@@ -48,7 +49,7 @@ class DummyProfiler:
 
 @contextmanager
 def profiler_context(
-    config: UnifiedExperimentConfig,
+    config: UnifiedExperimentConfig, instance: InstanceConfig
 ) -> Generator[DummyProfiler | profile, Any, None]:  # object is torch.profiler.profile
     # TODO: Wrap profiler in a class instead of union
     """
@@ -58,7 +59,7 @@ def profiler_context(
     from torch.profiler import profile, ProfilerActivity, schedule
 
     try:
-        if config.run.profile is None:
+        if config.run.profile is None or not instance.is_main:
             yield DummyProfiler()  # Replace with actual profiling logic
         else:
             profile_dir = config.metadata.output_dir / "profiler"

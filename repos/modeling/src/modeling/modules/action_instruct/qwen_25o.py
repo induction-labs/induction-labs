@@ -285,7 +285,10 @@ class Qwen25OActionLIT(
         Shard the model using Fully Sharded Data Parallel (FSDP).
         This method is called during the model configuration phase.
         """
-        fsdp_config = {"mesh": device_mesh[MeshAxis.FSDP], "mp_policy": mp_policy}
+        fsdp_config = {
+            "mesh": device_mesh[MeshAxis.DP, MeshAxis.FSDP],
+            "mp_policy": mp_policy,
+        }
 
         for layer_id, transformer_block in enumerate(self.model.model.layers):
             # Activation checkpointing kinda broken

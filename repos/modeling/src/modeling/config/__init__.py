@@ -21,7 +21,6 @@ from modeling.types import Accelerator, DType, AttentionImplementation
 from .distributed import DistributedConfig, InstanceConfig
 from .wandb import WandbConfig
 from typing import Optional
-from torch.distributed.fsdp import MixedPrecisionPolicy
 from pathlib import Path
 from modeling.utils.cloud_path import BeforeValidator, CloudPath
 from lightning.fabric.plugins.precision.precision import (
@@ -38,6 +37,8 @@ if TYPE_CHECKING:
     from modeling.modules.base_module import BaseLITModule
     from modeling.data.data_module import BaseDataModule
     from wandb.sdk.wandb_run import Run
+    from torch.distributed.fsdp import MixedPrecisionPolicy
+
 
 logger = configure_logging(__name__, logging.DEBUG)
 # _T = TypeVar("_T")

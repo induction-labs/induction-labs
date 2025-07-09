@@ -9,7 +9,7 @@ from modeling.config import (
     RunConfig,
     WandbConfig,
     LinearLRSchedule,
-    # ProfileConfig
+    ProfileConfig,
 )
 from pathlib import Path
 from modeling.types import Accelerator, DType
@@ -37,7 +37,7 @@ Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
         # checkpoint_path=CloudPath.from_str(
         #     "gs://induction-labs/checkpoints/qwen25o_mouse_follow/test_noise_2/2025-07-04T04-05-09/step_-1"
         # )
-        freeze_vision=False,
+        # freeze_vision=False,
         # compile=None,
         # compile=CompileConfig(),
     ),
@@ -45,31 +45,34 @@ Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
         # prefix="gs://induction-labs/jonathan/synth/garbage_cursor_follow_v1/sample_",
         prefix="gs://induction-labs/jonathan/synth/cursor_follow_v3/sample_",
         # prefix="gs://induction-labs/jonathan/synth/noise_cursor_follow_v1/sample_",
-        end_index=10000,  # 60k samples
+        end_index=500,  # 60k samples
     ),
     run=RunConfig(
         lr=LinearLRSchedule(
             peak_lr=1e-3,
             end_lr=1e-5,
             warmup_steps=16,
-            end_step=3000,  # 10k steps
+            end_step=500,  # 10k steps
         ),
-        sequence_length=2800,
+        sequence_length=2048,
         batch_size=2,
         steps_per_epoch=5000,
         validation_every_n_steps=100,
         distributed=DistributedConfig(
-            devices_per_node=1,
+            devices_per_node=2,
+            sharding=DistributedConfig.ShardingConfig(
+                FSDP=2,
+            ),
         ),
         attn_impl=AttentionImplementation.SDPA,
         accelerator=Accelerator.CUDA,
         precision=DType.bf16,
-        # profile=ProfileConfig(),
+        profile=ProfileConfig(),
     ),
 )
 
 Qwen25OActionGPU_Test = Qwen25OActionExperimentConfig_GPU.testing_config(
-    num_steps=5, enable_wandb=True
+    num_steps=5, enable_wandb=False
 )
 
 Qwen25OActionExperimentConfig_CPU = Qwen25OActionExperimentConfig_GPU.model_copy(
