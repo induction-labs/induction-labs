@@ -180,7 +180,7 @@ class BaseLITModule(ABC, Generic[MODEL_TYPE, DATA_TYPE, CONFIG_TYPE]):
             torch.cuda.reset_peak_memory_stats()
         self.model = self.init_model_meta()
         # TODO: Move this to a separate method
-        self.download_weights(self.tmp_dir)
+        # self.download_weights(self.tmp_dir)
 
     # @abstractmethod
     @final

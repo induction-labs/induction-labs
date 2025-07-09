@@ -253,38 +253,6 @@ class ExperimentInstance:
 
                 logger.debug("Initializing trainer:")
 
-                # trainer = L.Trainer(
-                #     max_epochs=exp_config.run.num_epochs,
-                #     val_check_interval=exp_config.run.validation_every_n_steps
-                #     if exp_config.run.validation_every_n_steps > 0
-                #     else None,
-                #     limit_val_batches=1,
-                #     # Distributed training configuration
-                #     limit_train_batches=exp_config.run.num_epochs
-                #     * exp_config.run.steps_per_epoch,
-                #     accelerator=exp_config.run.accelerator,
-                #     devices=exp_config.run.distributed.devices_per_node,
-                #     num_nodes=exp_config.run.distributed.num_nodes,
-                #     profiler=profiler,
-                #     # Precision and parallel
-                #     strategy=strategy,
-                #     precision=exp_config.run.lightning_precision,
-                #     # Logging and checkpointing
-                #     # logger=loggers,
-                #     callbacks=(
-                #         [
-                #             GCSCheckpointCallback(
-                #                 exp_config=exp_config,
-                #             )
-                #         ]
-                #         if exp_config.metadata.checkpoint
-                #         else []
-                #     ),
-                #     enable_checkpointing=False,
-                #     default_root_dir=exp_config.metadata.output_dir,
-                #     log_every_n_steps=1,
-                # )
-
                 try:
                     with elapsed_timer("Experiment.Init") as trainer_timer:
                         datapack = unified_config.datapack.create_datapack(

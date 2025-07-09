@@ -5,6 +5,7 @@ from pydantic import BaseModel, ConfigDict
 import torch
 
 
+# TODO: Don't use pydantic for this maybe? I'm not sure how much overhead it adds.
 class BaseDataSample(BaseModel, ABC):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 

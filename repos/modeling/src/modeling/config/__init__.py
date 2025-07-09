@@ -524,7 +524,10 @@ class ExperimentConfig(BaseModel, Generic[_LITDataModule]):
         return tomli_w.dumps(self.model_dump(serialize_as_any=True))
 
     def testing_config(
-        self, num_steps: int = 1, enable_wandb: bool = True, profile: bool = False
+        self,
+        num_steps: int = 1,
+        enable_wandb: bool = True,
+        profile: bool = False,
     ) -> Self:
         """
         Create a testing configuration for the experiment.

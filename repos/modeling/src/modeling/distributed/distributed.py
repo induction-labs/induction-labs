@@ -10,7 +10,7 @@ from contextlib import contextmanager
 from typing import Iterator
 from synapse.elapsed_timer import elapsed_timer
 
-logger = configure_logging(__name__, level=logging.DEBUG)
+logger = configure_logging(__name__, level=logging.INFO)
 
 
 @contextmanager

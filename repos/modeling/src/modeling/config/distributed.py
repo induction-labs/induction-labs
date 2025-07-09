@@ -4,8 +4,7 @@ from enum import Enum
 from functools import reduce
 
 from pydantic import BaseModel, Field, model_validator
-from typing import TYPE_CHECKING
-from typing import Self
+from typing import TYPE_CHECKING, Self
 
 
 if TYPE_CHECKING:
@@ -56,9 +55,12 @@ class DistributedConfig(BaseModel):
     num_nodes: int = 1
 
     class ShardingConfig(BaseModel):
-        DP: int = 1
-        FSDP: int = 1
-        TP: int = 1
+        # TODO: For now DP and TP are disabled, figure out how to implement them properly
+        DP: int = Field(default=1, ge=1, le=1, description="Data parallelism factor")
+        FSDP: int = Field(
+            default=1, ge=1, description="Fully sharded data parallelism factor"
+        )
+        TP: int = Field(default=1, ge=1, le=1, description="Tensor parallelism factor")
 
         @classmethod
         def default(cls, world_size: int) -> DistributedConfig.ShardingConfig:
@@ -66,8 +68,8 @@ class DistributedConfig(BaseModel):
             Default not sharding configuration for distributed training.
             """
             return cls(
-                DP=world_size,  # Data parallelism across all devices
-                FSDP=1,  # Fully sharded data parallelism is not used by default
+                DP=1,  # Data parallelism across all devices
+                FSDP=world_size,  # Only FSDP by default
                 TP=1,  # Tensor parallelism is not used by default
             )
 

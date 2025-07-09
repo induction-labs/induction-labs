@@ -6,6 +6,7 @@ from modeling.config import (
     ExperimentMetadata,
     RunConfig,
     WandbConfig,
+    ProfileConfig,
     LinearLRSchedule,
 )
 from pathlib import Path
@@ -16,10 +17,13 @@ from modeling.types import AttentionImplementation
 
 from modeling.types import Accelerator, DType
 
+bs = 8
+experiment_name = "llama3_text_pretrain.shard_test"
+
 Llama3PretrainExperimentConfig = ExperimentConfig(
     metadata=ExperimentMetadata(
-        wandb=WandbConfig(project="testing", name="llama3_4B_text_pretrain"),
-        output_dir=Path("./output/llama3_text_pretrain"),
+        wandb=WandbConfig(project="testing", name=experiment_name),
+        output_dir=Path(f"./output/{experiment_name}"),
         checkpoint=None,
     ),
     module=Llama3LITConfig(
@@ -34,15 +38,16 @@ Llama3PretrainExperimentConfig = ExperimentConfig(
             warmup_steps=16,
             end_step=500,  # 10k steps
         ),
-        sequence_length=1024,
+        sequence_length=4096,
         batch_size=1,
         steps_per_epoch=5000,
         distributed=DistributedConfig(
-            devices_per_node=1,
+            devices_per_node=bs, sharding=DistributedConfig.ShardingConfig(FSDP=bs)
         ),
         attn_impl=AttentionImplementation.SDPA,
         accelerator=Accelerator.CUDA,
         precision=DType.bf16,
+        profile=ProfileConfig(),
     ),
 )
 Llama3PretrainTest = Llama3PretrainExperimentConfig.testing_config(

@@ -28,11 +28,9 @@ from torch.distributed.fsdp import MixedPrecisionPolicy, fully_shard
 from synapse.utils.logging import configure_logging
 from accelerate import init_empty_weights
 from modeling.config.distributed import MeshAxis
+import logging
 
-logger = configure_logging(
-    __name__,
-    # level=logging.DEBUG
-)
+logger = configure_logging(__name__, level=logging.DEBUG)
 
 
 ConfigType = TypeVar("ConfigType", bound="TextPretrainLITConfig")
@@ -52,7 +50,7 @@ class TextPretrainLIT(TextLIT[MODEL_TYPE, TextPretrainDataSample, ConfigType]):
             self.module_config.model_name, trust_remote_code=True
         )
 
-        logger.debug(f"Initializing model {self.module_config.model_name} with config")
+        logger.debug(f"Initializing model {self.module_config.model_name}")
 
         with init_empty_weights():
             model = AutoModelForCausalLM.from_config(
@@ -77,8 +75,13 @@ class TextPretrainLIT(TextLIT[MODEL_TYPE, TextPretrainDataSample, ConfigType]):
         """
         Shard the model using Fully Sharded Data Parallel (FSDP).
         This method is called during the model configuration phase.
+        (HSDP) with ``(Replicate(), Shard(0))``
+        ! TODO(jl): Currently broken - DP=1 just takes more memory with HSDP even though it should be a no-op
         """
-        fsdp_config = {"mesh": device_mesh[MeshAxis.FSDP], "mp_policy": mp_policy}
+        fsdp_config = {
+            "mesh": device_mesh[MeshAxis.FSDP],
+            "mp_policy": mp_policy,
+        }
         assert isinstance(self.model.model, PreTrainedModel) and isinstance(
             self.model.model.layers, nn.ModuleList
         )
