@@ -23,21 +23,19 @@ from .wandb import WandbConfig
 from typing import Optional
 from pathlib import Path
 from modeling.utils.cloud_path import BeforeValidator, CloudPath
-from lightning.fabric.plugins.precision.precision import (
-    _PRECISION_INPUT,
-)
+
 
 from dataclasses import dataclass
 from synapse.utils.logging import configure_logging
 import logging
 from typing import TYPE_CHECKING
-import torch
 
 if TYPE_CHECKING:
     from modeling.modules.base_module import BaseLITModule
     from modeling.data.data_module import BaseDataModule
     from wandb.sdk.wandb_run import Run
     from torch.distributed.fsdp import MixedPrecisionPolicy
+    import torch
 
 
 logger = configure_logging(__name__, logging.DEBUG)
@@ -421,25 +419,10 @@ class RunConfig(BaseModel):
     precision: DType = DType.bf16
     quantize_model: bool = True  # Quantize the model if True. If False, only cast the optimizer weights to precision
 
-    @computed_field
     @property
-    def lightning_precision(self) -> _PRECISION_INPUT:
-        # if we're not quantizing the model, we use the suffix "-true" for the precision
-        # since we're only using the precision for the optimizer and not for the model weights.
-        lighting_mixed_suffix = "-true" if self.quantize_model else "-mixed"
+    def mp_policy(self) -> "MixedPrecisionPolicy":
+        from torch.distributed.fsdp import MixedPrecisionPolicy
 
-        if self.precision == DType.bf16:
-            return "bf16" + lighting_mixed_suffix
-        elif self.precision == DType.fp16:
-            return "16" + lighting_mixed_suffix
-        elif self.precision == DType.fp32:
-            # quantization doesn't matter
-            return "32"
-        else:
-            raise ValueError(f"Unsupported precision: {self.precision}")
-
-    @property
-    def mp_policy(self) -> MixedPrecisionPolicy:
         return MixedPrecisionPolicy(
             param_dtype=self.precision.torch_dtype,
             reduce_dtype=DType.fp32.torch_dtype
