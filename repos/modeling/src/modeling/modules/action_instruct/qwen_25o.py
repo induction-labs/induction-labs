@@ -33,6 +33,7 @@ from synapse.utils.logging import configure_logging, logging
 import numpy as np
 import time
 
+from torch import nn
 
 logger = configure_logging(__name__, level=logging.DEBUG)
 
@@ -107,7 +108,7 @@ class Qwen25OActionLIT(
             config=config,
             torch_dtype=self.dtype,
             attn_implementation=self.attn_impl,
-            local_files_only=True,
+            # local_files_only=True,
         ).train()
         assert isinstance(model, MODEL_TYPE), (
             f"Expected model to be of type Qwen2_5OmniThinkerForActionModelling, "
@@ -138,6 +139,10 @@ class Qwen25OActionLIT(
             attn_implementation=self.attn_impl,
             local_files_only=True,
         ).train()
+        assert isinstance(loaded_model, MODEL_TYPE), (
+            f"Expected loaded_model to be of type Qwen2_5OmniThinkerForActionModelling, "
+            f"got {type(loaded_model)}"
+        )
 
         return cast(MODEL_TYPE, loaded_model)
 
@@ -313,7 +318,15 @@ class Qwen25OActionLIT(
                 reshard_after_forward=reshard_after_forward,
             )
             self.model.model.layers[layer_id] = transformer_block
-        return fully_shard(self.model, **fsdp_config)
+
+        ignored_params = cast(
+            set[nn.Parameter], set(self.model.action_token_embedding.weight)
+        )
+        return fully_shard(
+            self.model,
+            ignored_params=ignored_params,
+            **fsdp_config,
+        )
 
 
 class Qwen25OActionLITConfig(BaseModuleConfig):
