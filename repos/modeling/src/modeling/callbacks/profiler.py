@@ -84,8 +84,5 @@ def profiler_context(
                 # prof.start()
                 yield prof
                 # prof.stop()
-    except Exception as e:
-        logger.error(f"Profiling error: {e}")
-        raise e
     finally:
         pass

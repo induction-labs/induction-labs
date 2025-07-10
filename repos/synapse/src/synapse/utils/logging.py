@@ -6,6 +6,12 @@ import sys
 from rich.logging import RichHandler
 
 
+class _PrefixAdapter(logging.LoggerAdapter):
+    def process(self, msg, kwargs):
+        # prefix and original message are combined here
+        return f"{self.extra['prefix']}{msg}", kwargs
+
+
 # https://chatgpt.com/c/68658dcb-54b0-8006-b406-ae483cadaedd
 def configure_logging(
     name: str,
@@ -14,7 +20,7 @@ def configure_logging(
     use_rich: bool = True,
     fmt: str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     datefmt: str = "%Y-%m-%d %H:%M:%S",
-) -> logging.Logger:
+) -> logging.LoggerAdapter:
     """
     Create a logger that prints either plain-text or rich-formatted logs.
 
@@ -28,6 +34,12 @@ def configure_logging(
     Returns:
         Configured Logger instance.
     """
+
+    import os
+
+    rank = int(os.environ["LOCAL_RANK"]) if "LOCAL_RANK" in os.environ else None
+
+    # Include rank in logger name if it exists
     logger = logging.getLogger(name)
     logger.setLevel(level)
     logger.propagate = False  # avoid double logs if root logger is configured
@@ -47,8 +59,13 @@ def configure_logging(
     else:
         console_handler = logging.StreamHandler(sys.stdout)
         console_handler.setLevel(level)
+        # Include rank in format if it exists
+        if rank is not None:
+            fmt = f"[Rank {rank}] {fmt}"
         formatter = logging.Formatter(fmt=fmt, datefmt=datefmt)
         console_handler.setFormatter(formatter)
 
     logger.addHandler(console_handler)
-    return logger
+    return _PrefixAdapter(
+        logger, {"prefix": f"[Rank {rank}] " if rank is not None else ""}
+    )
