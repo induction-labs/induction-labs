@@ -1,9 +1,6 @@
 from pathlib import Path
-import lightning.pytorch as pl
-from lightning.pytorch.callbacks import Callback
 from modeling.utils.cloud_path import CloudPath
 from typing import Any
-from lightning.pytorch.utilities.types import STEP_OUTPUT
 from modeling.modules.base_module import BaseLITModule
 from modeling.config import GCSCheckpointConfig, ExperimentConfig
 
@@ -79,7 +76,7 @@ def ensure_empty_gcs_prefix(bucket_name: str, output_dir: str) -> None:
         )
 
 
-class GCSCheckpointCallback(Callback):
+class GCSCheckpointCallback:
     def __init__(self, exp_config: ExperimentConfig):
         self.exp_config = exp_config
         self.tmp_dir: Path | None = None
@@ -96,9 +93,7 @@ class GCSCheckpointCallback(Callback):
     def ckpt_path(self) -> CloudPath:
         return self.ckpt_config.checkpoint_path
 
-    def setup(
-        self, trainer: "pl.Trainer", pl_module: "pl.LightningModule", stage: str
-    ) -> None:
+    def setup(self, pl_module: "BaseLITModule", stage: str) -> None:
         """Called when fit, validate, test, predict, or tune begins."""
         # Set up the temporary directory for saving checkpoints
         assert self.tmp_dir is None, "Temporary directory already set up"
@@ -108,9 +103,7 @@ class GCSCheckpointCallback(Callback):
         with smart_open(self.ckpt_config.ckpt_config_path.to_str(), "w") as f:
             f.write(self.exp_config.serialize_to_toml())
 
-    def teardown(
-        self, trainer: "pl.Trainer", pl_module: "pl.LightningModule", stage: str
-    ) -> None:
+    def teardown(self, pl_module: "BaseLITModule", stage: str) -> None:
         """Called when fit, validate, test, predict, or tune ends."""
         # Clean up the temporary directory
         assert self.tmp_dir is not None, "Temporary directory not set up"
@@ -118,9 +111,7 @@ class GCSCheckpointCallback(Callback):
 
     def on_train_batch_end(
         self,
-        trainer: "pl.Trainer",
-        pl_module: "pl.LightningModule",
-        outputs: STEP_OUTPUT,
+        pl_module: "BaseLITModule",
         batch: Any,
         batch_idx: int,
     ) -> None:
@@ -131,6 +122,10 @@ class GCSCheckpointCallback(Callback):
             loss returned from ``training_step``.
 
         """
+        raise NotImplementedError(
+            "on_train_batch_end is not implemented in GCSCheckpointCallback. "
+            "This is not fully migrated from lightning yet."
+        )
         assert isinstance(pl_module, BaseLITModule), (
             f"Expected pl_module to be an instance of BaseLITModule, got {type(pl_module)}"
         )
@@ -138,7 +133,7 @@ class GCSCheckpointCallback(Callback):
             "Temporary directory for checkpoints is not set up"
         )
 
-        step_num = trainer.global_step
+        step_num = 0
         model = pl_module.model
         assert isinstance(model, PreTrainedModel)
         # TODO: figure out why this isn't auto inferred from covariant bound
@@ -154,7 +149,7 @@ class GCSCheckpointCallback(Callback):
                 local_dir=self.tmp_dir,
             )
 
-    def on_fit_start(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
+    def on_fit_start(self, pl_module: BaseLITModule) -> None:
         # Save the initial model checkpoint
         assert isinstance(pl_module, BaseLITModule), (
             f"Expected pl_module to be an instance of BaseLITModule, got {type(pl_module)}"
@@ -174,9 +169,7 @@ class GCSCheckpointCallback(Callback):
                 local_dir=self.tmp_dir,
             )
 
-    def on_fit_end(
-        self, trainer: "pl.Trainer", pl_module: "pl.LightningModule"
-    ) -> None:
+    def on_fit_end(self, pl_module: "BaseLITModule") -> None:
         """Called when fit ends."""
         # Save the final model checkpoint
         assert isinstance(pl_module, BaseLITModule), (

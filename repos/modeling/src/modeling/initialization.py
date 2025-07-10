@@ -109,7 +109,7 @@ class ExperimentInstance:
                     batch = batch.to_device(device)
                     # Zero gradients
                     optimizer.zero_grad(set_to_none=True)
-                    # Note: Need to call this or gradient checkpointing won't work
+                    # Note: Need to call this or activation checkpointing won't work
                     # And it will silently fail
                     self.module.model.train()
 
