@@ -56,12 +56,13 @@ def profiler_context(
     Context manager to handle profiling during the experiment.
     This is a placeholder for actual profiling logic.
     """
-    from torch.profiler import profile, ProfilerActivity, schedule
 
     try:
         if config.run.profile is None or not instance.is_main:
             yield DummyProfiler()  # Replace with actual profiling logic
         else:
+            from torch.profiler import profile, ProfilerActivity, schedule
+
             profile_dir = config.metadata.output_dir / "profiler"
             profile_schedule = schedule(
                 wait=config.run.profile.wait,

@@ -49,9 +49,9 @@ class BaseDataModule(ABC, Generic[DataSample]):
         pass
 
     @abstractmethod
-    def train_dataloader(self) -> DataLoader[DataSample]:
+    def train_dataloader(self, generator: torch.Generator) -> DataLoader[DataSample]:
         pass
 
     @abstractmethod
-    def val_dataloader(self) -> DataLoader[DataSample]:
+    def val_dataloader(self, generator: torch.Generator) -> DataLoader[DataSample]:
         pass

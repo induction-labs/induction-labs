@@ -133,16 +133,17 @@ class TextPretrainDataModule(BaseDataModule[TextPretrainDataSample]):
         )
         logger.info(f"Training dataset created with {len(self.train_data)} examples")
 
-    def train_dataloader(self) -> DataLoader:
+    def train_dataloader(self, generator: torch.Generator) -> DataLoader:
         return DataLoader(
             self.train_data,  # type: ignore # noqa: PGH003
             batch_size=self.extra_args.batch_size,
             shuffle=True,
             drop_last=True,
             collate_fn=GenericSFTDataset.combine_batch,  # type: ignore
+            generator=generator,
         )
 
-    def val_dataloader(self) -> DataLoader:
+    def val_dataloader(self, generator: torch.Generator) -> DataLoader:
         # For pretraining, we typically don't have a validation set
         return DataLoader(
             self.train_data,  # Using the same data for validation
@@ -150,6 +151,7 @@ class TextPretrainDataModule(BaseDataModule[TextPretrainDataSample]):
             shuffle=False,
             drop_last=False,
             collate_fn=GenericSFTDataset.combine_batch,  # type: ignore
+            generator=generator,
         )
 
 

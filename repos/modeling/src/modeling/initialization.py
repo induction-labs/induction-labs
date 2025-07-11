@@ -30,6 +30,9 @@ from dataclasses import dataclass
 import secrets
 import string
 
+import os
+import random
+import numpy as np
 
 logger = configure_logging(
     __name__,
@@ -77,8 +80,12 @@ class ExperimentInstance:
         self.module.configure_model(self.state.mesh)
 
         # Get training dataloader
-        train_dataloader = self.datapack.train_dataloader()
-        validation_dataloader = iter(self.datapack.val_dataloader())
+        train_dataloader = self.datapack.train_dataloader(
+            generator=self.state.generator
+        )
+        validation_dataloader = iter(
+            self.datapack.val_dataloader(generator=self.state.generator)
+        )
 
         # Configure optimizer and scheduler
         optimizer_config = self.module.configure_optimizers()
@@ -88,6 +95,7 @@ class ExperimentInstance:
         # Training loop
         num_epochs = self.exp_config.run.num_epochs
         steps_per_epoch = self.exp_config.run.steps_per_epoch
+        clipped_grad_norm = float("inf")
 
         logger.info(
             f"Starting training: {num_epochs} epochs, {steps_per_epoch} steps per epoch"
@@ -115,33 +123,32 @@ class ExperimentInstance:
                     self.module.model.train()
 
                     # Forward pass
-                    with torch.profiler.record_function("training_step"):
-                        loss = self.module.training_step(batch, global_state=self.state)
+                    # with torch.profiler.record_function("training_step"):
+                    loss = self.module.training_step(batch, global_state=self.state)
 
                     # Backward pass
-                    with torch.profiler.record_function("backward"):
-                        loss.backward()
-                        real_grad_norm = clip_grad_norm_(
-                            self.module.model.parameters(), max_norm=float("inf")
-                        )
-                        # embedding_grad_norm = clip_grad_norm_(
-                        #     self.module.model.action_token_embedding.parameters(),
-                        #     max_norm=float("inf"),
-                        # )
-                        # action_head_grad_norm = clip_grad_norm_(
-                        #     self.module.model.action_head.parameters(),
-                        #     max_norm=float("inf"),
-                        # )
-                        # torch.nn.utils.clip_grads_with_norm_(
-                        #     self.module.model.parameters(),
-                        #     max_norm=clipped_grad_norm,
-                        #     total_norm=real_grad_norm,
-                        # )
+                    # with torch.profiler.record_function("backward"):
+                    loss.backward()
+                    real_grad_norm = clip_grad_norm_(
+                        self.module.model.parameters(), max_norm=clipped_grad_norm
+                    )
+                    # embedding_grad_norm = clip_grad_norm_(
+                    #     self.module.model.action_token_embedding.parameters(),
+                    #     max_norm=float("inf"),
+                    # )
+                    # action_head_grad_norm = clip_grad_norm_(
+                    #     self.module.model.action_head.parameters(),
+                    #     max_norm=float("inf"),
+                    # )
+
+                    # clipped_grad_norm = min(
+                    #     real_grad_norm.item(), clipped_grad_norm
+                    # )
 
                     # Update weights
-                    with torch.profiler.record_function("optimizer_step"):
-                        optimizer.step()
-                        lr_scheduler.step()
+                    # with torch.profiler.record_function("optimizer_step"):
+                    optimizer.step()
+                    lr_scheduler.step()
 
                     optimizer.zero_grad(set_to_none=True)
 
@@ -171,17 +178,27 @@ class ExperimentInstance:
                         {
                             "lr": lr_scheduler.get_last_lr()[0],
                             "real_grad_norm": real_grad_norm.item(),
+                            "clipped_grad_norm": clipped_grad_norm,
                         },
                         commit=True,
                     )
+                    # logger.info(
+                    #     {
+                    #         "lr": lr_scheduler.get_last_lr()[0],
+                    #         "real_grad_norm": real_grad_norm.item(),
+                    #         "clipped_grad_norm": clipped_grad_norm,
+                    #         "loss": loss.item(),
+                    #         "global_step": self.state.global_step,
+                    #         # "embedding_grad_norm": embedding_grad_norm.item(),
+                    #         # "action_head_grad_norm": action_head_grad_norm.item(),
+                    #     }
+                    # )
                     self.state.global_step += 1
 
                     prof.step()
 
                     # Update progress bar with loss value
-                    pbar.set_postfix(
-                        loss=f"{loss.item():.4f}", step=self.state.global_step
-                    )
+                    pbar.set_postfix(loss=f"{loss.item():.4f}")
 
             logger.info(f"Training completed. Total steps: {self.state.global_step}")
 
@@ -222,6 +239,7 @@ class ExperimentInstance:
         exp_config: UnifiedExperimentConfig,
         mesh: torch.distributed.device_mesh.DeviceMesh,
         instance_config: InstanceConfig,
+        generator: torch.Generator,
     ) -> GlobalState:
         """
         Initialize a WandbLogger instance with the configuration.
@@ -231,6 +249,7 @@ class ExperimentInstance:
             global_step=0,
             mesh=mesh,
             wandb=wandb_run,
+            generator=generator,
         )
 
     @staticmethod
@@ -245,6 +264,28 @@ class ExperimentInstance:
 
         torch.set_float32_matmul_precision("high")
 
+    @staticmethod
+    def fix_rng(seed: int) -> torch.Generator:
+        os.environ["PYTHONHASHSEED"] = str(
+            seed
+        )  # make hash-based operations reproducible
+        os.environ["CUBLAS_WORKSPACE_CONFIG"] = (
+            ":4096:8"  # for reproducibility in cuBLAS
+        )
+        # https://docs.nvidia.com/cuda/cublas/index.html#results-reproducibility
+        random.seed(seed)  # Python RNG
+        np.random.seed(seed)  # NumPy RNG
+        torch.manual_seed(seed)  # CPU RNG
+        torch.cuda.manual_seed(seed)  # current GPU RNG
+        torch.cuda.manual_seed_all(seed)  # all-GPU RNGs
+        # torch.backends.cudnn.deterministic = True
+        # torch.backends.cudnn.benchmark = False
+        # # In PyTorch ≥1.8 you can also do:
+        torch.use_deterministic_algorithms(True)
+        g = torch.Generator()
+        g.manual_seed(seed)
+        return g
+
     # TODO: Make this a callback instead of global
 
     @staticmethod
@@ -255,13 +296,15 @@ class ExperimentInstance:
         """
         Initialize the experiment configuration from a given path.
         """
+        ExperimentInstance.do_random_torch_things()
+        torch_generator = ExperimentInstance.fix_rng(exp_config.run.seed)
+        # torch_generator = torch.Generator()
         # We need to enter manually because we need to exit to access timing tree
         global_timer = elapsed_timer("Experiment.Run").__enter__()
 
         with (
             TmpDirContext() as (tmpdir_context, tmp_dir),
         ):
-            ExperimentInstance.do_random_torch_things()
             runtime_config = ExperimentInstance.create_runtime_config(tmp_dir)
             unified_config = UnifiedExperimentConfig(
                 runtime_config=runtime_config,
@@ -275,7 +318,7 @@ class ExperimentInstance:
                 unified_config.run.distributed, instance_config
             ) as device_mesh:
                 global_state = ExperimentInstance.init_global_state(
-                    unified_config, device_mesh, instance_config
+                    unified_config, device_mesh, instance_config, torch_generator
                 )
 
                 logger.debug("Initializing trainer:")

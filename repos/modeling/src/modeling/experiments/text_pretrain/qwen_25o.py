@@ -6,7 +6,6 @@ from modeling.config import (
     ExperimentMetadata,
     RunConfig,
     WandbConfig,
-    ProfileConfig,
 )
 from modeling.data.text_train import TextPretrainDatapackConfig
 from modeling.modules.text_pretrain.qwen_25o import Qwen25OLITConfig
@@ -49,12 +48,12 @@ Qwen25OPretrainExperimentConfig = ExperimentConfig(
         attn_impl=AttentionImplementation.SDPA,
         accelerator=Accelerator.CUDA,
         precision=DType.bf16,
-        profile=ProfileConfig(),
+        # profile=ProfileConfig(),
     ),
 )
 
 Qwen25OPretrainTest = Qwen25OPretrainExperimentConfig.testing_config(
-    num_steps=5, enable_wandb=True
+    num_steps=5, enable_wandb=False
 )
 # mdl export modeling.experiments.text_pretrain.qwen_25o.Qwen25OPretrainExperimentConfig
 # mdl export modeling.experiments.text_pretrain.qwen_25o.Qwen25OPretrainTest

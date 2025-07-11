@@ -191,6 +191,7 @@ class GlobalState:
 
     global_step: int
     mesh: "torch.distributed.device_mesh.DeviceMesh"
+    generator: "torch.Generator"
     wandb: Optional["Run"] = None
 
 
@@ -340,7 +341,8 @@ class SerializedDatapackConfig(DatapackConfig[_LITDataModule]):
         return module_config
 
     def create_datapack(
-        self, full_config: ExperimentConfig[_LITDataModule]
+        self,
+        full_config: ExperimentConfig[_LITDataModule],
     ) -> _LITDataModule:
         """
         Create a Lightning data module instance by loading it from the specified path.

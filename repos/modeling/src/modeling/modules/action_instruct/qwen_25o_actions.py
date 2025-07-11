@@ -18,6 +18,27 @@ from transformers.masking_utils import (
     create_sliding_window_causal_mask,
 )
 from dataclasses import dataclass
+from synapse.utils.logging import configure_logging, logging
+
+logger = configure_logging(__name__, level=logging.INFO)
+
+
+def check_nans(tensor: torch.Tensor, name: str):
+    """
+    Check if the tensor contains NaN values and log an error if it does.
+    """
+    if not torch.isfinite(tensor).all():
+        finite_elements = torch.isfinite(tensor)
+        num_finite = finite_elements.sum()
+        total_elements = tensor.numel()
+        # logger.error(
+        #     f"{name} contains NaN values: number of finite: {num_finite} number of total: {total_elements}"
+        # )
+        # return False
+        raise ValueError(
+            f"{name} contains NaN values: number of finite: {num_finite} number of total: {total_elements}"
+        )
+    return True
 
 
 class Qwen2_5OmniThinkerActionConfig(Qwen2_5OmniThinkerConfig):
@@ -290,7 +311,6 @@ class Qwen2_5OmniThinkerForActionModelling(
 
         >>> response = processor.batch_decode(generate_ids, skip_special_tokens=True, clean_up_tokenization_spaces=False)[0]
         ```"""
-
         output_attentions = (
             output_attentions
             if output_attentions is not None
@@ -307,6 +327,7 @@ class Qwen2_5OmniThinkerForActionModelling(
 
         if inputs_embeds is None:
             # 1. Extract the input embeddings
+            check_nans(self.get_input_embeddings().weight, "input_embeddings_weight")
             inputs_embeds = self.get_input_embeddings()(input_ids)  # [B, S, D]
             # If we are in decode
             if action_tokens.shape[1] == inputs_embeds.shape[1]:
@@ -381,6 +402,7 @@ class Qwen2_5OmniThinkerForActionModelling(
                 past_seen_tokens + inputs_embeds.shape[1],
                 device=inputs_embeds.device,
             )
+
         mask_kwargs = {
             "config": self.model.config,
             "input_embeds": inputs_embeds,
@@ -413,7 +435,7 @@ class Qwen2_5OmniThinkerForActionModelling(
             )
 
         outputs = self.model(
-            attention_mask=causal_mask_mapping,
+            attention_mask=attention_mask,
             position_ids=position_ids,
             past_key_values=past_key_values,
             inputs_embeds=inputs_embeds,

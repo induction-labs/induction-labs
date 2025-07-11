@@ -236,14 +236,14 @@ class BaseLITModule(ABC, Generic[MODEL_TYPE, DATA_TYPE, CONFIG_TYPE]):
             self.model = self.activation_checkpoint_model()  # type: ignore[assignment]
             # # Enable activation checkpointing if configured
 
-        self.model = self.shard_model(
-            mp_policy=self.run_config.mp_policy,
-            device_mesh=device_mesh,
-        )  # type: ignore[assignment]
-        logger.debug(f"Sharded model {self.model} with dtype {self.dtype}")
-        assert isinstance(self.model, FSDPModule), (
-            f"Expected self.model to be a FullyShardedDataParallel, got {type(self.model)}"
-        )
+        # self.model = self.shard_model(
+        #     mp_policy=self.run_config.mp_policy,
+        #     device_mesh=device_mesh,
+        # )  # type: ignore[assignment]
+        # logger.debug(f"Sharded model {self.model} with dtype {self.dtype}")
+        # assert isinstance(self.model, FSDPModule), (
+        #     f"Expected self.model to be a FullyShardedDataParallel, got {type(self.model)}"
+        # )
 
         # We can only compile *after* sharding and gradient checkpointing, otherwise it doesn't trace through.
         if self.module_config.compile is not None:

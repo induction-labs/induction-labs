@@ -41,6 +41,8 @@ Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
         tokenizer_name="Qwen/Qwen2.5-Omni-7B",
         freeze_vision=True,
         freeze_network=False,
+        freeze_action_embedding=False,
+        freeze_action_head=False,
         # compile=None,
         # compile=CompileConfig(),
     ),
@@ -68,12 +70,13 @@ Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
         attn_impl=AttentionImplementation.SDPA,
         accelerator=Accelerator.CUDA,
         precision=DType.bf16,
+        seed=42,
         # profile=ProfileConfig(),
     ),
 )
 
 Qwen25OActionGPU_Test = Qwen25OActionExperimentConfig_GPU.testing_config(
-    num_steps=5,
+    num_steps=2,
     enable_wandb=False,
     with_val=False,
     profile=False,
