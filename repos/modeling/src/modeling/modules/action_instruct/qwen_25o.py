@@ -139,6 +139,7 @@ class Qwen25OActionLIT(
             attn_implementation=self.attn_impl,
             local_files_only=True,
         ).train()
+
         assert isinstance(loaded_model, MODEL_TYPE), (
             f"Expected loaded_model to be of type Qwen2_5OmniThinkerForActionModelling, "
             f"got {type(loaded_model)}"
@@ -162,13 +163,27 @@ class Qwen25OActionLIT(
         Compute the loss for the training step.
         This method is called by run_training_step after the forward pass.
         """
+        output_actions = (
+            outputs.action_outputs[inputs.action_tokens]
+            .reshape(-1, 2, 3)
+            .to(device=self.device, dtype=self.dtype)
+        )
+        cursor_path = (
+            inputs.cursor_path[inputs.action_tokens]
+            .reshape(-1, 2, 3)
+            .to(device=self.device, dtype=self.dtype)
+        )
+
+        l2_loss = self.model.l2_loss(output_actions, cursor_path)
+        # loss = l2_loss(
+        #     output_actions,
+        # )  # [B, S, 6]
+        # loss = torch.sum(loss, dim=-1)
+        # loss *= action_tokens
+        # loss = loss.sum() / action_tokens.sum().clamp(min=1.0)
+
         # print(f"{self.device=}")
-        output_actions = outputs.action_outputs[inputs.action_tokens].reshape(
-            -1, 2, 3
-        )  # [k, 2,3]
-        cursor_path = inputs.cursor_path[inputs.action_tokens].reshape(
-            -1, 2, 3
-        )  # [k, 2,3]
+
         assert output_actions.shape == cursor_path.shape, (
             f"Expected output_actions shape {output_actions.shape} to match "
             f"cursor_path shape {cursor_path.shape}"
@@ -192,16 +207,16 @@ class Qwen25OActionLIT(
         )
 
         # if inputs.cursor_path is not None:
-        loss = self.model.l2_loss(actual_xs, predicted_xs) + self.model.l2_loss(
-            actual_ys, predicted_ys
-        )
-        loss = loss.sum() / inputs.action_tokens.sum().clamp(min=1.0)
-        assert isinstance(loss, torch.Tensor), (
-            f"Expected outputs.loss to be a Tensor, got {type(outputs.loss)}"
-        )
+        # loss = self.model.l2_loss(actual_xs, predicted_xs) + self.model.l2_loss(
+        #     actual_ys, predicted_ys
+        # )
+        # loss = loss.sum() / inputs.action_tokens.sum().clamp(min=1.0)
+        # assert isinstance(loss, torch.Tensor), (
+        #     f"Expected outputs.loss to be a Tensor, got {type(outputs.loss)}"
+        # )
 
         return (
-            loss,
+            l2_loss,
             predicted_xs,
             predicted_ys,
             actual_xs,
@@ -301,6 +316,7 @@ class Qwen25OActionLIT(
         Shard the model using Fully Sharded Data Parallel (FSDP).
         This method is called during the model configuration phase.
         """
+
         fsdp_config = {
             "mesh": device_mesh[MeshAxis.FSDP],
             "mp_policy": mp_policy,
@@ -319,12 +335,10 @@ class Qwen25OActionLIT(
             )
             self.model.model.layers[layer_id] = transformer_block
 
-        ignored_params = cast(
-            set[nn.Parameter], set(self.model.action_token_embedding.weight)
-        )
+        _ = cast(set[nn.Parameter], set(self.model.action_token_embedding.weight))
         return fully_shard(
             self.model,
-            ignored_params=ignored_params,
+            # ignored_params=ignored_params,
             **fsdp_config,
         )
 

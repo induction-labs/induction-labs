@@ -83,7 +83,7 @@ class Qwen2_5OmniThinkerForActionModelling(
         )
         self.spatial_merge_size = config.vision_config.spatial_merge_size
         self.rope_deltas = None
-        self.l2_loss = nn.MSELoss(reduction="none")
+        self.l2_loss = nn.MSELoss()
 
         for param in self.parameters():
             param.requires_grad = not self.config.freeze_network
