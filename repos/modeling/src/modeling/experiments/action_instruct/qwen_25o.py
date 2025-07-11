@@ -40,6 +40,7 @@ Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
         model_name="Qwen/Qwen2.5-Omni-7B",
         tokenizer_name="Qwen/Qwen2.5-Omni-7B",
         freeze_vision=True,
+        freeze_network=False,
         # compile=None,
         # compile=CompileConfig(),
     ),
@@ -48,14 +49,14 @@ Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
         prefix="gs://induction-labs/jonathan/synth/cursor_follow_v3/sample_",
         # prefix="gs://induction-labs/jonathan/synth/noise_cursor_follow_v1/sample_",
         # end_index=60_000,  # 60k samples
-        end_index=500,  # 60k samples
+        end_index=5000,  # 60k samples
     ),
     run=RunConfig(
         lr=LinearLRSchedule(
             peak_lr=1e-3,
             end_lr=1e-5,
             warmup_steps=200,
-            end_step=5000,  # 10k steps
+            end_step=3_000,  # 10k steps
         ),
         sequence_length=4096,
         batch_size=1,

@@ -83,7 +83,7 @@ class Qwen2_5OmniThinkerForActionModelling(
         )
         self.spatial_merge_size = config.vision_config.spatial_merge_size
         self.rope_deltas = None
-        self.l2_loss = nn.MSELoss()
+        self.l2_loss = nn.MSELoss(reduce=False)
 
         for param in self.parameters():
             param.requires_grad = not self.config.freeze_network
@@ -313,42 +313,14 @@ class Qwen2_5OmniThinkerForActionModelling(
                 # Otherwise this breaks torch.compile graph
                 mask = action_tokens.unsqueeze(-1)  # [B, L, 1]
                 action_vec = self.action_token_embedding.weight[0]  # [hidden_size]
-                action_vec = action_vec.view(1, 1, -1).expand_as(inputs_embeds)
+                action_vec = action_vec.view(1, 1, -1).expand_as(
+                    inputs_embeds
+                )  # [B, S, D]
                 inputs_embeds = torch.where(mask, action_vec, inputs_embeds)
                 # inputs_embeds[action_tokens] = self.action_token_embedding.weight[0]
 
         # 2. Merge text , audios , image and video
         if input_ids is not None and input_ids.shape[1] != 1:  # Prefill stage
-            if input_features is not None:
-                audio_features = self.get_audio_features(
-                    input_features,
-                    feature_attention_mask=feature_attention_mask,
-                    audio_feature_lengths=audio_feature_lengths,
-                )
-                audio_mask = (
-                    (input_ids == self.config.audio_token_id)
-                    .unsqueeze(-1)
-                    .expand_as(inputs_embeds)
-                    .to(inputs_embeds.device)
-                )
-                audio_features = audio_features.to(
-                    inputs_embeds.device, inputs_embeds.dtype
-                )
-                inputs_embeds = inputs_embeds.masked_scatter(audio_mask, audio_features)
-
-            if pixel_values is not None:
-                image_embeds = self.get_image_features(pixel_values, image_grid_thw)
-                image_mask = (
-                    (input_ids == self.config.image_token_id)
-                    .unsqueeze(-1)
-                    .expand_as(inputs_embeds)
-                    .to(inputs_embeds.device)
-                )
-                image_embeds = image_embeds.to(
-                    inputs_embeds.device, inputs_embeds.dtype
-                )
-                inputs_embeds = inputs_embeds.masked_scatter(image_mask, image_embeds)
-
             if pixel_values_videos is not None:
                 video_embeds = self.get_video_features(
                     pixel_values_videos, video_grid_thw
@@ -364,10 +336,7 @@ class Qwen2_5OmniThinkerForActionModelling(
                 )
                 inputs_embeds = inputs_embeds.masked_scatter(video_mask, video_embeds)
 
-        if feature_attention_mask is not None:
-            audio_feature_lengths = torch.sum(feature_attention_mask, dim=1)
-        else:
-            audio_feature_lengths = None
+        audio_feature_lengths = None
 
         if attention_mask is not None and position_ids is None:
             if (

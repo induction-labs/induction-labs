@@ -121,14 +121,29 @@ class ExperimentInstance:
                     # Backward pass
                     with torch.profiler.record_function("backward"):
                         loss.backward()
-                        grad_norm = clip_grad_norm_(
+                        real_grad_norm = clip_grad_norm_(
                             self.module.model.parameters(), max_norm=float("inf")
                         )
+                        # embedding_grad_norm = clip_grad_norm_(
+                        #     self.module.model.action_token_embedding.parameters(),
+                        #     max_norm=float("inf"),
+                        # )
+                        # action_head_grad_norm = clip_grad_norm_(
+                        #     self.module.model.action_head.parameters(),
+                        #     max_norm=float("inf"),
+                        # )
+                        # torch.nn.utils.clip_grads_with_norm_(
+                        #     self.module.model.parameters(),
+                        #     max_norm=clipped_grad_norm,
+                        #     total_norm=real_grad_norm,
+                        # )
 
                     # Update weights
                     with torch.profiler.record_function("optimizer_step"):
                         optimizer.step()
                         lr_scheduler.step()
+
+                    optimizer.zero_grad(set_to_none=True)
 
                     if (
                         self.exp_config.run.validation_every_n_steps > 0
@@ -155,7 +170,7 @@ class ExperimentInstance:
                         self.state,
                         {
                             "lr": lr_scheduler.get_last_lr()[0],
-                            "grad_norm": grad_norm,
+                            "real_grad_norm": real_grad_norm.item(),
                         },
                         commit=True,
                     )

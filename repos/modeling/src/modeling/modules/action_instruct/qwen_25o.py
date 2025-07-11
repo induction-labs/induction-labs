@@ -174,7 +174,7 @@ class Qwen25OActionLIT(
             .to(device=self.device, dtype=self.dtype)
         )
 
-        l2_loss = self.model.l2_loss(output_actions, cursor_path)
+        # l2_loss = self.model.l2_loss(output_actions, cursor_path)
         # loss = l2_loss(
         #     output_actions,
         # )  # [B, S, 6]
@@ -207,16 +207,16 @@ class Qwen25OActionLIT(
         )
 
         # if inputs.cursor_path is not None:
-        # loss = self.model.l2_loss(actual_xs, predicted_xs) + self.model.l2_loss(
-        #     actual_ys, predicted_ys
-        # )
-        # loss = loss.sum() / inputs.action_tokens.sum().clamp(min=1.0)
-        # assert isinstance(loss, torch.Tensor), (
-        #     f"Expected outputs.loss to be a Tensor, got {type(outputs.loss)}"
-        # )
+        loss = self.model.l2_loss(actual_xs, predicted_xs) + self.model.l2_loss(
+            actual_ys, predicted_ys
+        )
+        loss = loss.sum() / inputs.action_tokens.sum().clamp(min=1.0)
+        assert isinstance(loss, torch.Tensor), (
+            f"Expected outputs.loss to be a Tensor, got {type(outputs.loss)}"
+        )
 
         return (
-            l2_loss,
+            loss,
             predicted_xs,
             predicted_ys,
             actual_xs,

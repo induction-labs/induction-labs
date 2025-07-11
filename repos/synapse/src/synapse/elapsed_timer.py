@@ -125,13 +125,13 @@ class TimingContext:
 
         return stats
 
-    def print_timing_tree(self, logger: logging.Logger | None = None) -> None:
+    def print_timing_tree(self, logger: logging.LoggerAdapter | None = None) -> None:
         """Print the timing tree in a formatted way"""
         print_timing_tree(self.get_timing_tree(), logger=logger)
 
 
 def print_timing_tree(
-    timing_tree: dict[str, TimingStats], logger: logging.Logger | None = None
+    timing_tree: dict[str, TimingStats], logger: logging.LoggerAdapter | None = None
 ) -> None:
     if logger is None:
         logger = timing_logger
