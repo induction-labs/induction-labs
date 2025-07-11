@@ -18,7 +18,7 @@ from modeling.modules.action_instruct.qwen_25o import Qwen25OActionLITConfig
 from modeling.utils.cloud_path import CloudPath
 # from modeling.modules.base_module import CompileConfig
 
-run_name = "qwen25o_7B_big_train"
+run_name = "qwen25o_7B_overfit"
 Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
     metadata=ExperimentMetadata(
         wandb=WandbConfig(project="mouse_following", name=run_name),
@@ -39,6 +39,7 @@ Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
         # )
         model_name="Qwen/Qwen2.5-Omni-7B",
         tokenizer_name="Qwen/Qwen2.5-Omni-7B",
+        freeze_vision=True,
         # compile=None,
         # compile=CompileConfig(),
     ),
@@ -46,21 +47,22 @@ Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
         # prefix="gs://induction-labs/jonathan/synth/garbage_cursor_follow_v1/sample_",
         prefix="gs://induction-labs/jonathan/synth/cursor_follow_v3/sample_",
         # prefix="gs://induction-labs/jonathan/synth/noise_cursor_follow_v1/sample_",
-        end_index=60_000,  # 60k samples
+        # end_index=60_000,  # 60k samples
+        end_index=500,  # 60k samples
     ),
     run=RunConfig(
         lr=LinearLRSchedule(
             peak_lr=1e-3,
             end_lr=1e-5,
-            warmup_steps=1000,
+            warmup_steps=200,
             end_step=5000,  # 10k steps
         ),
         sequence_length=4096,
         batch_size=1,
         steps_per_epoch=5000,
-        validation_every_n_steps=100,
+        validation_every_n_steps=20,
         distributed=DistributedConfig(
-            devices_per_node=8,
+            devices_per_node=1,
         ),
         attn_impl=AttentionImplementation.SDPA,
         accelerator=Accelerator.CUDA,

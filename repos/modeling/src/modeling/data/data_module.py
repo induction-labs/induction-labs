@@ -17,6 +17,29 @@ class BaseDataSample(BaseModel, ABC):
         """
         pass
 
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, self.__class__):
+            return False
+        # Run `torch.equal` on all tensors on all attributes
+
+        for attr in self.__dict__:
+            # If it is a tensor, compare it
+            if isinstance(getattr(self, attr), torch.Tensor):
+                if not torch.equal(getattr(self, attr), getattr(other, attr)):
+                    return False
+            else:
+                self_value = getattr(self, attr)
+                other_value = getattr(other, attr)
+                # Then must be BaseDataSample
+                assert isinstance(self_value, BaseDataSample) and isinstance(
+                    other_value, BaseDataSample
+                ), (
+                    f"Attributes {attr} are not BaseDataSample instances: {self_value}, {other_value}"
+                )
+                if self_value != other_value:
+                    return False
+        return True
+
 
 DataSample = TypeVar("DataSample", bound=BaseDataSample, covariant=True)
 
