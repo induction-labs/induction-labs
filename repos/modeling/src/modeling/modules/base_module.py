@@ -302,14 +302,18 @@ class BaseLITModule(ABC, Generic[MODEL_TYPE, DATA_TYPE, CONFIG_TYPE]):
         return cast(MODEL_TYPE, loaded_model)
 
     @final
-    def wandb_log(self, global_state: GlobalState, metrics: dict[str, Any]) -> None:
+    def wandb_log(
+        self, global_state: GlobalState, metrics: dict[str, Any], commit: bool = False
+    ) -> None:
         """
         Log metrics to Wandb if available.
         This method is a wrapper around the logger's log_dict method.
+        Should not call wandb commit except in trainer.
+        # TODO: Rewrite with a wandb commit callback thing.
         """
         # logger.info(metrics)
         if global_state.wandb is not None:
-            global_state.wandb.log(metrics)
+            global_state.wandb.log(metrics, commit=commit)
 
     @abstractmethod
     def run_validation_step(

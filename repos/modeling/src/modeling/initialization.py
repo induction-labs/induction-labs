@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from torch.nn.utils import clip_grad_norm_
 from transformers.modeling_utils import PreTrainedModel
 from wandb.sdk.wandb_run import Run
 from contextlib import contextmanager
@@ -120,6 +121,9 @@ class ExperimentInstance:
                     # Backward pass
                     with torch.profiler.record_function("backward"):
                         loss.backward()
+                        grad_norm = clip_grad_norm_(
+                            self.module.model.parameters(), max_norm=float("inf")
+                        )
 
                     # Update weights
                     with torch.profiler.record_function("optimizer_step"):
@@ -147,6 +151,14 @@ class ExperimentInstance:
                                 val_batch, global_state=self.state
                             )
 
+                    self.module.wandb_log(
+                        self.state,
+                        {
+                            "lr": lr_scheduler.get_last_lr()[0],
+                            "grad_norm": grad_norm,
+                        },
+                        commit=True,
+                    )
                     self.state.global_step += 1
 
                     prof.step()
