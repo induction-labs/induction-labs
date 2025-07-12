@@ -131,6 +131,7 @@ def export(
         f"torchrun --nproc_per_node={exp_config.run.distributed.devices_per_node}"
         f" --nnodes {exp_config.run.distributed.num_nodes}"
         " --node_rank 0"
+        " --rdzv_endpoint=127.0.0.1:29500"
         f" src/modeling/main.py run {export_path} --node-rank 0"
     )
 
