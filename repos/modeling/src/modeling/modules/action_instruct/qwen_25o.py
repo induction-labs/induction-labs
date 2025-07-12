@@ -189,21 +189,13 @@ class Qwen25OActionLIT(
             f"cursor_path shape {cursor_path.shape}"
         )
         actual_xs, actual_ys = (
-            cubics_to_points_torch(
-                coeffs=cursor_path[:, 0, :].to(device=self.device, dtype=self.dtype)
-            ),
-            cubics_to_points_torch(
-                coeffs=cursor_path[:, 1, :].to(device=self.device, dtype=self.dtype)
-            ),
+            cubics_to_points_torch(coeffs=cursor_path[:, 0, :]),
+            cubics_to_points_torch(coeffs=cursor_path[:, 1, :]),
         )  # [k, num_points]
 
         predicted_xs, predicted_ys = (
-            cubics_to_points_torch(
-                coeffs=output_actions[:, 0, :].to(device=self.device, dtype=self.dtype)
-            ),
-            cubics_to_points_torch(
-                coeffs=output_actions[:, 1, :].to(device=self.device, dtype=self.dtype)
-            ),
+            cubics_to_points_torch(coeffs=output_actions[:, 0, :]),
+            cubics_to_points_torch(coeffs=output_actions[:, 1, :]),
         )
 
         # if inputs.cursor_path is not None:
@@ -335,10 +327,14 @@ class Qwen25OActionLIT(
             )
             self.model.model.layers[layer_id] = transformer_block
 
-        _ = cast(set[nn.Parameter], set(self.model.action_token_embedding.weight))
+        ignored_params = cast(
+            set[nn.Parameter], set(self.model.action_token_embedding.weight)
+        )
+        # for param in self.model.action_head.parameters():
+        #     ignored_params.add(param)
         return fully_shard(
             self.model,
-            # ignored_params=ignored_params,
+            ignored_params=ignored_params,
             **fsdp_config,
         )
 

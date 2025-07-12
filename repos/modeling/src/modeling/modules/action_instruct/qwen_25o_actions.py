@@ -9,6 +9,7 @@ from transformers.models.qwen2_5_omni.modeling_qwen2_5_omni import (
     Qwen2_5OmniPreTrainedModelForConditionalGeneration,
     Qwen2_5OmniThinkerCausalLMOutputWithPast,
     Qwen2_5OmniThinkerForConditionalGeneration,
+    Qwen2MLP,  # Same as Qwen2_5OmniMLP
 )
 from transformers.models.qwen2_5_omni.configuration_qwen2_5_omni import (
     Qwen2_5OmniThinkerConfig,
@@ -63,6 +64,28 @@ class Qwen2_5OmniActionCausalLMOutputWithPast(Qwen2_5OmniThinkerCausalLMOutputWi
     action_outputs: Optional[torch.FloatTensor] = None
 
 
+# class Qwen2MLP(nn.Module):
+#     def __init__(
+#         self,
+#         hidden_size: int,
+#         intermediate_size: int,
+#         hidden_act: str,
+#         bias: bool = False,
+#     ):
+#         super().__init__()
+#         self.hidden_size = hidden_size
+#         self.intermediate_size = intermediate_size
+#         self.gate_proj = nn.Linear(self.hidden_size, self.intermediate_size, bias=bias)
+#         self.up_proj = nn.Linear(self.hidden_size, self.intermediate_size, bias=bias)
+#         self.down_proj = nn.Linear(self.intermediate_size, self.hidden_size, bias=bias)
+#         self.act_fn = ACT2FN[hidden_act]
+
+#     def forward(self, hidden_state):
+#         return self.down_proj(
+#             self.act_fn(self.gate_proj(hidden_state)) * self.up_proj(hidden_state)
+#         )
+
+
 class Qwen2_5OmniThinkerForActionModelling(
     Qwen2_5OmniPreTrainedModelForConditionalGeneration, GenerationMixin
 ):
@@ -93,9 +116,8 @@ class Qwen2_5OmniThinkerForActionModelling(
         self.lm_head = nn.Linear(
             config.text_config.hidden_size, config.text_config.vocab_size, bias=False
         )
+        self.action_mlp = Qwen2MLP(config=config.text_config)
         self.action_head = nn.Sequential(
-            nn.Linear(hidden_size, hidden_size),  # layer 1
-            nn.GELU(),  # non-linearity (ReLU also fine)
             nn.Linear(hidden_size, 6),  # layer 2
         )
 
@@ -446,12 +468,26 @@ class Qwen2_5OmniThinkerForActionModelling(
             cache_position=cache_position,
         )
 
+        # This hidden_state has already been passed through an RMS norm.
+        # TODO: I think what we are supposed to do is get the unnormed last hidden_state then do
+        #
+        # residual = unnormed_last_hidden_state
+        # hidden_states = self.model.norm(unnormed_last_hidden_state)
+        # hidden_states = self.action_mlp(hidden_states)
+        # hidden_states = residual + hidden_states
+        # hidden_states = self.model.norm(hidden_states)
+
         hidden_states = outputs[0]
+
         logits = self.lm_head(hidden_states)  # [B, S, V]
+
+        hidden_states = self.action_mlp(hidden_states)
+        hidden_states = self.model.norm(hidden_states)
         action_outputs = self.action_head(hidden_states)  # [B, S, 6]
 
-        if not return_dict:
-            raise NotImplementedError("bruh what is hf doing")
+        assert return_dict, (
+            "return_dict should be True for Qwen2_5OmniActionCausalLMOutputWithPast"
+        )
 
         return Qwen2_5OmniActionCausalLMOutputWithPast(
             logits=logits,
