@@ -231,10 +231,10 @@ class BaseLITModule(ABC, Generic[MODEL_TYPE, DATA_TYPE, CONFIG_TYPE]):
         # 2. Shard the model using FSDP
         # 3. Compile the model if configured
 
-        if self.module_config.activation_checkpointing is not None:
-            logger.debug("Enabling activation checkpointing...")
-            self.model = self.activation_checkpoint_model()  # type: ignore[assignment]
-            # # Enable activation checkpointing if configured
+        # if self.module_config.activation_checkpointing is not None:
+        #     logger.debug("Enabling activation checkpointing...")
+        #     self.model = self.activation_checkpoint_model()  # type: ignore[assignment]
+        # # Enable activation checkpointing if configured
 
         # self.model = self.shard_model(
         #     mp_policy=self.run_config.mp_policy,

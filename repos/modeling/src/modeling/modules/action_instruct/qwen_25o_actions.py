@@ -8,8 +8,7 @@ from transformers.models.qwen2_5_omni.modeling_qwen2_5_omni import (
     Qwen2_5OmniVisionEncoder,
     Qwen2_5OmniPreTrainedModelForConditionalGeneration,
     Qwen2_5OmniThinkerCausalLMOutputWithPast,
-    Qwen2_5OmniThinkerForConditionalGeneration,
-    Qwen2MLP,  # Same as Qwen2_5OmniMLP
+    Qwen2_5OmniThinkerForConditionalGeneration,  # Same as Qwen2_5OmniMLP
 )
 from transformers.models.qwen2_5_omni.configuration_qwen2_5_omni import (
     Qwen2_5OmniThinkerConfig,
@@ -116,8 +115,10 @@ class Qwen2_5OmniThinkerForActionModelling(
         self.lm_head = nn.Linear(
             config.text_config.hidden_size, config.text_config.vocab_size, bias=False
         )
-        self.action_mlp = Qwen2MLP(config=config.text_config)
+        # self.action_mlp = Qwen2MLP(config=config.text_config)
         self.action_head = nn.Sequential(
+            nn.Linear(hidden_size, hidden_size),  # layer 1
+            nn.GELU(),  # activation
             nn.Linear(hidden_size, 6),  # layer 2
         )
 
@@ -480,9 +481,13 @@ class Qwen2_5OmniThinkerForActionModelling(
         hidden_states = outputs[0]
 
         logits = self.lm_head(hidden_states)  # [B, S, V]
+        torch.save(hidden_states, "hidden_states.pt")
+        torch.save(self.action_head, "action_head.pt")
+        torch.save(action_tokens, "action_tokens.pt")
+        raise NotImplementedError("Action head is not implemented yet")
 
-        hidden_states = self.action_mlp(hidden_states)
-        hidden_states = self.model.norm(hidden_states)
+        # hidden_states = self.action_mlp(hidden_states)
+        # hidden_states = self.model.norm(hidden_states)
         action_outputs = self.action_head(hidden_states)  # [B, S, 6]
 
         assert return_dict, (
