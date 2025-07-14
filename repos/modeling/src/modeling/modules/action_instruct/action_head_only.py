@@ -38,7 +38,7 @@ logger = configure_logging(__name__, level=logging.DEBUG)
 
 MODEL_TYPE = Qwen2_5OmniThinkerForActionModelling
 
-l2_loss = nn.MSELoss(reduction="sum")
+l2_loss = nn.MSELoss(reduction="mean")
 
 
 def __call__(self, x: float):
@@ -49,7 +49,7 @@ def __call__(self, x: float):
 
 def cubics_to_points_torch(
     coeffs: torch.Tensor,  # [seq, 3]
-    num_points: int = 100,
+    num_points: int = 2,
 ) -> torch.Tensor:
     x = torch.linspace(0, 1, num_points, device=coeffs.device).unsqueeze(
         0
@@ -64,6 +64,44 @@ def cubics_to_points_torch(
     c1 = c1.unsqueeze(1)  # shape: [seq, 1]
     y = ((c3 * x + c2) * x + c1) * x  # [seq, num_points]
     return y
+
+
+def analytical_distance(
+    a: torch.Tensor,  # [seq, 3]
+    b: torch.Tensor,  # [seq, 3]
+) -> torch.Tensor:
+    m1, n1, a1 = a.unbind(dim=1)  # shape: [seq, 3]
+    m2, n2, a2 = b.unbind(dim=1)  # shape:
+    c1 = torch.stack(
+        [
+            m1 + n1 - 2 * a1,
+            3 * a1 - 2 * m1 - n1,
+            m1,
+        ],
+        dim=1,
+    )  # shape: [seq, 3]
+    c2 = torch.stack(
+        [
+            m2 + n2 - 2 * a2,
+            3 * a2 - 2 * m2 - n2,
+            m2,
+        ],
+        dim=1,
+    )  # shape: [seq, 3]
+
+    d = c1 - c2
+    d1, d2, d3 = d[..., 0], d[..., 1], d[..., 2]
+    dist_sq = (
+        d1**2 * (1 / 3)
+        + d1 * d2 * (2 / 4)
+        + d1 * d3 * (2 / 5)
+        + d2**2 * (1 / 5)
+        + d2 * d3 * (2 / 6)
+        + d3**2 * (1 / 7)
+    )
+    # https://chatgpt.com/share/68733eb1-a248-8006-a5a3-9494aa3ed24a
+
+    return dist_sq
 
 
 SCREEN_SIZE = (854, 480)
@@ -130,11 +168,14 @@ class Qwen25OActionLITTesting(
         logger.debug(f"Loading model weights from {tmpdir} to device {self.device}")
         self.model.to_empty(device=self.device)
         self.model_test = torch.load("action_head.pt", weights_only=False)
-        self.model_test.to(self.device)
+        self.model_test.to(self.device, dtype=self.dtype)
         self.model_test.train()
         # enable gradients for model_test
         self.model_test.requires_grad_(True)
         self.hidden_states = torch.load("hidden_states.pt")
+        self.hidden_states = torch.randn_like(self.hidden_states).to(
+            device=self.device, dtype=self.dtype
+        )
         self.action_tokens = torch.load("action_tokens.pt")
 
         return cast(MODEL_TYPE, self.model_test)
@@ -189,8 +230,16 @@ class Qwen25OActionLITTesting(
             cubics_to_points_torch(coeffs=output_actions[:, 1, :]),
         )
 
+        loss = analytical_distance(
+            a=output_actions[:, 0, :],
+            b=cursor_path[:, 0, :],
+        ) + analytical_distance(
+            a=output_actions[:, 1, :],
+            b=cursor_path[:, 1, :],
+        )  # [k, num_points]
+
         # if inputs.cursor_path is not None:
-        loss = l2_loss(actual_xs, predicted_xs) + l2_loss(actual_ys, predicted_ys)
+        # loss = l2_loss(actual_xs, predicted_xs) + l2_loss(actual_ys, predicted_ys)
         loss = loss.sum() / inputs.action_tokens.sum().clamp(min=1.0)
 
         return (

@@ -40,8 +40,8 @@ Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
         model_name="Qwen/Qwen2.5-Omni-7B",
         tokenizer_name="Qwen/Qwen2.5-Omni-7B",
         freeze_vision=True,
-        freeze_network=True,
-        freeze_action_embedding=True,
+        freeze_network=False,
+        freeze_action_embedding=False,
         freeze_action_head=False,
         # compile=None,
         # compile=CompileConfig(),
@@ -55,9 +55,9 @@ Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
     ),
     run=RunConfig(
         lr=LinearLRSchedule(
-            peak_lr=1e-3,
+            peak_lr=1e-4,
             end_lr=1e-5,
-            warmup_steps=200,
+            warmup_steps=20,
             end_step=3_000,  # 10k steps
         ),
         sequence_length=4096,

@@ -46,6 +46,44 @@ def __call__(self, x: float):
     return ((c3 * x + c2) * x + c1) * x  # Horner form
 
 
+def analytical_distance(
+    a: torch.Tensor,  # [seq, 3]
+    b: torch.Tensor,  # [seq, 3]
+) -> torch.Tensor:
+    m1, n1, a1 = a.unbind(dim=1)  # shape: [seq, 3]
+    m2, n2, a2 = b.unbind(dim=1)  # shape:
+    c1 = torch.stack(
+        [
+            m1 + n1 - 2 * a1,
+            3 * a1 - 2 * m1 - n1,
+            m1,
+        ],
+        dim=1,
+    )  # shape: [seq, 3]
+    c2 = torch.stack(
+        [
+            m2 + n2 - 2 * a2,
+            3 * a2 - 2 * m2 - n2,
+            m2,
+        ],
+        dim=1,
+    )  # shape: [seq, 3]
+
+    d = c1 - c2
+    d1, d2, d3 = d[..., 0], d[..., 1], d[..., 2]
+    dist_sq = (
+        d1**2 * (1 / 3)
+        + d1 * d2 * (2 / 4)
+        + d1 * d3 * (2 / 5)
+        + d2**2 * (1 / 5)
+        + d2 * d3 * (2 / 6)
+        + d3**2 * (1 / 7)
+    )
+    # https://chatgpt.com/share/68733eb1-a248-8006-a5a3-9494aa3ed24a
+
+    return dist_sq
+
+
 def cubics_to_points_torch(
     coeffs: torch.Tensor,  # [seq, 3]
     num_points: int = 100,
@@ -174,16 +212,6 @@ class Qwen25OActionLIT(
             .to(device=self.device, dtype=self.dtype)
         )
 
-        # l2_loss = self.model.l2_loss(output_actions, cursor_path)
-        # loss = l2_loss(
-        #     output_actions,
-        # )  # [B, S, 6]
-        # loss = torch.sum(loss, dim=-1)
-        # loss *= action_tokens
-        # loss = loss.sum() / action_tokens.sum().clamp(min=1.0)
-
-        # print(f"{self.device=}")
-
         assert output_actions.shape == cursor_path.shape, (
             f"Expected output_actions shape {output_actions.shape} to match "
             f"cursor_path shape {cursor_path.shape}"
@@ -199,10 +227,15 @@ class Qwen25OActionLIT(
         )
 
         # if inputs.cursor_path is not None:
-        loss = self.model.l2_loss(actual_xs, predicted_xs) + self.model.l2_loss(
-            actual_ys, predicted_ys
-        )
-        loss = loss.sum() / inputs.action_tokens.sum().clamp(min=1.0)
+        loss = analytical_distance(
+            a=output_actions[:, 0, :],
+            b=cursor_path[:, 0, :],
+        ) + analytical_distance(
+            a=output_actions[:, 1, :],
+            b=cursor_path[:, 1, :],
+        )  # [k, num_points]
+
+        loss = loss.sum()
         assert isinstance(loss, torch.Tensor), (
             f"Expected outputs.loss to be a Tensor, got {type(outputs.loss)}"
         )

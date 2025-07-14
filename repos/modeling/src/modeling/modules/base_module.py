@@ -231,9 +231,9 @@ class BaseLITModule(ABC, Generic[MODEL_TYPE, DATA_TYPE, CONFIG_TYPE]):
         # 2. Shard the model using FSDP
         # 3. Compile the model if configured
 
-        # if self.module_config.activation_checkpointing is not None:
-        #     logger.debug("Enabling activation checkpointing...")
-        #     self.model = self.activation_checkpoint_model()  # type: ignore[assignment]
+        if self.module_config.activation_checkpointing is not None:
+            logger.debug("Enabling activation checkpointing...")
+            self.model = self.activation_checkpoint_model()  # type: ignore[assignment]
         # # Enable activation checkpointing if configured
 
         # self.model = self.shard_model(
@@ -410,7 +410,6 @@ class BaseLITModule(ABC, Generic[MODEL_TYPE, DATA_TYPE, CONFIG_TYPE]):
         optimizer = torch.optim.AdamW(
             self.model.parameters(),
             lr=self.run_config.lr.peak_lr,
-            # foreach=True,
             fused=True,
         )
 

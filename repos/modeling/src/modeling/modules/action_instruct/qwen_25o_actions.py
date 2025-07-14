@@ -63,28 +63,6 @@ class Qwen2_5OmniActionCausalLMOutputWithPast(Qwen2_5OmniThinkerCausalLMOutputWi
     action_outputs: Optional[torch.FloatTensor] = None
 
 
-# class Qwen2MLP(nn.Module):
-#     def __init__(
-#         self,
-#         hidden_size: int,
-#         intermediate_size: int,
-#         hidden_act: str,
-#         bias: bool = False,
-#     ):
-#         super().__init__()
-#         self.hidden_size = hidden_size
-#         self.intermediate_size = intermediate_size
-#         self.gate_proj = nn.Linear(self.hidden_size, self.intermediate_size, bias=bias)
-#         self.up_proj = nn.Linear(self.hidden_size, self.intermediate_size, bias=bias)
-#         self.down_proj = nn.Linear(self.intermediate_size, self.hidden_size, bias=bias)
-#         self.act_fn = ACT2FN[hidden_act]
-
-#     def forward(self, hidden_state):
-#         return self.down_proj(
-#             self.act_fn(self.gate_proj(hidden_state)) * self.up_proj(hidden_state)
-#         )
-
-
 class Qwen2_5OmniThinkerForActionModelling(
     Qwen2_5OmniPreTrainedModelForConditionalGeneration, GenerationMixin
 ):
@@ -115,11 +93,8 @@ class Qwen2_5OmniThinkerForActionModelling(
         self.lm_head = nn.Linear(
             config.text_config.hidden_size, config.text_config.vocab_size, bias=False
         )
-        # self.action_mlp = Qwen2MLP(config=config.text_config)
         self.action_head = nn.Sequential(
-            nn.Linear(hidden_size, hidden_size),  # layer 1
-            nn.GELU(),  # activation
-            nn.Linear(hidden_size, 6),  # layer 2
+            nn.Linear(hidden_size, 6),
         )
 
         self.pad_token_id = (
@@ -469,25 +444,9 @@ class Qwen2_5OmniThinkerForActionModelling(
             cache_position=cache_position,
         )
 
-        # This hidden_state has already been passed through an RMS norm.
-        # TODO: I think what we are supposed to do is get the unnormed last hidden_state then do
-        #
-        # residual = unnormed_last_hidden_state
-        # hidden_states = self.model.norm(unnormed_last_hidden_state)
-        # hidden_states = self.action_mlp(hidden_states)
-        # hidden_states = residual + hidden_states
-        # hidden_states = self.model.norm(hidden_states)
-
         hidden_states = outputs[0]
 
         logits = self.lm_head(hidden_states)  # [B, S, V]
-        torch.save(hidden_states, "hidden_states.pt")
-        torch.save(self.action_head, "action_head.pt")
-        torch.save(action_tokens, "action_tokens.pt")
-        raise NotImplementedError("Action head is not implemented yet")
-
-        # hidden_states = self.action_mlp(hidden_states)
-        # hidden_states = self.model.norm(hidden_states)
         action_outputs = self.action_head(hidden_states)  # [B, S, 6]
 
         assert return_dict, (

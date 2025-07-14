@@ -476,10 +476,6 @@ class ActionDataset(Dataset[ActionDataSample]):
         )
 
         self.datas = list(zip(self.data_paths, stream_metadatas, strict=True))
-        self.first_data = None
-        self.first_data = asyncio.run(
-            self.get_item(0)
-        )  # Pre-fetch the first item to ensure the dataset is ready
 
     def __getitem__(self, index) -> ActionDataSample:
         # TODO: Make everything async native
@@ -501,10 +497,7 @@ class ActionDataset(Dataset[ActionDataSample]):
         Asynchronously fetch a batch of data samples.
         This method should be implemented to load the actual data from the paths.
         """
-        if self.first_data is not None:
-            # If we already have the first data, return it directly
-            return self.first_data
-        index = 0
+
         # TODO: Handle case where index is out of bounds by returning a 0 sample and emitting a warning
         path, stream_metadata = self.datas[index]
 
