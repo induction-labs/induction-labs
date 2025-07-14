@@ -240,15 +240,15 @@ class BaseLITModule(ABC, Generic[MODEL_TYPE, DATA_TYPE, CONFIG_TYPE]):
             mp_policy=self.run_config.mp_policy,
             device_mesh=device_mesh,
         )  # type: ignore[assignment]
-        logger.debug(f"Sharded model {self.model} with dtype {self.dtype}")
-        # NOTE: For now we are just going to shard all params, and `ignore_params` is not supported because
-        # sharding in torch is all manual anyways and if we want to support replicate on some params only then
-        # we would basically need to rewrite into `torch.distributed.fsdp._fully_shard._fsdp_param.FSDPParam` class
-        # the logic of how to handle replicate params and sharded params.
 
         assert isinstance(self.model, FSDPModule), (
             f"Expected self.model to be a FullyShardedDataParallel, got {type(self.model)}"
         )
+        # logger.debug(f"Sharded model {self.model} with dtype {self.dtype}")
+        # NOTE: For now we are just going to shard all params, and `ignore_params` is not supported because
+        # sharding in torch is all manual anyways and if we want to support replicate on some params only then
+        # we would basically need to rewrite into `torch.distributed.fsdp._fully_shard._fsdp_param.FSDPParam` class
+        # the logic of how to handle replicate params and sharded params.
 
         # We can only compile *after* sharding and gradient checkpointing, otherwise it doesn't trace through.
         if self.module_config.compile is not None:
@@ -349,8 +349,9 @@ class BaseLITModule(ABC, Generic[MODEL_TYPE, DATA_TYPE, CONFIG_TYPE]):
         assert loss.ndim == 0, f"Expected loss to be a scalar tensor, got {loss.ndim}"
 
         # Assert loss is not NaN or Inf
-        assert not torch.isnan(loss), "Loss is NaN"
-        assert not torch.isinf(loss), "Loss is Inf"
+        assert torch.isfinite(loss).all(), (
+            f"Expected loss to be finite, got {loss} with dtype {loss.dtype}"
+        )
         return loss
 
     @final

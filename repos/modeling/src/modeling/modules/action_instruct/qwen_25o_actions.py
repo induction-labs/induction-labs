@@ -93,8 +93,9 @@ class Qwen2_5OmniThinkerForActionModelling(
         self.lm_head = nn.Linear(
             config.text_config.hidden_size, config.text_config.vocab_size, bias=False
         )
+        # `bias=True` here creates NaN gradients when fsdp is enabled + torch.use_deterministic_algorithms(True)
         self.action_head = nn.Sequential(
-            nn.Linear(hidden_size, 6),
+            nn.Linear(hidden_size, 6, bias=False),
         )
 
         self.pad_token_id = (
