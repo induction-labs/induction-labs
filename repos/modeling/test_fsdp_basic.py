@@ -5,6 +5,7 @@ torchrun --standalone --nproc_per_node=2 test_fsdp_basic.py
 
 import os
 import torch
+from torch import nn
 import torch.distributed as dist
 from torch.distributed.fsdp import fully_shard, MixedPrecisionPolicy
 from torch.testing._internal.distributed._tensor.common_dtensor import (
@@ -30,11 +31,18 @@ def main():
     for module in model.modules():
         if isinstance(module, TransformerBlock):
             fully_shard(module, **fsdp_cfg)
-    fully_shard(model, **fsdp_cfg)
+
+    ignored_params: set[nn.Parameter] = set()
+    # Doesn't work:
+    # for param in model.output.parameters():
+    #     ignored_params.add(param)
+    fully_shard(model, ignored_params=ignored_params, **fsdp_cfg)
     optim = torch.optim.AdamW(model.parameters(), lr=1e-2)
     inp = torch.randint(0, model_args.vocab_size, (8, 1024), device="cuda")
-    model(inp).sum().backward()
+    loss = model(inp).sum()
+    loss.backward()
     optim.step()
+    print("Model training step completed successfully, loss:", loss.item())
 
 
 if __name__ == "__main__":

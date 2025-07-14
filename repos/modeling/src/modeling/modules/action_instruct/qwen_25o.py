@@ -33,7 +33,6 @@ from synapse.utils.logging import configure_logging, logging
 import numpy as np
 import time
 
-from torch import nn
 
 logger = configure_logging(__name__, level=logging.DEBUG)
 
@@ -346,7 +345,7 @@ class Qwen25OActionLIT(
             "mesh": device_mesh[MeshAxis.FSDP],
             "mp_policy": mp_policy,
         }
-        fully_shard(self.model.visual, **fsdp_config)
+        # fully_shard(self.model.visual, **fsdp_config)
 
         for layer_id, transformer_block in enumerate(self.model.model.layers):
             # Activation checkpointing kinda broken
@@ -360,14 +359,8 @@ class Qwen25OActionLIT(
             )
             self.model.model.layers[layer_id] = transformer_block
 
-        ignored_params = cast(
-            set[nn.Parameter], set(self.model.action_token_embedding.weight)
-        )
-        # for param in self.model.action_head.parameters():
-        #     ignored_params.add(param)
         return fully_shard(
             self.model,
-            ignored_params=ignored_params,
             **fsdp_config,
         )
 
