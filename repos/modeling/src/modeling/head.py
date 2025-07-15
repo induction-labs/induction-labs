@@ -1,40 +1,40 @@
 from __future__ import annotations
 
-from wandb.sdk.wandb_run import Run
-from contextlib import asynccontextmanager
-from typing import AsyncIterator
-
-from modeling.config import ExperimentConfig, UnifiedExperimentConfig
-from synapse.utils.logging import configure_logging
-from modeling.utils.tmpdir import TmpDirContext
-from synapse.elapsed_timer import elapsed_timer
-from modeling.modules.base_module import (
-    RuntimeConfig,
-)
-from modeling.config.distributed import DistributedConfig, InstanceConfig
-import wandb
-from pydantic import AnyUrl
-from typing import Optional
-from datetime import UTC, datetime
-from pathlib import Path
-import torch
-from dataclasses import dataclass
-
-import secrets
-import string
-
+import asyncio
+import logging
 import os
 import random
-import numpy as np
-from modeling.distributed.ray_head import initialize_ray_head
+import secrets
+import string
+from contextlib import asynccontextmanager
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import AsyncIterator, Iterator, Optional
 
+import numpy as np
+import torch
+import wandb
 from ray.util.placement_group import (
     placement_group,
 )
-from modeling.actor import ExperimentActor, ActorArgs
+from synapse.elapsed_timer import elapsed_timer
+from synapse.utils.logging import configure_logging
+from wandb.sdk.wandb_run import Run
+
+from modeling.actor import ActorArgs, ExperimentActor
+from modeling.config import ExperimentConfig, UnifiedExperimentConfig
+from modeling.config.distributed import DistributedConfig, InstanceConfig
+from modeling.distributed.ray_head import initialize_ray_head, RayUrl
+from modeling.modules.base_module import (
+    RuntimeConfig,
+)
+from modeling.utils.tmpdir import TmpDirContext
 from modeling.utils.typed_remote import RemoteArgs
-import asyncio
-import logging
+from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
+from ray.util.placement_group import (
+    PlacementGroup,
+)
 
 logger = configure_logging(__name__, level=logging.DEBUG)
 
@@ -52,7 +52,7 @@ def node_resource_str(node_id: int) -> str:
     Generate a resource string for a node based on its ID.
     This is used to specify resources for Ray actors.
     """
-    return f"node_{node_id}"
+    return f"Node{node_id}"
 
 
 def get_ray_pg_resources(
@@ -73,6 +73,14 @@ def get_ray_pg_resources(
 class RayActors:
     actors: list[list[ExperimentActor]]
 
+    @property
+    def all_actors(self) -> Iterator[ExperimentActor]:
+        """
+        Flatten the list of actors across all nodes.
+        """
+        for node_actors in self.actors:
+            yield from node_actors
+
 
 @dataclass
 class ManagerState:
@@ -84,7 +92,7 @@ class ManagerState:
     global_step: int
     tmp_dir: Path
     generator: "torch.Generator"
-    ray_host: AnyUrl
+    ray_host: RayUrl
     actors: RayActors
     wandb: Optional["Run"]
 
@@ -281,12 +289,18 @@ class ExperimentManager:
         return g
 
     @staticmethod
-    async def initialize_actors(distributed_config: DistributedConfig) -> RayActors:
+    async def initialize_actors(
+        distributed_config: DistributedConfig, pg: PlacementGroup
+    ) -> RayActors:
         actor_args = [
             [
                 (
                     RemoteArgs(
                         num_cpus=NUM_ACTOR_CPUS,
+                        num_gpus=1.0,
+                        scheduling_strategy=PlacementGroupSchedulingStrategy(
+                            placement_group=pg,
+                        ),
                         resources={node_resource_str(node_rank): 1.0},
                     ),
                     ActorArgs(
@@ -313,9 +327,20 @@ class ExperimentManager:
         return RayActors(actors=actors)
 
     @staticmethod
+    def ray_head_resources(distributed_config: DistributedConfig):
+        # Ray doesn't let you do `ray.init(resources={})` if connecting to an existing cluster,
+        # so we just compute how much we need here instead of passing it to `ray.init()`.
+        assert distributed_config.num_nodes == 1, (
+            "This method is only for initializing a single node Ray head worker."
+        )
+        return {
+            node_resource_str(0): float(distributed_config.devices_per_node),
+        }
+
+    @staticmethod
     @asynccontextmanager
     async def init_experiment(
-        exp_config: ExperimentConfig,
+        exp_config: ExperimentConfig, ray_head_worker=False
     ) -> AsyncIterator[ExperimentManager]:
         """
         Initialize the experiment configuration from a given path.
@@ -330,31 +355,39 @@ class ExperimentManager:
             metadata=exp_config.metadata,
         )
         generator = ExperimentManager.fix_rng(unified_config.run.seed)
-        logger.info("starting ray stuffs")
+        head_resources = (
+            ExperimentManager.ray_head_resources(
+                unified_config.run.distributed,
+            )
+            if ray_head_worker
+            else None
+        )
 
         with (
             elapsed_timer("Experiment.Init") as trainer_timer,
             TmpDirContext() as (_, tmp_dir),
-            initialize_ray_head() as ray_host,
+            initialize_ray_head(head_resources) as ray_host,
         ):
-            logger.debug(f"Ray head node initialized at {ray_host}")
             wandb_run = ExperimentManager.init_wandb(unified_config)
-
             pg_resources = get_ray_pg_resources(
                 unified_config.run.distributed,
             )
             # Strategy doesn't matter here bc we are running 1 process per device.
             pg = placement_group(pg_resources, strategy="PACK")
-            logger.debug(f"Placement group created: {pg}")
+            logger.debug(f"Placement group created: {pg_resources=}")
             # Wait here for worker processes to start
             with elapsed_timer("Experiment.WaitForPlacementGroup"):
                 await pg.ready()
             logger.debug("Placement group is ready.")
             with elapsed_timer("Experiment.InitActors"):
                 actors = await ExperimentManager.initialize_actors(
-                    unified_config.run.distributed
+                    unified_config.run.distributed, pg
                 )
             logger.debug(f"Actors initialized: {actors}")
+            health_checks = await asyncio.gather(
+                *[actor.health_check.remote() for actor in actors.all_actors]
+            )
+            logger.debug(f"Health checks completed: {health_checks}")
 
             manager_state = ManagerState(
                 global_step=0,
@@ -364,7 +397,6 @@ class ExperimentManager:
                 ray_host=ray_host,
                 actors=actors,
             )
-            trainer_timer.print_timing_tree(logger)
 
             try:
                 yield ExperimentManager(
@@ -372,6 +404,8 @@ class ExperimentManager:
                     state=manager_state,
                 )
             finally:
+                # trainer_timer.print_timing_tree(logger)
+
                 # Clean up temporary directory
                 if manager_state.wandb is not None:
                     manager_state.wandb.finish()

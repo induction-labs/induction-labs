@@ -2533,7 +2533,7 @@ flash-attn = [
     { name = "flash-attn", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
 ]
 head = [
-    { name = "ray", extra = ["default"] },
+    { name = "ray", extra = ["client", "default"] },
 ]
 
 [package.metadata]
@@ -2579,7 +2579,7 @@ dev = [
     { name = "torch-tb-profiler", specifier = ">=0.4.3" },
 ]
 flash-attn = [{ name = "flash-attn", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'", url = "https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.3.9/flash_attn-2.6.3+cu128torch2.7-cp312-cp312-linux_x86_64.whl" }]
-head = [{ name = "ray", extras = ["default"] }]
+head = [{ name = "ray", extras = ["default", "client"] }]
 
 [[package]]
 name = "more-itertools"

@@ -1,9 +1,8 @@
 # https://chatgpt.com/share/68769b6d-b38c-8006-8221-e7f845ec2439
 from __future__ import annotations
 
-import functools
 import types
-from abc import ABC, abstractmethod
+from abc import ABC
 from typing import (
     Any,
     Callable,
@@ -18,15 +17,14 @@ from typing import (
     TypeVar,
     Union,
     cast,
-    final,
     overload,
     runtime_checkable,
 )
 
 import ray
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
-# from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
+from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 
 P = ParamSpec("P")  # parameters after  ‘self’
 R = TypeVar("R", covariant=True)  # return type
@@ -44,9 +42,11 @@ class _WithCustomCall(Protocol[P, R]):
     # Disable the default `__call__` method to avoid confusion with the remote call.
     # Similar to CUDA `__device__` vs `__host__` qualifiers.
     # def __call__(self, *args: P.args, **kwargs: P.kwargs) -> R: ...
-    def remote_call(self, *args: P.args, **kwargs: P.kwargs) -> R: ...
+    def remote(self, *args: P.args, **kwargs: P.kwargs) -> R: ...
 
 
+#! For now, in practice we should not be using async remote methods because Ray
+#! does not allow for threading if the method is async for some reason. :/
 @overload
 def remote_method(
     func: Callable[Concatenate[SelfT, P], Coroutine[Any, Any, R]],
@@ -61,21 +61,25 @@ def remote_method(
 
 def remote_method(  # type: ignore
     func,
-):
+):  # -> _Wrapped[Callable[..., Any], Any, Callable[..., Any], Any]:
     """
     Decorator to turn a normal instance method into one that also exposes
     `.custom_call()`, while preserving the original type signature.
     """
 
-    @functools.wraps(func)
-    def wrapper(self, *args, **kwargs):
-        # -- normal call path, you can add extra behaviour here
-        return func(self, *args, **kwargs)
+    #! Note: Don't wrap the original function, because ray checks whether the original
+    #! function is sync or async and does different things based on that.
+
+    # @functools.wraps(func)
+    # def wrapper(self, *args, **kwargs):
+    #     # -- normal call path, you can add extra behaviour here
+    #     return func(self, *args, **kwargs)
 
     def _custom(self, *args, **kwargs):
-        # -- “alternative” call path
-        # put whatever custom logic you need before/after the real call
-        # Assert that func has the `remote` attribute
+        #! Note that this is never actually called, this is only used for typing
+        #! because ray overrides with `setattr(obj,method, ActorMethod(...))` which ignores
+        #! the additional properties on the method we add.
+        raise NotImplementedError("This method should be called on a remote actor.")
         assert hasattr(func, "remote"), (
             f"Function {func.__name__} does not have a 'remote' attribute."
         )
@@ -94,57 +98,22 @@ def remote_method(  # type: ignore
         object.__setattr__(bound, "custom_call", types.MethodType(_custom, instance))
         return bound
 
-    wrapper.__get__ = _get_bound  # type: ignore[attr-defined]
+    func.__get__ = _get_bound  # type: ignore[attr-defined]
     # keep an unbound `.custom_call` so static analysers see it on the class
-    wrapper.remote_call = _custom  # type: ignore[attr-defined]
+    func.remote_call = _custom  # type: ignore[attr-defined]
 
-    return wrapper  # type: ignore[return-value]
+    return func  # type: ignore[return-value]
 
 
 # ────────────────────────  how you use it  ─────────────────────────
 
 
-class BaseActor(Generic[ActorArgs, ConfiguredState], ABC):
-    state: ConfiguredState
-
-    @final
+class BaseActor(Generic[ActorArgs], ABC):
     def __init__(self, args: ActorArgs):
         self.args = args
-        # We can't do configure_state here because it is async so we rely on the caller to call it
-        # right after instantiation.
-
-    @abstractmethod
-    async def _configure_state(self) -> ConfiguredState:
-        """
-        Configure the state of the actor based on the provided arguments.
-        This method should be implemented by subclasses to define how the
-        actor's state is initialized.
-        """
-        raise NotImplementedError("Subclasses must implement this method.")
-
-    @final
-    @remote_method
-    async def configure_state(self):
-        """
-        Configure the state of the actor.
-        This method is called to initialize the actor's state.
-        """
-        assert not hasattr(self, "state"), (
-            "State has already been configured. "
-            "This method should only be called once per actor instance."
-        )
-        self.state = await self._configure_state()
 
     @remote_method
-    async def health_check(self) -> None:
-        """
-        Run a health check on the actor.
-        This method can be overridden by subclasses to implement custom health checks.
-        """
-        return None
-
-    @remote_method
-    async def shutdown(self):
+    def shutdown(self):
         """
         Shutdown the actor.
         """
@@ -161,7 +130,6 @@ class BaseActor(Generic[ActorArgs, ConfiguredState], ABC):
         kwargs = remote_args.model_dump(exclude_none=True) if remote_args else {}
         # Just a lil cursed
         instance = cast(Self, ray.remote(**kwargs)(cls).remote(args))
-        await instance.configure_state.remote_call()
         return instance
 
 
@@ -190,6 +158,7 @@ class BaseActor(Generic[ActorArgs, ConfiguredState], ABC):
 
 
 class RemoteArgs(BaseModel):
+    model_config = ConfigDict(arbitrary_types_allowed=True)
     num_cpus: Optional[float] = None
     num_gpus: Optional[float] = None
     resources: Optional[dict[str, float]] = None
@@ -197,31 +166,30 @@ class RemoteArgs(BaseModel):
     label_selector: Optional[dict[str, str]] = None
     scheduling_strategy: Optional[
         Union[
-            Literal["DEFAULT"], Literal["SPREAD"]
-        ]  # , PlacementGroupSchedulingStrategy]
+            Literal["DEFAULT"], Literal["SPREAD"], PlacementGroupSchedulingStrategy
+        ]  # ,
     ] = None
 
 
 C = TypeVar("C", bound=type[BaseActor])  # “any class object”
 
 
-def actor_class(
-    remote_args: Optional[RemoteArgs] = None,
-):  # → returns *the same* class
-    """A no-op decorator that preserves the original type."""
-    # Get kwargs dict, remove all None values
-    kwargs = remote_args.model_dump(exclude_none=True) if remote_args else {}
+# def actor_class(
+#     remote_args: Optional[RemoteArgs] = None,
+# ):  # → returns *the same* class
+#     """A no-op decorator that preserves the original type."""
+#     # Get kwargs dict, remove all None values
+#     kwargs = remote_args.model_dump(exclude_none=True) if remote_args else {}
 
-    def decorator(cls: C) -> C:
-        return ray.remote(**kwargs)(cls)  # type: ignore[return-value]
+#     def decorator(cls: C) -> C:
+#         return ray.remote(**kwargs)(cls)  # type: ignore[return-value]
 
-    return decorator
+#     return decorator
 
 
 if __name__ == "__main__":
-
-    @actor_class()
-    class Greeter(BaseActor[BaseModel, None]):
+    # @actor_class()
+    class Greeter(BaseActor[BaseModel]):
         @remote_method
         def greet(self, name: str) -> None:
             print(f"Hello, {name}!")
@@ -235,6 +203,6 @@ if __name__ == "__main__":
         # g = Greeter(BaseModel())
         g = await Greeter.create(args=BaseModel())
         # g.greet("Alice")  # → Hello, Alice!
-        await g.greet.remote_call("Bob")  # → ⚡ custom path
-        await g.greet_async.remote_call("Bob")
+        await g.greet.remote("Bob")  # → ⚡ custom path
+        await g.greet_async.remote("Bob")
         #    Hello, Bob!

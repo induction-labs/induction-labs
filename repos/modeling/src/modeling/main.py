@@ -38,17 +38,17 @@ def silence_everything():
     builtins.print = lambda *args, **kwargs: None
 
 
-if __name__ == "__main__":
-    pass
-    # if get_rank() != 0:
-    #     print("Running in silent mode for rank", get_rank())
-    #     silence_everything()
-
-
 @app.async_command()
 async def run(
     config_path: str = typer.Argument(
         ..., help="Path to experiment configuration toml file"
+    ),
+    ray_head_worker: bool = typer.Option(
+        False,
+        "--ray-head-worker",
+        "-rhw",
+        help="Run the Ray head worker. "
+        "This is useful for debugging and local development. ",
     ),
 ):
     """
@@ -58,12 +58,6 @@ async def run(
         config_path (str): Path to the configuration file.
         extra_args (str): Additional arguments for the module.
     """
-    # local_rank = get_rank()
-    # if get_rank() != 0:
-    #     print("Running in silent mode for rank", get_rank())
-    #     silence_everything()
-    #     logger.setLevel(logging.ERROR)  # Set logger to ERROR to reduce output
-
     try:
         from modeling.config.serde import (
             build_experiment_config,
@@ -74,7 +68,8 @@ async def run(
         logger.info("Running with config")
         logger.info(experiment_config.model_dump_json(serialize_as_any=True, indent=2))
         async with ExperimentManager.init_experiment(
-            exp_config=experiment_config
+            exp_config=experiment_config,
+            ray_head_worker=ray_head_worker,
         ) as experiment:
             await experiment.run()
 
@@ -122,7 +117,7 @@ def export(
     #     f" src/modeling/main.py run {export_path} --node-rank 0"
     # )
 
-    run_command = f"mdl run {export_path}"
+    run_command = f"mdl run {export_path} -rhw"
 
     serialize_experiment_config(exp_config, export_path, eof_comments=run_command)
     logger.info(
@@ -135,14 +130,7 @@ def export(
 
     if submit:
         logger.info("Running the experiment...")
-        asyncio.run(run(config_path=export_path.as_posix()))
-        # import subprocess
-
-        # subprocess.run(
-        #     run_command,
-        #     shell=True,
-        #     check=True,
-        # )
+        asyncio.run(run(config_path=export_path.as_posix(), ray_head_worker=True))
 
 
 if __name__ == "__main__":

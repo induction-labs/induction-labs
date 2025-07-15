@@ -2,15 +2,15 @@ from __future__ import annotations
 
 import logging
 from contextlib import contextmanager
-from typing import Any, Generator
 
+from modeling.modules.base_module import cast
 import ray
-import ray._private.services as services
 import ray.scripts.scripts as ray_cli
-from pydantic import AnyUrl
+from pydantic import AnyUrl, UrlConstraints
 from synapse.utils.logging import configure_logging
 
 from modeling.utils.temp_env import temp_env
+import json
 
 logger = configure_logging(__name__, level=logging.DEBUG)
 
@@ -27,13 +27,27 @@ HOST = "localhost"
 PORT = 6379
 
 
+class RayUrl(AnyUrl):
+    """ """
+
+    host_required = True
+
+    @property
+    def host(self) -> str:
+        """The required URL host."""
+        return cast(str, self._url.host)  # pyright: ignore[reportAttributeAccessIssue]
+
+    _constraints = UrlConstraints(allowed_schemes=["ray"])
+
+
 @contextmanager
-def initialize_ray_head() -> Generator[AnyUrl, Any, None]:
+def initialize_ray_head(resources: dict[str, float] | None = None):
+    logger.debug("Initializing Ray head node...")
     assert not ray.is_initialized(), "Ray is already initialized."
 
-    resolved_host = services.resolve_ip_for_localhost(HOST)
+    # resolved_host = services.resolve_ip_for_localhost(HOST)
     # Scheme here is whatever for now idk
-    ray_host = AnyUrl.build(scheme="ray", host=resolved_host, port=PORT)
+    ray_host = RayUrl.build(scheme="ray", host=HOST, port=PORT)
 
     try:
         with temp_env(
@@ -48,7 +62,7 @@ def initialize_ray_head() -> Generator[AnyUrl, Any, None]:
                 # "CUDA_VISIBLE_DEVICES": "",
             }
         ):
-            logger.debug(f"Starting Ray head node at {ray_host}")
+            logger.debug(f"Starting Ray head node at {ray_host} with {resources=}")
             ray_cli.start.main(
                 # URL interpolation is so troll
                 [
@@ -57,14 +71,19 @@ def initialize_ray_head() -> Generator[AnyUrl, Any, None]:
                     # TODO: Read address from ray_cli return
                     # f"--address={ray_host.host}:{ray_host.port}",
                     f"--port={str(ray_host.port)}",
+                    f"--resources={json.dumps(resources)}" if resources else "",
+                    # TODO: ray dashboard configuration
+                    "--dashboard-host=0.0.0.0",
                 ],
                 prog_name="ray",
                 # Otherwise click will os.exit on completion
                 standalone_mode=False,
             )
-            ray.init()
-        assert ray.is_initialized(), "Ray failed to initialize."
-        logger.debug(f"Ray head node started at {ray_host}")
+        ray.init()
+        assert ray.is_initialized(), (
+            "Ray failed to initialize. Please check the logs for more details."
+        )
+        logger.debug(f"Ray head node finished initializing at {ray_host}")
         yield ray_host
     except Exception as e:
         logger.error(f"Failed to initialize Ray head node: {e}")

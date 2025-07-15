@@ -50,7 +50,7 @@ dev = [
 flash-attn = [
   "flash-attn @ https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.3.9/flash_attn-2.6.3+cu128torch2.7-cp312-cp312-linux_x86_64.whl ; sys_platform == 'linux' and platform_machine == 'x86_64'",
 ]
-head = ["ray[default]"]
+head = ["ray[default,client]"]
 [tool.uv]
 default-groups = ["dev", "head"]
 # TODO: figure out how to only support linux aarch64/x86, and ban windows + darwin
