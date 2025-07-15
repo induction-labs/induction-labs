@@ -11,7 +11,6 @@ from modeling.config import (
     InstanceConfig,
     ModuleConfig,
     RunConfig,
-    GlobalState,
     RuntimeConfig,
 )
 from modeling.utils.elapsed_timer import elapsed_timer

@@ -8,7 +8,7 @@ requires-python = ">=3.12"
 dependencies = [
   "datasets>=3.6.0",
   "numpy>=2.2.6",
-  "ray>=2.45.0",
+  "ray[client]>=2.47.1",
   "torch==2.7.1",
   "torchvision>=0.22.1",
   "torchaudio>=2.7.1",
@@ -50,15 +50,9 @@ dev = [
 flash-attn = [
   "flash-attn @ https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.3.9/flash_attn-2.6.3+cu128torch2.7-cp312-cp312-linux_x86_64.whl ; sys_platform == 'linux' and platform_machine == 'x86_64'",
 ]
-qwen-omni-utils = [
-  "requests>=2.32.3",
-  "av>=14.4.0",
-  "librosa>=0.11.0",
-  "decord>=0.6.0",
-]
-
+head = ["ray[default]"]
 [tool.uv]
-default-groups = ["dev", "qwen-omni-utils"]
+default-groups = ["dev", "head"]
 # TODO: figure out how to only support linux aarch64/x86, and ban windows + darwin
 
 [tool.uv.sources]

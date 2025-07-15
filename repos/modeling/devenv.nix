@@ -30,7 +30,6 @@
   # https://devenv.sh/languages/
   languages.python = {
     libraries = [
-      # pkgs.cmake
     ];
     enable = true;
     uv = {

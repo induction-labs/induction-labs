@@ -33,7 +33,6 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from modeling.modules.base_module import BaseLITModule
     from modeling.data.data_module import BaseDataModule
-    from wandb.sdk.wandb_run import Run
     from torch.distributed.fsdp import MixedPrecisionPolicy
     import torch
 
@@ -52,7 +51,6 @@ _LITDataModule = TypeVar("_LITDataModule", bound="BaseDataModule")
 class RuntimeConfig(BaseModel):
     id: str
     start_time: datetime
-    tmp_dir: Path
 
 
 # TODO: Make checkpoint config use different backends and have it dynamically loaded and stuff
@@ -183,7 +181,7 @@ class ExperimentMetadata(BaseModel):
 
 
 @dataclass
-class GlobalState:
+class InstanceState:
     """
     Global state for the module, used to store shared information across different parts of the module.
     This can include things like the current step, global loss, etc.
@@ -192,7 +190,7 @@ class GlobalState:
     global_step: int
     mesh: "torch.distributed.device_mesh.DeviceMesh"
     generator: "torch.Generator"
-    wandb: Optional["Run"] = None
+    tmp_dir: Path
 
 
 class ModuleConfig(BaseModel, ABC):

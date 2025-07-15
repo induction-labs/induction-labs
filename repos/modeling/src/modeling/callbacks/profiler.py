@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import Any, Generator, Optional
 from modeling.distributed.distributed import InstanceConfig
-from modeling.initialization import UnifiedExperimentConfig
+from modeling.config import UnifiedExperimentConfig
 from synapse.utils.logging import configure_logging
 import logging
 from contextlib import contextmanager

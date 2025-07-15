@@ -6,7 +6,7 @@ from wandb.sdk.wandb_run import Run
 from contextlib import contextmanager
 from typing import Iterator
 
-from modeling.config import ExperimentConfig, GlobalState, UnifiedExperimentConfig
+from modeling.config import ExperimentConfig, UnifiedExperimentConfig
 from synapse.utils.logging import configure_logging
 from modeling.utils.tmpdir import TmpDirContext
 from synapse.elapsed_timer import elapsed_timer
@@ -132,18 +132,6 @@ class ExperimentInstance:
                     real_grad_norm = clip_grad_norm_(
                         self.module.model.parameters(), max_norm=clipped_grad_norm
                     )
-                    # embedding_grad_norm = clip_grad_norm_(
-                    #     self.module.model.action_token_embedding.parameters(),
-                    #     max_norm=float("inf"),
-                    # )
-                    # action_head_grad_norm = clip_grad_norm_(
-                    #     self.module.model.action_head.parameters(),
-                    #     max_norm=float("inf"),
-                    # )
-
-                    # clipped_grad_norm = min(
-                    #     real_grad_norm.item(), clipped_grad_norm
-                    # )
 
                     # Update weights
                     # with torch.profiler.record_function("optimizer_step"):
@@ -330,7 +318,6 @@ class ExperimentInstance:
                         datapack = unified_config.datapack.create_datapack(
                             unified_config
                         )
-                        assert tmpdir_context.tmpdir is not None
                         lit_module = unified_config.module.create_module(
                             unified_config.run,
                             unified_config.runtime_config,

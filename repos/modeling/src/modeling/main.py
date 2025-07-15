@@ -11,6 +11,7 @@ import os
 import warnings
 import builtins
 from synapse.video_loader.main import AsyncTyper
+import asyncio
 
 logger = configure_logging(
     __name__,
@@ -44,13 +45,10 @@ if __name__ == "__main__":
     #     silence_everything()
 
 
-@app.command()
-def run(
+@app.async_command()
+async def run(
     config_path: str = typer.Argument(
         ..., help="Path to experiment configuration toml file"
-    ),
-    node_rank: int = typer.Option(
-        ..., help="Node rank of the process (default is 0 for single-node runs)"
     ),
 ):
     """
@@ -60,39 +58,28 @@ def run(
         config_path (str): Path to the configuration file.
         extra_args (str): Additional arguments for the module.
     """
-    local_rank = get_rank()
-    if get_rank() != 0:
-        print("Running in silent mode for rank", get_rank())
-        silence_everything()
-        logger.setLevel(logging.ERROR)  # Set logger to ERROR to reduce output
+    # local_rank = get_rank()
+    # if get_rank() != 0:
+    #     print("Running in silent mode for rank", get_rank())
+    #     silence_everything()
+    #     logger.setLevel(logging.ERROR)  # Set logger to ERROR to reduce output
 
     try:
         from modeling.config.serde import (
             build_experiment_config,
         )
-        from modeling.initialization import ExperimentInstance
-        from modeling.config import InstanceConfig
-
-        instance_config = InstanceConfig(
-            node_rank=node_rank,
-            device_rank=local_rank,
-        )
-        logger.debug(
-            f"Running on instance: {instance_config.model_dump_json(serialize_as_any=True, indent=2)}"
-        )
+        from modeling.head import ExperimentManager
 
         experiment_config = build_experiment_config(Path(config_path))
         logger.info("Running with config")
         logger.info(experiment_config.model_dump_json(serialize_as_any=True, indent=2))
-        with ExperimentInstance.init_experiment(
-            exp_config=experiment_config, instance_config=instance_config
+        async with ExperimentManager.init_experiment(
+            exp_config=experiment_config
         ) as experiment:
-            experiment.run()
+            await experiment.run()
 
     except Exception as e:
-        if get_rank() == 0:
-            raise e
-        pass
+        raise e
 
 
 @app.command()
@@ -127,15 +114,15 @@ def export(
     export_path = exp_module_path(config_path, file_extension=".toml")
     export_path.parent.mkdir(parents=True, exist_ok=True)
 
-    run_command = (
-        f"torchrun --nproc_per_node={exp_config.run.distributed.devices_per_node}"
-        f" --nnodes {exp_config.run.distributed.num_nodes}"
-        " --node_rank 0"
-        " --rdzv_endpoint=127.0.0.1:29500"
-        f" src/modeling/main.py run {export_path} --node-rank 0"
-    )
+    # run_command = (
+    #     f"torchrun --nproc_per_node={exp_config.run.distributed.devices_per_node}"
+    #     f" --nnodes {exp_config.run.distributed.num_nodes}"
+    #     " --node_rank 0"
+    #     " --rdzv_endpoint=127.0.0.1:29500"
+    #     f" src/modeling/main.py run {export_path} --node-rank 0"
+    # )
 
-    # run_command = f"mdl run {export_path}"
+    run_command = f"mdl run {export_path}"
 
     serialize_experiment_config(exp_config, export_path, eof_comments=run_command)
     logger.info(
@@ -148,13 +135,14 @@ def export(
 
     if submit:
         logger.info("Running the experiment...")
-        import subprocess
+        asyncio.run(run(config_path=export_path.as_posix()))
+        # import subprocess
 
-        subprocess.run(
-            run_command,
-            shell=True,
-            check=True,
-        )
+        # subprocess.run(
+        #     run_command,
+        #     shell=True,
+        #     check=True,
+        # )
 
 
 if __name__ == "__main__":
