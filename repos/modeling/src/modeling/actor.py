@@ -4,10 +4,20 @@ from modeling.utils.typed_remote import (
 )
 from pydantic import BaseModel
 from modeling.config.distributed import InstanceConfig
+from modeling.config import UnifiedExperimentConfig, InstanceState
+from modeling.utils.fix_rng import fix_rng
+from synapse.utils.logging import configure_logging, logging
+from contextlib import AbstractContextManager
+from modeling.utils.tmpdir import TmpDirContext
+import torch
+from modeling.distributed.distributed import init_distributed, TorchUrl
+
+logger = configure_logging(__name__, level=logging.DEBUG)
 
 
 class ActorArgs(BaseModel):
     instance_config: InstanceConfig
+    experiment_config: UnifiedExperimentConfig
 
 
 class ExperimentActor(BaseActor[ActorArgs]):
@@ -15,10 +25,105 @@ class ExperimentActor(BaseActor[ActorArgs]):
     An example actor that can be used to run experiments in a distributed manner.
     """
 
+    state: InstanceState
+    distributed_context: AbstractContextManager
+    tmpdir_context: TmpDirContext
+
+    @property
+    def instance_config(self) -> InstanceConfig:
+        """
+        Return the instance configuration for this actor.
+        """
+        return self.args.instance_config
+
+    @property
+    def experiment_config(self) -> UnifiedExperimentConfig:
+        """
+        Return the experiment configuration for this actor.
+        """
+        return self.args.experiment_config
+
+    @property
+    def g(self) -> torch.Generator:
+        """
+        Return the random number generator for this actor.
+        This is useful for reproducibility in experiments.
+        """
+        return self.state.generator
+
+    @property
+    def mesh(self) -> torch.distributed.device_mesh.DeviceMesh:
+        """
+        Return the device mesh for this actor.
+        This is used for distributed training and operations.
+        """
+        return self.state.mesh
+
+    @property
+    def device(self) -> torch.device:
+        """
+        Return the device for this actor.
+        This is typically used for tensor operations.
+        """
+        return self.instance_config.device
+
     @remote_method
-    def health_check(self) -> None:
+    def get_ip(self) -> str:
+        """
+        Get the IP address of the actor.
+        This can be useful for debugging or logging purposes.
+        """
+        import socket
+
+        hostname = socket.gethostname()
+        local_ip = socket.gethostbyname(hostname)
+        return local_ip
+
+    def __init__(self, args: ActorArgs):
+        super().__init__(args)
+
+    @remote_method
+    def init_distributed(self, rank0_address: TorchUrl) -> None:
+        """
+        Initialize distributed training for this actor.
+        This method should be called before any distributed operations.
+        """
+        assert not hasattr(self, "state"), (
+            "This method should not be called after the actor has been initialized."
+        )
+        generator = fix_rng(self.args.experiment_config.run.seed, device=self.device)
+
+        self.distributed_context = init_distributed(
+            self.experiment_config.run.distributed,
+            self.instance_config,
+            rank0_address=rank0_address,
+        )
+        self.tmpdir_context = TmpDirContext()
+        device_mesh = self.distributed_context.__enter__()
+        (_, tmp_dir) = self.tmpdir_context.__enter__()
+        logger.info(f"Distributed training initialized for {self.instance_config=}")
+        self.state = InstanceState(
+            global_step=0,
+            generator=generator,
+            mesh=device_mesh,
+            tmp_dir=tmp_dir,
+        )
+
+    @remote_method
+    def shutdown(self) -> None:
+        """
+        Shutdown the actor.
+        This method should be called to clean up resources when the actor is no longer needed.
+        """
+        logger.info(f"Shutting down actor for {self.instance_config=}")
+        self.distributed_context.__exit__(None, None, None)
+        self.tmpdir_context.__exit__(None, None, None)
+
+    @remote_method
+    def health_check(self) -> float:
         """
         Run a health check on the experiment.
         """
         # Implement the logic to run the experiment here
-        print(f"Running health check on experiment with {self.args=}")
+        x = torch.rand(1, generator=self.g, device=self.device).item()
+        return x

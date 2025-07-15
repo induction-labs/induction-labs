@@ -9,13 +9,30 @@ import torch
 from contextlib import contextmanager
 from typing import Iterator
 from synapse.elapsed_timer import elapsed_timer
+from pydantic import AnyUrl, UrlConstraints
+from typing import cast
 
 logger = configure_logging(__name__, level=logging.INFO)
 
 
+class TorchUrl(AnyUrl):
+    """ """
+
+    host_required = True
+
+    @property
+    def host(self) -> str:
+        """The required URL host."""
+        return cast(str, self._url.host)  # pyright: ignore[reportAttributeAccessIssue]
+
+    _constraints = UrlConstraints(allowed_schemes=["tcp"])
+
+
 @contextmanager
 def init_distributed(
-    distributed_config: DistributedConfig, instance_config: InstanceConfig
+    distributed_config: DistributedConfig,
+    instance_config: InstanceConfig,
+    rank0_address: TorchUrl,
 ) -> Iterator[torch.distributed.device_mesh.DeviceMesh]:
     """
     Initialize torch.distributed for distributed training as a context manager.
@@ -47,13 +64,12 @@ def init_distributed(
         ) as timer:
             # Use env:// for now
             torch.distributed.init_process_group(
-                init_method="env://",
+                init_method=rank0_address.encoded_string(),
+                # init_method="env://",
                 backend="nccl",
                 device_id=instance_config.device,
-                # backend=distributed_config.backend,
-                # init_method=distributed_config.init_method,
-                # world_size=distributed_config.world_size,
-                # rank=instance_config.device_rank,
+                rank=global_rank,
+                world_size=distributed_config.world_size,
             )
             logger.debug(f"Process group initialized on rank {dist.get_rank()}. ")
 

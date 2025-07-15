@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
-import random
 import secrets
 import string
 from contextlib import asynccontextmanager
@@ -12,7 +10,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import AsyncIterator, Iterator, Optional
 
-import numpy as np
 import torch
 import wandb
 from ray.util.placement_group import (
@@ -35,6 +32,8 @@ from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 from ray.util.placement_group import (
     PlacementGroup,
 )
+from modeling.utils.fix_rng import fix_rng
+from modeling.distributed.distributed import TorchUrl
 
 logger = configure_logging(__name__, level=logging.DEBUG)
 
@@ -80,6 +79,14 @@ class RayActors:
         """
         for node_actors in self.actors:
             yield from node_actors
+
+    @property
+    def rank0(self) -> ExperimentActor:
+        """
+        Get the rank 0 actor (the first actor in the first node).
+        This is typically used for logging or other global operations.
+        """
+        return self.actors[0][0]
 
 
 @dataclass
@@ -265,33 +272,11 @@ class ExperimentManager:
         return None
 
     @staticmethod
-    def fix_rng(seed: int) -> torch.Generator:
-        os.environ["PYTHONHASHSEED"] = str(
-            seed
-        )  # make hash-based operations reproducible
-        os.environ["CUBLAS_WORKSPACE_CONFIG"] = (
-            ":4096:8"  # for reproducibility in cuBLAS
-        )
-
-        # https://docs.nvidia.com/cuda/cublas/index.html#results-reproducibility
-        random.seed(seed)  # Python RNG
-        np.random.seed(seed)  # NumPy RNG
-        torch.manual_seed(seed)  # CPU RNG
-        torch.cuda.manual_seed(seed)  # current GPU RNG
-        torch.cuda.manual_seed_all(seed)  # all-GPU RNGs
-        torch.backends.cudnn.deterministic = True
-        torch.backends.cudnn.benchmark = False
-
-        # # In PyTorch ≥1.8 you can also do:
-        torch.use_deterministic_algorithms(True)
-        g = torch.Generator()
-        g.manual_seed(seed)
-        return g
-
-    @staticmethod
+    @asynccontextmanager
     async def initialize_actors(
-        distributed_config: DistributedConfig, pg: PlacementGroup
-    ) -> RayActors:
+        experiment_config: UnifiedExperimentConfig, pg: PlacementGroup
+    ) -> AsyncIterator[RayActors]:
+        distributed_config = experiment_config.run.distributed
         actor_args = [
             [
                 (
@@ -307,7 +292,8 @@ class ExperimentManager:
                         instance_config=InstanceConfig(
                             node_rank=node_rank,
                             device_rank=device_rank,
-                        )
+                        ),
+                        experiment_config=experiment_config,
                     ),
                 )
                 for device_rank in range(distributed_config.devices_per_node)
@@ -324,7 +310,16 @@ class ExperimentManager:
         actors = await asyncio.gather(
             *[asyncio.gather(*per_node) for per_node in actor_promises]
         )
-        return RayActors(actors=actors)
+        try:
+            yield RayActors(actors=actors)
+        finally:
+            # Shutdown all actors
+            logger.debug("Shutting down all actors...")
+            shutdown_promises = [
+                actor.shutdown.remote() for per_node in actors for actor in per_node
+            ]
+            await asyncio.gather(*shutdown_promises)
+            logger.debug("All actors have been shut down.")
 
     @staticmethod
     def ray_head_resources(distributed_config: DistributedConfig):
@@ -354,7 +349,7 @@ class ExperimentManager:
             run=exp_config.run,
             metadata=exp_config.metadata,
         )
-        generator = ExperimentManager.fix_rng(unified_config.run.seed)
+        generator = fix_rng(unified_config.run.seed)
         head_resources = (
             ExperimentManager.ray_head_resources(
                 unified_config.run.distributed,
@@ -364,7 +359,7 @@ class ExperimentManager:
         )
 
         with (
-            elapsed_timer("Experiment.Init") as trainer_timer,
+            elapsed_timer("Experiment.Init"),
             TmpDirContext() as (_, tmp_dir),
             initialize_ray_head(head_resources) as ray_host,
         ):
@@ -377,37 +372,61 @@ class ExperimentManager:
             logger.debug(f"Placement group created: {pg_resources=}")
             # Wait here for worker processes to start
             with elapsed_timer("Experiment.WaitForPlacementGroup"):
+                # TODO: Put a timer on this and error if it takes too long
                 await pg.ready()
             logger.debug("Placement group is ready.")
-            with elapsed_timer("Experiment.InitActors"):
-                actors = await ExperimentManager.initialize_actors(
-                    unified_config.run.distributed, pg
+
+            async with ExperimentManager.initialize_actors(
+                unified_config, pg
+            ) as actors:
+                logger.debug(f"Actors created: {actors}")
+
+                with elapsed_timer("Experiment.InitDistributed"):
+                    rank0_host = await actors.rank0.get_ip.remote()
+                    rank0_address = TorchUrl.build(
+                        host=rank0_host,
+                        port=23456,
+                        scheme="tcp",
+                    )
+                    logger.debug(f"Rank 0 address: {rank0_address}")
+                    await asyncio.gather(
+                        *[
+                            actor.init_distributed.remote(rank0_address)
+                            for actor in actors.all_actors
+                        ]
+                    )
+                logger.debug("Distributed training initialized for all actors.")
+
+                health_checks = await asyncio.gather(
+                    *[actor.health_check.remote() for actor in actors.all_actors]
                 )
-            logger.debug(f"Actors initialized: {actors}")
-            health_checks = await asyncio.gather(
-                *[actor.health_check.remote() for actor in actors.all_actors]
-            )
-            logger.debug(f"Health checks completed: {health_checks}")
-
-            manager_state = ManagerState(
-                global_step=0,
-                tmp_dir=tmp_dir,
-                generator=generator,
-                wandb=wandb_run,
-                ray_host=ray_host,
-                actors=actors,
-            )
-
-            try:
-                yield ExperimentManager(
-                    exp_config=unified_config,
-                    state=manager_state,
+                # Make sure all health check values are the same
+                assert all(
+                    health_check == health_checks[0] for health_check in health_checks
+                ), (
+                    f"Health checks returned different values across actors. {health_checks=}"
                 )
-            finally:
-                # trainer_timer.print_timing_tree(logger)
+                logger.debug(f"Health checks completed: {health_checks}")
 
-                # Clean up temporary directory
-                if manager_state.wandb is not None:
-                    manager_state.wandb.finish()
-                global_timer.__exit__(None, None, None)
-                global_timer.print_timing_tree(logger)
+                manager_state = ManagerState(
+                    global_step=0,
+                    tmp_dir=tmp_dir,
+                    generator=generator,
+                    wandb=wandb_run,
+                    ray_host=ray_host,
+                    actors=actors,
+                )
+
+                try:
+                    yield ExperimentManager(
+                        exp_config=unified_config,
+                        state=manager_state,
+                    )
+                finally:
+                    # trainer_timer.print_timing_tree(logger)
+
+                    # Clean up temporary directory
+                    if manager_state.wandb is not None:
+                        manager_state.wandb.finish()
+                    global_timer.__exit__(None, None, None)
+                    global_timer.print_timing_tree(logger)
