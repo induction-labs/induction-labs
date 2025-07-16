@@ -4,15 +4,35 @@ from modeling.utils.typed_remote import (
 )
 from pydantic import BaseModel
 from modeling.config.distributed import InstanceConfig
-from modeling.config import UnifiedExperimentConfig, InstanceState
+from modeling.config import UnifiedExperimentConfig
 from modeling.utils.fix_rng import fix_rng
 from synapse.utils.logging import configure_logging, logging
 from contextlib import AbstractContextManager
-from modeling.utils.tmpdir import TmpDirContext
 import torch
 from modeling.distributed.distributed import init_distributed, TorchUrl
+from dataclasses import dataclass
+from pathlib import Path
+from typing import TYPE_CHECKING
+import os
+
+if TYPE_CHECKING:
+    from modeling.modules.base_module import BaseLITModule, OptimizerConfig
 
 logger = configure_logging(__name__, level=logging.DEBUG)
+
+
+@dataclass
+class InstanceState:
+    """
+    Global state for the module, used to store shared information across different parts of the module.
+    This can include things like the current step, global loss, etc.
+    """
+
+    global_step: int
+    mesh: "torch.distributed.device_mesh.DeviceMesh"
+    generator: "torch.Generator"
+    module: "BaseLITModule"
+    optimizer: "OptimizerConfig"
 
 
 class ActorArgs(BaseModel):
@@ -27,7 +47,6 @@ class ExperimentActor(BaseActor[ActorArgs]):
 
     state: InstanceState
     distributed_context: AbstractContextManager
-    tmpdir_context: TmpDirContext
 
     @property
     def instance_config(self) -> InstanceConfig:
@@ -98,15 +117,54 @@ class ExperimentActor(BaseActor[ActorArgs]):
             self.instance_config,
             rank0_address=rank0_address,
         )
-        self.tmpdir_context = TmpDirContext()
         device_mesh = self.distributed_context.__enter__()
-        (_, tmp_dir) = self.tmpdir_context.__enter__()
         logger.info(f"Distributed training initialized for {self.instance_config=}")
+
+        module = self.experiment_config.module.create_module(
+            run_config=self.experiment_config.run,
+            instance_config=self.instance_config,
+        )
+        optimizer_state = module.configure_optimizers()
         self.state = InstanceState(
             global_step=0,
             generator=generator,
             mesh=device_mesh,
-            tmp_dir=tmp_dir,
+            module=module,
+            optimizer=optimizer_state,
+        )
+
+    @property
+    def model_weights_dir(self) -> Path:
+        """
+        Return the directory where model weights are stored.
+        This is typically used for saving and loading model checkpoints.
+        """
+        return self.experiment_config.runtime_config.tmp_dir / "model_weights"
+
+    @remote_method
+    def download_weights(self) -> None:
+        """
+        Download the model weights for the module.
+        This method should be called after the actor has been initialized.
+        This should only be called on global_rank 0
+        """
+        assert hasattr(self, "state"), (
+            "This method should not be called before the actor has been initialized."
+        )
+        os.makedirs(self.model_weights_dir, exist_ok=True)
+        self.state.module.download_weights(self.model_weights_dir)
+
+    @remote_method
+    def configure_model(self) -> None:
+        """
+        Configure the model for the actor.
+        """
+        assert hasattr(self, "state"), (
+            "This method should not be called before the actor has been initialized."
+        )
+        os.makedirs(self.model_weights_dir, exist_ok=True)
+        self.state.module.configure_model(
+            device_mesh=self.mesh, weights_dir=self.model_weights_dir
         )
 
     @remote_method
@@ -117,7 +175,6 @@ class ExperimentActor(BaseActor[ActorArgs]):
         """
         logger.info(f"Shutting down actor for {self.instance_config=}")
         self.distributed_context.__exit__(None, None, None)
-        self.tmpdir_context.__exit__(None, None, None)
 
     @remote_method
     def health_check(self) -> float:

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from modeling.config import RunConfig, RuntimeConfig, InstanceConfig
+from modeling.config import RunConfig, InstanceConfig
 from modeling.modules.text_pretrain.default import TextPretrainLITConfig
 from transformers.models.qwen2_5_omni import (
     Qwen2_5OmniProcessor,
@@ -47,7 +47,6 @@ class Qwen25OLITConfig(TextPretrainLITConfig):
     def create_module(
         self,
         run_config: RunConfig,
-        runtime_config: RuntimeConfig,
         instance_config: InstanceConfig,
     ) -> Qwen25OLIT:
-        return Qwen25OLIT(self, run_config, runtime_config, instance_config)
+        return Qwen25OLIT(self, run_config, instance_config)

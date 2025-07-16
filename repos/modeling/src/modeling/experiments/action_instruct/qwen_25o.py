@@ -37,8 +37,8 @@ Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
         # checkpoint_path=CloudPath.from_str(
         #     "gs://induction-labs/checkpoints/qwen25o_mouse_follow/test_noise_2/2025-07-04T04-05-09/step_-1"
         # )
-        model_name="Qwen/Qwen2.5-Omni-7B",
-        tokenizer_name="Qwen/Qwen2.5-Omni-7B",
+        model_name="Qwen/Qwen2.5-Omni-3B",
+        tokenizer_name="Qwen/Qwen2.5-Omni-3B",
         freeze_vision=True,
         freeze_network=False,
         freeze_action_embedding=False,

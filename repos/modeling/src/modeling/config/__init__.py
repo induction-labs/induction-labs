@@ -1,9 +1,10 @@
 from __future__ import annotations
-from modeling.utils.cloud_path import path_validator
 
+import logging
 from abc import ABC, abstractmethod
 from datetime import UTC, datetime
-from typing import Annotated, Any, Generic, Self, TypeVar
+from pathlib import Path
+from typing import TYPE_CHECKING, Annotated, Any, Generic, Optional, Self, TypeVar
 
 from pydantic import (
     BaseModel,
@@ -13,28 +14,20 @@ from pydantic import (
     field_serializer,
     model_validator,
 )
+from synapse.utils.logging import configure_logging
 
-
+from modeling.types import Accelerator, AttentionImplementation, DType
+from modeling.utils.cloud_path import BeforeValidator, CloudPath, path_validator
 from modeling.utils.git import get_git_commit_sha, get_git_commit_sha_short
-from modeling.types import Accelerator, DType, AttentionImplementation
 
 from .distributed import DistributedConfig, InstanceConfig
 from .wandb import WandbConfig
-from typing import Optional
-from pathlib import Path
-from modeling.utils.cloud_path import BeforeValidator, CloudPath
-
-
-from dataclasses import dataclass
-from synapse.utils.logging import configure_logging
-import logging
-from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from modeling.modules.base_module import BaseLITModule
-    from modeling.data.data_module import BaseDataModule
     from torch.distributed.fsdp import MixedPrecisionPolicy
-    import torch
+
+    from modeling.data.data_module import BaseDataModule
+    from modeling.modules.base_module import BaseLITModule
 
 
 logger = configure_logging(__name__, logging.DEBUG)
@@ -51,6 +44,7 @@ _LITDataModule = TypeVar("_LITDataModule", bound="BaseDataModule")
 class RuntimeConfig(BaseModel):
     id: str
     start_time: datetime
+    tmp_dir: Path
 
 
 # TODO: Make checkpoint config use different backends and have it dynamically loaded and stuff
@@ -180,19 +174,6 @@ class ExperimentMetadata(BaseModel):
     commit_short: str = Field(default_factory=get_git_commit_sha_short)
 
 
-@dataclass
-class InstanceState:
-    """
-    Global state for the module, used to store shared information across different parts of the module.
-    This can include things like the current step, global loss, etc.
-    """
-
-    global_step: int
-    mesh: "torch.distributed.device_mesh.DeviceMesh"
-    generator: "torch.Generator"
-    tmp_dir: Path
-
-
 class ModuleConfig(BaseModel, ABC):
     config_path: str
 
@@ -225,7 +206,6 @@ class ModuleConfig(BaseModel, ABC):
     def create_module(
         self,
         run_config: RunConfig,
-        runtime_config: RuntimeConfig,
         instance_config: InstanceConfig,
     ) -> "BaseLITModule":
         """
@@ -263,7 +243,6 @@ class SerializedModuleConfig(ModuleConfig):
     def create_module(
         self,
         run_config: RunConfig,
-        runtime_config: RuntimeConfig,
         instance_config: InstanceConfig,
     ) -> "BaseLITModule":
         """

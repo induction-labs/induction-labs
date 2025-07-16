@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from modeling.config import RunConfig, RuntimeConfig, InstanceConfig
+from modeling.config import RunConfig, InstanceConfig
 from transformers.models.llama.modeling_llama import LlamaForCausalLM
 from modeling.modules.text_pretrain.default import (
     TextPretrainLIT,
@@ -24,7 +24,6 @@ class Llama3LITConfig(TextPretrainLITConfig):
     def create_module(
         self,
         run_config: RunConfig,
-        runtime_config: RuntimeConfig,
         instance_config: InstanceConfig,
     ) -> Llama3LIT:
-        return Llama3LIT(self, run_config, runtime_config, instance_config)
+        return Llama3LIT(self, run_config, instance_config)

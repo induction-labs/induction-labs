@@ -7,7 +7,6 @@ from modeling.config import (
     DatapackConfig,
     RunConfig,
     InstanceConfig,
-    RuntimeConfig,
 )
 from modeling.data.text_train import TextPretrainDatapackConfig, TextPretrainDataSample
 from modeling.modules.text_module import TextLIT, TextLITConfig, MODEL_TYPE
@@ -147,7 +146,6 @@ class TextPretrainLITConfig(TextLITConfig):
     def create_module(
         self,
         run_config: RunConfig,
-        runtime_config: RuntimeConfig,
         instance_config: InstanceConfig,
     ) -> TextPretrainLIT:
-        return TextPretrainLIT(self, run_config, runtime_config, instance_config)
+        return TextPretrainLIT(self, run_config, instance_config)

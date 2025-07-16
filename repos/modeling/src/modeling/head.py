@@ -13,27 +13,22 @@ from typing import AsyncIterator, Iterator, Optional
 import torch
 import wandb
 from ray.util.placement_group import (
+    PlacementGroup,
     placement_group,
 )
+from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 from synapse.elapsed_timer import elapsed_timer
 from synapse.utils.logging import configure_logging
 from wandb.sdk.wandb_run import Run
 
 from modeling.actor import ActorArgs, ExperimentActor
-from modeling.config import ExperimentConfig, UnifiedExperimentConfig
+from modeling.config import ExperimentConfig, RuntimeConfig, UnifiedExperimentConfig
 from modeling.config.distributed import DistributedConfig, InstanceConfig
-from modeling.distributed.ray_head import initialize_ray_head, RayUrl
-from modeling.modules.base_module import (
-    RuntimeConfig,
-)
+from modeling.distributed.distributed import TorchUrl
+from modeling.distributed.ray_head import RayUrl, initialize_ray_head
+from modeling.utils.fix_rng import fix_rng
 from modeling.utils.tmpdir import TmpDirContext
 from modeling.utils.typed_remote import RemoteArgs
-from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
-from ray.util.placement_group import (
-    PlacementGroup,
-)
-from modeling.utils.fix_rng import fix_rng
-from modeling.distributed.distributed import TorchUrl
 
 logger = configure_logging(__name__, level=logging.DEBUG)
 
@@ -88,6 +83,12 @@ class RayActors:
         """
         return self.actors[0][0]
 
+    def __len__(self) -> int:
+        """
+        Return the total number of actors across all nodes.
+        """
+        return sum(len(node_actors) for node_actors in self.actors)
+
 
 @dataclass
 class ManagerState:
@@ -127,7 +128,10 @@ class ExperimentManager:
         This method is a placeholder for the actual run logic.
         """
         # # Setup data and model
-
+        # datapack = cast(
+        #     BaseDataModule,
+        #     self.exp_config.datapack.create_datapack(full_config=self.exp_config),
+        # )
         # self.datapack.setup("fit")
         # self.module.configure_model(self.state.mesh)
 
@@ -243,7 +247,7 @@ class ExperimentManager:
         #     logger.info(f"Training completed. Total steps: {self.state.global_step}")
 
     @staticmethod
-    def create_runtime_config() -> RuntimeConfig:
+    def create_runtime_config(tmp_dir: Path) -> RuntimeConfig:
         """
         Initialize a WandbLogger instance with the configuration.
         """
@@ -251,6 +255,7 @@ class ExperimentManager:
         return RuntimeConfig(
             id=id,
             start_time=datetime.now(tz=UTC),
+            tmp_dir=tmp_dir,
         )
 
     @staticmethod
@@ -341,7 +346,9 @@ class ExperimentManager:
         Initialize the experiment configuration from a given path.
         """
         global_timer = elapsed_timer("Experiment.Run").__enter__()
-        runtime_config = ExperimentManager.create_runtime_config()
+        (tmpdir_context, tmp_dir) = TmpDirContext().__enter__()
+
+        runtime_config = ExperimentManager.create_runtime_config(tmp_dir)
         unified_config = UnifiedExperimentConfig(
             runtime_config=runtime_config,
             datapack=exp_config.datapack,
@@ -360,7 +367,6 @@ class ExperimentManager:
 
         with (
             elapsed_timer("Experiment.Init"),
-            TmpDirContext() as (_, tmp_dir),
             initialize_ray_head(head_resources) as ray_host,
         ):
             wandb_run = ExperimentManager.init_wandb(unified_config)
@@ -379,7 +385,7 @@ class ExperimentManager:
             async with ExperimentManager.initialize_actors(
                 unified_config, pg
             ) as actors:
-                logger.debug(f"Actors created: {actors}")
+                logger.debug(f"Actors created: {len(actors)=}")
 
                 with elapsed_timer("Experiment.InitDistributed"):
                     rank0_host = await actors.rank0.get_ip.remote()
@@ -408,6 +414,16 @@ class ExperimentManager:
                 )
                 logger.debug(f"Health checks completed: {health_checks}")
 
+                with elapsed_timer("Experiment.DownloadWeights"):
+                    await actors.rank0.download_weights.remote()
+                logger.debug("Model weights downloaded to actors.")
+
+                with elapsed_timer("Experiment.ConfigureModel"):
+                    await asyncio.gather(
+                        *[actor.configure_model.remote() for actor in actors.all_actors]
+                    )
+                logger.debug("Model configured for all actors.")
+
                 manager_state = ManagerState(
                     global_step=0,
                     tmp_dir=tmp_dir,
@@ -423,6 +439,7 @@ class ExperimentManager:
                         state=manager_state,
                     )
                 finally:
+                    tmpdir_context.__exit__(None, None, None)
                     # trainer_timer.print_timing_tree(logger)
 
                     # Clean up temporary directory

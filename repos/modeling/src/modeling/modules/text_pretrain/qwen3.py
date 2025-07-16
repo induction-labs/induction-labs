@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from modeling.config import RunConfig, RuntimeConfig, InstanceConfig
+from modeling.config import RunConfig, InstanceConfig
 from transformers.models.qwen3.modeling_qwen3 import (
     Qwen3ForCausalLM,
 )
@@ -26,7 +26,6 @@ class Qwen3LITConfig(TextPretrainLITConfig):
     def create_module(
         self,
         run_config: RunConfig,
-        runtime_config: RuntimeConfig,
         instance_config: InstanceConfig,
     ) -> Qwen3LIT:
-        return Qwen3LIT(self, run_config, runtime_config, instance_config)
+        return Qwen3LIT(self, run_config, instance_config)

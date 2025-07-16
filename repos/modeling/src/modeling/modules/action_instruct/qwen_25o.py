@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 import time
-from pathlib import Path
-from typing import Any, cast
+from typing import Any, TypeVar
 
 import numpy as np
 import torch
@@ -20,7 +19,6 @@ from modeling.config import (
     DatapackConfig,
     InstanceConfig,
     RunConfig,
-    RuntimeConfig,
 )
 from modeling.config.distributed import MeshAxis
 from modeling.data.video_action import ActionDatapackConfig, ActionDataSample
@@ -30,12 +28,23 @@ from modeling.utils.class_property import class_property
 from .qwen_25o_actions import (
     Qwen2_5OmniActionCausalLMOutputWithPast,
     Qwen2_5OmniThinkerActionConfig,
-    Qwen2_5OmniThinkerForActionModelling,
+    Qwen2_5OmniActionModel,
 )
 
 logger = configure_logging(__name__, level=logging.DEBUG)
 
-MODEL_TYPE = Qwen2_5OmniThinkerForActionModelling
+MODEL_TYPE = Qwen2_5OmniActionModel
+
+T = TypeVar("T")
+
+
+def not_none(value: T | None) -> T:
+    """
+    Ensure that the value is not None.
+    Raises an AssertionError if the value is None.
+    """
+    assert value is not None, "Value cannot be None"
+    return value
 
 
 def __call__(self, x: float):
@@ -139,49 +148,43 @@ class Qwen25OActionLIT(
             freeze_action_embedding=module_config.freeze_action_embedding,
         )
 
-        model = MODEL_TYPE.from_pretrained(
-            module_config.model_name,
-            config=config,
-            torch_dtype=self.dtype,
-            attn_implementation=self.attn_impl,
-            # local_files_only=True,
-        ).train()
+        model = MODEL_TYPE(config)
         assert isinstance(model, MODEL_TYPE), (
             f"Expected model to be of type Qwen2_5OmniThinkerForActionModelling, "
             f"got {type(model)}"
         )
         return model
 
-    def load_weights(self, tmpdir: Path) -> Qwen2_5OmniThinkerForActionModelling:
-        """
-        Load the model weights from the specified checkpoint directory.
-        This method should handle the loading of pre-trained weights or checkpoint files.
-        """
-        # logger.debug(f"Loading model weights from {tmpdir}")
-        # Load the model weights and dispatch them to the appropriate devices
-        logger.debug(f"Loading model weights from {tmpdir} to device {self.device}")
-        self.model.to_empty(device=self.device)
-        # This is so stupid - but if you try to load the model on multiple devices fucking huggingface throws an error
-        # Huggingface for sure is real company :/
-        delay = self.instance_config.device_rank * 0.5
-        time.sleep(delay)
-        loaded_model = MODEL_TYPE.from_pretrained(
-            self.module_config.model_name,
-            config=self.model.config,
-            torch_dtype=self.dtype,
-            device_map={
-                "": self.device  # Use the device index for the model
-            },  # Ensure model is loaded on the correct device
-            attn_implementation=self.attn_impl,
-            local_files_only=True,
-        ).train()
+    # def load_weights(self, tmpdir: Path) -> Qwen2_5OmniThinkerForActionModelling:
+    #     """
+    #     Load the model weights from the specified checkpoint directory.
+    #     This method should handle the loading of pre-trained weights or checkpoint files.
+    #     """
+    #     # logger.debug(f"Loading model weights from {tmpdir}")
+    #     # Load the model weights and dispatch them to the appropriate devices
+    #     logger.debug(f"Loading model weights from {tmpdir} to device {self.device}")
+    #     self.model.to_empty(device=self.device)
+    #     # This is so stupid - but if you try to load the model on multiple devices fucking huggingface throws an error
+    #     # Huggingface for sure is real company :/
+    #     delay = self.instance_config.device_rank * 0.5
+    #     time.sleep(delay)
+    #     # loaded_model = MODEL_TYPE.from_pretrained(
+    #     #     self.module_config.model_name,
+    #     #     config=self.model.config,
+    #     #     torch_dtype=self.dtype,
+    #     #     device_map={
+    #     #         "": self.device  # Use the device index for the model
+    #     #     },  # Ensure model is loaded on the correct device
+    #     #     attn_implementation=self.attn_impl,
+    #     #     local_files_only=True,
+    #     # ).train()
 
-        assert isinstance(loaded_model, MODEL_TYPE), (
-            f"Expected loaded_model to be of type Qwen2_5OmniThinkerForActionModelling, "
-            f"got {type(loaded_model)}"
-        )
+    #     assert isinstance(loaded_model, MODEL_TYPE), (
+    #         f"Expected loaded_model to be of type Qwen2_5OmniThinkerForActionModelling, "
+    #         f"got {type(loaded_model)}"
+    #     )
 
-        return cast(MODEL_TYPE, loaded_model)
+    #     return cast(MODEL_TYPE, loaded_model)
 
     def run_training_step(self, inputs: ActionDataSample):
         # Forward pass through the model
@@ -200,7 +203,7 @@ class Qwen25OActionLIT(
         This method is called by run_training_step after the forward pass.
         """
         output_actions = (
-            outputs.action_outputs[inputs.action_tokens]
+            not_none(outputs.action_outputs)[inputs.action_tokens]
             .reshape(-1, 2, 3)
             .to(device=self.device, dtype=self.dtype)
         )
@@ -346,17 +349,19 @@ class Qwen25OActionLIT(
         }
         # fully_shard(self.model.visual, **fsdp_config)
 
-        for layer_id, transformer_block in enumerate(self.model.model.layers):
+        for layer_id, transformer_block in enumerate(self.model.thinker.model.layers):
             # Activation checkpointing kinda broken
             # For now this is broken with HF models https://github.com/huggingface/transformers/issues/34928
 
-            reshard_after_forward = int(layer_id) < len(self.model.model.layers) - 1
+            reshard_after_forward = (
+                int(layer_id) < len(self.model.thinker.model.layers) - 1
+            )
             fully_shard(
                 transformer_block,
                 **fsdp_config,
                 reshard_after_forward=reshard_after_forward,
             )
-            self.model.model.layers[layer_id] = transformer_block
+            self.model.thinker.model.layers[layer_id] = transformer_block
 
         return fully_shard(
             self.model,
@@ -392,7 +397,6 @@ class Qwen25OActionLITConfig(BaseModuleConfig):
     def create_module(
         self,
         run_config: RunConfig,
-        runtime_config: RuntimeConfig,
         instance_config: InstanceConfig,
     ) -> Qwen25OActionLIT:
-        return Qwen25OActionLIT(self, run_config, runtime_config, instance_config)
+        return Qwen25OActionLIT(self, run_config, instance_config)

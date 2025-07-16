@@ -3,6 +3,7 @@ from torch import nn
 
 from typing import Optional, Union
 from transformers.generation.utils import GenerationMixin
+from transformers.models.qwen2_5_omni import Qwen2_5OmniPreTrainedModel
 from transformers.models.qwen2_5_omni.modeling_qwen2_5_omni import (
     Qwen2_5OmniThinkerTextModel,
     Qwen2_5OmniVisionEncoder,
@@ -508,6 +509,24 @@ class Qwen2_5OmniThinkerForActionModelling(
             model_inputs["pixel_values_videos"] = None
 
         return model_inputs
+
+
+class Qwen2_5OmniActionModel(Qwen2_5OmniPreTrainedModel, GenerationMixin):
+    config_class = Qwen2_5OmniThinkerActionConfig
+    base_model_prefix = "model"
+    thinker: Qwen2_5OmniThinkerForActionModelling
+
+    def __init__(self, config: Qwen2_5OmniThinkerActionConfig):
+        super().__init__(config)
+        self.thinker = Qwen2_5OmniThinkerForActionModelling(config)
+
+        self.post_init()
+
+    def forward(self, **kwargs) -> Qwen2_5OmniActionCausalLMOutputWithPast:
+        """
+        Override the forward method to return the custom output type.
+        """
+        return self.thinker(**kwargs)
 
 
 async def main():

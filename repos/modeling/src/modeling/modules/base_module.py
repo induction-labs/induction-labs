@@ -5,13 +5,13 @@ from enum import Enum
 from pathlib import Path
 from functools import partial
 
+from accelerate import load_checkpoint_and_dispatch
 from modeling.utils.cloud_path import CloudPath
 import torch
 from modeling.config import (
     InstanceConfig,
     ModuleConfig,
     RunConfig,
-    RuntimeConfig,
 )
 from modeling.utils.elapsed_timer import elapsed_timer
 from modeling.utils.get_attn_impl import check_attn_impl
@@ -22,14 +22,12 @@ from torch.distributed.fsdp import FSDPModule, MixedPrecisionPolicy
 from transformers.modeling_utils import PreTrainedModel
 from typing import Any, Generic, Literal, TypeVar, cast, final
 from synapse.utils.logging import configure_logging
-import os
 from modeling.checkpoints.load import download_model_checkpoint
 from pydantic import BaseModel
 from torch.optim import Optimizer
 from torch.optim.lr_scheduler import LRScheduler
 import logging
 from modeling.utils.class_property import class_property
-
 
 logger = configure_logging(
     __file__,
@@ -85,7 +83,6 @@ class BaseModuleConfig(ModuleConfig):
     def create_module(
         self,
         run_config: RunConfig,
-        runtime_config: RuntimeConfig,
         instance_config: InstanceConfig,
     ) -> "BaseLITModule": ...
 
@@ -149,37 +146,26 @@ class BaseLITModule(ABC, Generic[MODEL_TYPE, DATA_TYPE, CONFIG_TYPE]):
     def model_config(self) -> PretrainedConfig:
         return self.model.config
 
-    @property
-    def tmp_dir(self) -> Path:
-        """
-        Returns the temporary directory path where model weights and checkpoints are stored.
-        This is useful for downloading and loading model weights.
-        """
-        return self.runtime_config.tmp_dir / "module"
-
     @final
     def __init__(
         self,
         module_config: CONFIG_TYPE,
         run_config: RunConfig,
-        runtime_config: RuntimeConfig,
         instance_config: InstanceConfig,
     ):
-        self.runtime_config = runtime_config
+        # self.runtime_config = runtime_config
         self.instance_config = instance_config
         self.module_config = module_config
         self.run_config = run_config
         self.attn_impl = run_config.attn_impl
         self.dtype = run_config.precision.torch_dtype
-        os.makedirs(self.tmp_dir, exist_ok=True)
 
         check_attn_impl(self.attn_impl)
         logger.debug(f"Using attention implementation: {self.attn_impl}, {self.dtype=}")
         if self.run_config.accelerator == "cuda":
             torch.cuda.reset_peak_memory_stats()
-        self.model = self.init_model_meta()
-        # TODO: Move this to a separate method
-        # self.download_weights(self.tmp_dir)
+        with torch.device("meta"):
+            self.model = self.init_model_meta()
 
     # @abstractmethod
     @final
@@ -217,13 +203,16 @@ class BaseLITModule(ABC, Generic[MODEL_TYPE, DATA_TYPE, CONFIG_TYPE]):
         """
 
     @final
-    def configure_model(self, device_mesh: DeviceMesh) -> None:
+    def configure_model(self, device_mesh: DeviceMesh, weights_dir: Path) -> None:
         # We need to ensure that all models are fsdp because that is we use by default
         logger.debug("Configuring model for FSDP sharding...")
 
         if isinstance(self.model, FSDPModule):
-            return  # already configured
-        self.model = self.load_weights(self.tmp_dir)
+            raise RuntimeError(
+                "Model is already sharded with FSDP. This should not happen, please report this issue."
+            )
+        # TODO: We should probably shard the model first and load sharded weights
+        self.model = self.load_weights(weights_dir)
 
         # Very specific order here:
         # 1. Enable activation checkpointing if configured
@@ -269,6 +258,7 @@ class BaseLITModule(ABC, Generic[MODEL_TYPE, DATA_TYPE, CONFIG_TYPE]):
         """
         Abstract method to be implemented by subclasses for downloading model weights.
         """
+
         download_model_checkpoint(
             tmpdir,
             self.module_config.model_name,
@@ -283,41 +273,52 @@ class BaseLITModule(ABC, Generic[MODEL_TYPE, DATA_TYPE, CONFIG_TYPE]):
         logger.debug(f"Loading model weights from {tmpdir} to device {self.device}")
         # Load the model weights and dispatch them to the appropriate devices
         self.model.to_empty(device=self.device)
+        self.model.tie_weights()
+        tf_logger = logging.getLogger("accelerate.utils.modeling")
+
+        class _HideUnusedWeights(logging.Filter):
+            def filter(self, record):
+                return "were not used when initializing" not in record.getMessage()
+
+        tf_logger.addFilter(_HideUnusedWeights())
+
+        # for shard in sorted(glob(str(tmpdir / "*.safetensors"))):
+        #     missing, unexpected = load_model(
+        #         self.model,
+        #         shard,
+        #         strict=True,
+        #         # Use device_rank for gpu
+        #         device=self.instance_config.device_rank,
+        #     )
+        #     if unexpected:  # normally empty for HF-converted weights
+        #         print(f"⚠️  {len(unexpected)=} in {Path(shard).name}")
+        # self.model.init_weights()
         # For now we load from hf only bc load_checkpoint_and_dispatch is broken
-        # safetensors_rust.SafetensorError: device cuda is invalid
 
-        loaded_model = self.model_cls.from_pretrained(
-            self.module_config.model_name,
-            config=self.model.config,
-            torch_dtype=self.dtype,
-            device_map={
-                "": self.device  # Use the device index for the model
-            },  # Ensure model is loaded on the correct device
-            attn_implementation=self.attn_impl,
+        # TODO: Either figure out how accelerate load_checkpoint_and_dispatch works in detail
+        # TODO: or just use the HF load_model method
+        loaded_model = load_checkpoint_and_dispatch(
+            self.model,
+            checkpoint=tmpdir,  # hub ID or local folder
+            device_map={"": self.instance_config.device_rank},
+            dtype=self.model.dtype,
         )
-
-        # loaded_model = load_checkpoint_and_dispatch(
-        #     self.model,
-        #     checkpoint=tmpdir,  # hub ID or local folder
-        #     device_map={"": self.device},
-        #     dtype=self.model.dtype,
-        # )
 
         return cast(MODEL_TYPE, loaded_model)
 
-    @final
-    def wandb_log(
-        self, global_state: GlobalState, metrics: dict[str, Any], commit: bool = False
-    ) -> None:
-        """
-        Log metrics to Wandb if available.
-        This method is a wrapper around the logger's log_dict method.
-        Should not call wandb commit except in trainer.
-        # TODO: Rewrite with a wandb commit callback thing.
-        """
-        # logger.info(metrics)
-        if global_state.wandb is not None:
-            global_state.wandb.log(metrics, commit=commit)
+    # @final
+    # def wandb_log(
+    #     self, global_state: GlobalState, metrics: dict[str, Any], commit: bool = False
+    # ) -> None:
+    #     """
+    #     Log metrics to Wandb if available.
+    #     This method is a wrapper around the logger's log_dict method.
+    #     Should not call wandb commit except in trainer.
+    #     # TODO: Rewrite with a wandb commit callback thing.
+    #     """
+    #     # logger.info(metrics)
+    #     if global_state.wandb is not None:
+    #         global_state.wandb.log(metrics, commit=commit)
 
     @abstractmethod
     def run_validation_step(
@@ -357,8 +358,7 @@ class BaseLITModule(ABC, Generic[MODEL_TYPE, DATA_TYPE, CONFIG_TYPE]):
     def training_step(
         self,
         inputs: DATA_TYPE,
-        global_state: GlobalState,
-    ):
+    ) -> tuple[torch.Tensor, dict[str, Any]]:
         # Forward pass through the model
         assert self.model.training, (
             f"Expected model to be in training mode, got {self.model.training}"
@@ -383,14 +383,12 @@ class BaseLITModule(ABC, Generic[MODEL_TYPE, DATA_TYPE, CONFIG_TYPE]):
             **memory_metrics,
         }
 
-        self.wandb_log(global_state, metrics)
-        return loss
+        return loss, metrics
 
     @final
     def validation_step(
         self,
         inputs: DATA_TYPE,
-        global_state: GlobalState,
     ):
         # Forward pass through the model
         assert not self.model.training, (
@@ -398,9 +396,7 @@ class BaseLITModule(ABC, Generic[MODEL_TYPE, DATA_TYPE, CONFIG_TYPE]):
         )
 
         with elapsed_timer() as timer:
-            loss, val_metrics = self.run_validation_step(
-                inputs, global_state.global_step
-            )
+            loss, val_metrics = self.run_validation_step(inputs, 0)
             elapsed = timer()
 
         metrics = {
@@ -408,7 +404,6 @@ class BaseLITModule(ABC, Generic[MODEL_TYPE, DATA_TYPE, CONFIG_TYPE]):
             "val/loss": loss,
             **val_metrics,
         }
-        self.wandb_log(global_state, metrics)
         return metrics
 
     def configure_optimizers(self) -> OptimizerConfig:
