@@ -256,8 +256,10 @@ class ExperimentManager:
             shuffle=True,
             drop_last=False,
             generator=generator,
-            # Need num_workers=1 so that this runs in MP mode, so that
-            num_workers=1,
+            # TODO: Figure out optimal prefetch factor + num_workers
+            prefetch_factor=2,
+            # Need num_workers!=0 so that this runs in MP mode, so that
+            num_workers=full_config.run.batch_size,
             persistent_workers=True,
             collate_fn=dataset.collate_fn(
                 batch_size=full_config.run.batch_size,
