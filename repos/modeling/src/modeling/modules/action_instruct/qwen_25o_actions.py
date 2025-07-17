@@ -20,26 +20,9 @@ from transformers.masking_utils import (
 )
 from dataclasses import dataclass
 from synapse.utils.logging import configure_logging, logging
+# from modeling.utils.check_nans import check_nans
 
 logger = configure_logging(__name__, level=logging.INFO)
-
-
-def check_nans(tensor: torch.Tensor, name: str):
-    """
-    Check if the tensor contains NaN values and log an error if it does.
-    """
-    if not torch.isfinite(tensor).all():
-        finite_elements = torch.isfinite(tensor)
-        num_finite = finite_elements.sum()
-        total_elements = tensor.numel()
-        # logger.error(
-        #     f"{name} contains NaN values: number of finite: {num_finite} number of total: {total_elements}"
-        # )
-        # return False
-        raise ValueError(
-            f"{name} contains NaN values: number of finite: {num_finite} number of total: {total_elements}"
-        )
-    return True
 
 
 class Qwen2_5OmniThinkerActionConfig(Qwen2_5OmniThinkerConfig):
@@ -327,7 +310,7 @@ class Qwen2_5OmniThinkerForActionModelling(
 
         if inputs_embeds is None:
             # 1. Extract the input embeddings
-            check_nans(self.get_input_embeddings().weight, "input_embeddings_weight")
+            # check_nans(self.get_input_embeddings().weight, "input_embeddings_weight")
             inputs_embeds = self.get_input_embeddings()(input_ids)  # [B, S, D]
             # If we are in decode
             if action_tokens.shape[1] == inputs_embeds.shape[1]:
@@ -338,6 +321,7 @@ class Qwen2_5OmniThinkerForActionModelling(
                     inputs_embeds
                 )  # [B, S, D]
                 inputs_embeds = torch.where(mask, action_vec, inputs_embeds)
+
                 # inputs_embeds[action_tokens] = self.action_token_embedding.weight[0]
 
         # 2. Merge text , audios , image and video
@@ -346,6 +330,7 @@ class Qwen2_5OmniThinkerForActionModelling(
                 video_embeds = self.get_video_features(
                     pixel_values_videos, video_grid_thw
                 )
+                # check_nans(video_embeds, "video_embeds")
                 video_mask = (
                     (input_ids == self.config.video_token_id)
                     .unsqueeze(-1)
@@ -357,6 +342,7 @@ class Qwen2_5OmniThinkerForActionModelling(
                 )
                 inputs_embeds = inputs_embeds.masked_scatter(video_mask, video_embeds)
 
+        # check_nans(inputs_embeds, "input_embeds")
         audio_feature_lengths = None
 
         if attention_mask is not None and position_ids is None:
@@ -435,7 +421,7 @@ class Qwen2_5OmniThinkerForActionModelling(
             )
 
         outputs = self.model(
-            attention_mask=attention_mask,
+            attention_mask=causal_mask_mapping,
             position_ids=position_ids,
             past_key_values=past_key_values,
             inputs_embeds=inputs_embeds,

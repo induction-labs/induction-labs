@@ -32,7 +32,7 @@ Qwen3_1BPretrainExperimentConfig = ExperimentConfig(
         lr=LinearLRSchedule.constant_lr(1e-5),
         sequence_length=4096,
         batch_size=1,
-        steps_per_epoch=5000,
+        num_steps=5000,
         distributed=DistributedConfig(
             devices_per_node=1,
         ),

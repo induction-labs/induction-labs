@@ -10,7 +10,7 @@ from modeling.config import ExperimentConfig, UnifiedExperimentConfig
 from synapse.utils.logging import configure_logging
 from modeling.utils.tmpdir import TmpDirContext
 from synapse.elapsed_timer import elapsed_timer
-from modeling.data.data_module import BaseDataModule, BaseDataSample
+from modeling.config.data import BaseDataModule, BaseDataSample
 from modeling.modules.base_module import (
     BaseLITModule,
     BaseModuleConfig,
@@ -94,7 +94,7 @@ class ExperimentInstance:
 
         # Training loop
         num_epochs = self.exp_config.run.num_epochs
-        steps_per_epoch = self.exp_config.run.steps_per_epoch
+        steps_per_epoch = self.exp_config.run.num_steps
         clipped_grad_norm = float("inf")
 
         logger.info(

@@ -62,7 +62,7 @@ Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
         ),
         sequence_length=4096,
         batch_size=1,
-        steps_per_epoch=5000,
+        num_steps=5000,
         validation_every_n_steps=20,
         distributed=DistributedConfig(
             devices_per_node=1,

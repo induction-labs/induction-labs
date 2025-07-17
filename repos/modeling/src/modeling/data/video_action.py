@@ -1,15 +1,14 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Self
+from typing import Any, Self, cast
 
 from modeling.config import DatapackConfig, ExperimentConfig, ModuleConfig
-from modeling.data.data_module import BaseDataModule, BaseDataSample
+from modeling.config.data import BaseDataSample, BaseDataset
 from pydantic import BaseModel, ConfigDict, model_validator
 from abc import abstractmethod
 from synapse.video_loader.read_frames import fetch_metadata_from_zarr
 from synapse.video_loader.typess import StreamMetadata
-from torch.utils.data import DataLoader, Dataset
 from synapse.combined.combined_loader import combined_loader, CombinedLoaderArgs
 import numpy as np
 from typing import Callable, Generic, TypeVar
@@ -128,6 +127,32 @@ class ActionDataSample(BaseDataSample):
             assert self.input_ids.shape[0] == self.attention_mask.shape[0]
             return self
 
+        @classmethod
+        def combine_batch(cls: type[Self], batch: list[Self]) -> Self:  # type: ignore[override]
+            """
+            Combine a batch of QwenInputs into a single QwenInputs.
+            This is used to prepare the inputs for training or evaluation.
+            """
+            input_ids = torch.stack([sample.input_ids for sample in batch])
+            attention_mask = torch.stack([sample.attention_mask for sample in batch])
+            pixel_values_videos = torch.concat(
+                [sample.pixel_values_videos for sample in batch], dim=0
+            )
+            video_grid_thw = torch.concat(
+                [sample.video_grid_thw for sample in batch], dim=0
+            )
+            video_second_per_grid = torch.concat(
+                [sample.video_second_per_grid for sample in batch], dim=0
+            )
+
+            return cls(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                pixel_values_videos=pixel_values_videos,
+                video_grid_thw=video_grid_thw,
+                video_second_per_grid=video_second_per_grid,
+            )
+
     qwen_inputs: QwenInputs
     cursor_path: torch.Tensor  # [seq_length, (x,y), (m,n,a)]
     action_tokens: torch.Tensor  # [seq_length], dtype=bool
@@ -143,7 +168,7 @@ class ActionDataSample(BaseDataSample):
         return self
 
     @classmethod
-    def combine_batch(cls, batch: list[ActionDataSample]) -> ActionDataSample:
+    def combine_batch(cls, batch: list[Self]) -> Self:  # type: ignore[override]
         """
         Combine a batch of ActionDataSamples into a single ActionDataSample.
         This is used to prepare the data for training or evaluation.
@@ -158,23 +183,8 @@ class ActionDataSample(BaseDataSample):
             f"but got {[sample.qwen_inputs.input_ids.shape[0] for sample in batch]}."
         )
 
-        qwen_inputs = ActionDataSample.QwenInputs(
-            input_ids=torch.stack([sample.qwen_inputs.input_ids for sample in batch]),
-            attention_mask=torch.stack(
-                [sample.qwen_inputs.attention_mask for sample in batch]
-            ),
-            pixel_values_videos=torch.concat(
-                [sample.qwen_inputs.pixel_values_videos for sample in batch],
-                dim=0,
-            ),
-            video_grid_thw=torch.concat(
-                [sample.qwen_inputs.video_grid_thw for sample in batch],
-                dim=0,
-            ),
-            video_second_per_grid=torch.concat(
-                [sample.qwen_inputs.video_second_per_grid for sample in batch],
-                dim=0,
-            ),
+        qwen_inputs = ActionDataSample.QwenInputs.combine_batch(
+            [sample.qwen_inputs for sample in batch]
         )
         cursor_path = torch.stack([sample.cursor_path for sample in batch])
         action_tokens = torch.stack([sample.action_tokens for sample in batch])
@@ -448,7 +458,7 @@ async def fetch_data(
         ),
         cursor_path=input_cursor_path,
         action_tokens=action_tokens,
-    ), frames
+    ), cast(FramesArray, frames)
 
 
 class ActionDatasetArgs(BaseModel):
@@ -458,28 +468,15 @@ class ActionDatasetArgs(BaseModel):
     raw_prompt: str
 
 
-class ActionDataset(Dataset[ActionDataSample]):
-    @property
-    def data_paths(self) -> list[str]:
-        return self.config.data_paths
-
-    def __init__(
-        self,
-        config: ActionDatasetArgs,
-    ):
-        super().__init__()
-        self.config = config
-
-        # TODO: get rid of running asyncio run in sync functions :///
-        stream_metadatas: list[StreamMetadata] = asyncio.run(
-            self._fetch_metadatas(self.data_paths)
-        )
-
-        self.datas = list(zip(self.data_paths, stream_metadatas, strict=True))
-
-    def __getitem__(self, index) -> ActionDataSample:
-        # TODO: Make everything async native
-        return asyncio.run(self.get_item(index))
+class ActionDataset(BaseDataset[ActionDataSample, ActionDatasetArgs]):
+    # @class_property
+    @classmethod
+    def data_cls(cls) -> type[ActionDataSample]:
+        """
+        Class property that should return the data class type.
+        This is used to ensure that the dataset is compatible with the data class.
+        """
+        return ActionDataSample
 
     @staticmethod
     async def _fetch_metadatas(metadata_paths: list[str]) -> list[StreamMetadata]:
@@ -492,80 +489,41 @@ class ActionDataset(Dataset[ActionDataSample]):
             *[fetch_metadata_from_zarr(path) for path in metadata_paths]
         )
 
-    async def get_item(self, index: int) -> ActionDataSample:
+    async def get_item(self, idx: int) -> ActionDataSample:
         """
         Asynchronously fetch a batch of data samples.
         This method should be implemented to load the actual data from the paths.
         """
 
         # TODO: Handle case where index is out of bounds by returning a 0 sample and emitting a warning
-        path, stream_metadata = self.datas[index]
+        path = self.args.data_paths[idx]
+        stream_metadata = await fetch_metadata_from_zarr(path)
 
-        # Placeholder implementation, replace with actual data loading logic
-        # For now, we just return empty samples
         sample, _ = await fetch_data(
             path=path,
-            raw_prompt=self.config.raw_prompt,
+            raw_prompt=self.args.raw_prompt,
             num_actions=calc_num_actions_per_sequence(
                 stream_metadata,
-                self.config.max_seq_length,
-                self.config.frames_per_action,
-                raw_prompt=self.config.raw_prompt,
+                self.args.max_seq_length,
+                self.args.frames_per_action,
+                raw_prompt=self.args.raw_prompt,
             ),
-            seq_length=self.config.max_seq_length,
+            seq_length=self.args.max_seq_length,
         )
         return sample
 
-    def __len__(self) -> int:
-        # For now only pull the first sequence from each.
-        # TODO: Worry about randomization and shit.
-        return len(self.datas)
+    @classmethod
+    async def constructor(cls, args: ActionDatasetArgs) -> Self:
+        # For now we are not going to do stream preprocessing and we are just going to trust that
+        # the data is already in the correct format.
 
-
-class ActionDataModule(BaseDataModule[ActionDataSample]):
-    def __init__(
-        self,
-        config: ActionDatapackConfig,
-        extra_args: ActionDataModuleExtraArgs,
-    ):
-        super().__init__()
-        self.config = config
-        self.extra_args = extra_args
-
-    def setup(self, stage: str | None = None) -> None:
-        # This method is used to download the dataset if it is not already present.
-
-        self.train_data = ActionDataset(
-            ActionDatasetArgs(
-                data_paths=self.config.data_paths,
-                max_seq_length=self.extra_args.seq_length,
-                frames_per_action=self.config.frames_per_action,
-                raw_prompt=self.config.raw_prompt,
-            )
-        )
-
-    def train_dataloader(
-        self, generator: torch.Generator
-    ) -> DataLoader[ActionDataSample]:
-        return DataLoader(
-            self.train_data,
-            batch_size=self.extra_args.batch_size,
-            shuffle=True,
-            drop_last=True,
-            generator=generator,
-            collate_fn=ActionDataSample.combine_batch,
-        )
-
-    def val_dataloader(
-        self, generator: torch.Generator
-    ) -> DataLoader[ActionDataSample]:
-        return DataLoader(
-            self.train_data,
-            batch_size=self.extra_args.batch_size,
-            shuffle=False,
-            drop_last=True,
-            generator=generator,
-            collate_fn=ActionDataSample.combine_batch,
+        # TODO: Later maybe do initialization / preprocessing to do dynamic length calcs?
+        # stream_metadatas: list[StreamMetadata] = await (
+        #     self._fetch_metadatas(self.data_paths)
+        # )
+        return cls(
+            args=args,
+            length=len(args.data_paths),
         )
 
 
@@ -575,7 +533,7 @@ class ActionDataModuleExtraArgs(BaseModel):
     batch_size: int
 
 
-class ActionDatapackConfig(DatapackConfig[ActionDataModule]):
+class ActionDatapackConfig(DatapackConfig[ActionDataSample]):
     """
     Configuration class for the Text Pretraining Data Module.
     This class is used to configure the data module for text pretraining tasks.
@@ -608,16 +566,25 @@ class ActionDatapackConfig(DatapackConfig[ActionDataModule]):
         """
         return module_config
 
-    def create_datapack(
-        self,
-        full_config: ExperimentConfig[ActionDataModule],
-    ) -> ActionDataModule:
-        self.validate_module_compatibility(full_config.module)
-        extra_args = ActionDataModuleExtraArgs(
-            seq_length=full_config.run.sequence_length,
-            batch_size=full_config.run.batch_size,
+    async def _init_train_dataset(self, full_config: ExperimentConfig) -> ActionDataset:
+        return await ActionDataset.constructor(
+            ActionDatasetArgs(
+                data_paths=self.data_paths,
+                max_seq_length=full_config.run.sequence_length,
+                frames_per_action=self.frames_per_action,
+                raw_prompt=self.raw_prompt,
+            )
         )
-        return ActionDataModule(self, extra_args)
+
+    async def _init_val_dataset(self, full_config: ExperimentConfig) -> ActionDataset:
+        return await ActionDataset.constructor(
+            ActionDatasetArgs(
+                data_paths=self.data_paths,
+                max_seq_length=full_config.run.sequence_length,
+                frames_per_action=self.frames_per_action,
+                raw_prompt=self.raw_prompt,
+            )
+        )
 
 
 class ListActionDatapackConfig(ActionDatapackConfig):
@@ -652,4 +619,4 @@ class RangeActionDatapackConfig(ActionDatapackConfig):
         ]
 
 
-__all__ = ["ActionDataModule", "ActionDatapackConfig"]
+__all__ = ["ActionDatapackConfig"]

@@ -1,3 +1,4 @@
+from modeling.modules.base_module import BaseModuleConfig, PreTrainedModel
 from modeling.utils.typed_remote import (
     remote_method,
     BaseActor,
@@ -12,11 +13,14 @@ import torch
 from modeling.distributed.distributed import init_distributed, TorchUrl
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 import os
+from modeling.config.data import BaseDataSample
+from torch.optim import Optimizer
+from modeling.utils.check_nans import check_nans
 
 if TYPE_CHECKING:
-    from modeling.modules.base_module import BaseLITModule, OptimizerConfig
+    from modeling.modules.base_module import BaseLITModule
 
 logger = configure_logging(__name__, level=logging.DEBUG)
 
@@ -28,11 +32,12 @@ class InstanceState:
     This can include things like the current step, global loss, etc.
     """
 
-    global_step: int
+    # global_step: int
     mesh: "torch.distributed.device_mesh.DeviceMesh"
     generator: "torch.Generator"
-    module: "BaseLITModule"
-    optimizer: "OptimizerConfig"
+    module: "BaseLITModule[PreTrainedModel, Any, BaseModuleConfig]"
+    optimizer: "Optimizer"
+    lr_scheduler: "torch.optim.lr_scheduler.LRScheduler"
 
 
 class ActorArgs(BaseModel):
@@ -86,6 +91,14 @@ class ExperimentActor(BaseActor[ActorArgs]):
         """
         return self.instance_config.device
 
+    @property
+    def module(self):
+        """
+        Return the module for this actor.
+        This is the main component that performs the training or inference.
+        """
+        return self.state.module
+
     @remote_method
     def get_ip(self) -> str:
         """
@@ -124,13 +137,14 @@ class ExperimentActor(BaseActor[ActorArgs]):
             run_config=self.experiment_config.run,
             instance_config=self.instance_config,
         )
-        optimizer_state = module.configure_optimizers()
+        optimizer, lr_scheduler = module.configure_optimizers()
         self.state = InstanceState(
-            global_step=0,
+            # global_step=0,
             generator=generator,
             mesh=device_mesh,
             module=module,
-            optimizer=optimizer_state,
+            optimizer=optimizer,
+            lr_scheduler=lr_scheduler,
         )
 
     @property
@@ -182,5 +196,40 @@ class ExperimentActor(BaseActor[ActorArgs]):
         Run a health check on the experiment.
         """
         # Implement the logic to run the experiment here
+        for name, param in self.state.module.model.named_parameters():
+            check_nans(param, f"{name}")
         x = torch.rand(1, generator=self.g, device=self.device).item()
         return x
+
+    @remote_method
+    def train_step(self, sample: "BaseDataSample") -> dict[str, float]:
+        """
+        Perform a training step for the actor.
+        This method should be called to train the model.
+        """
+        assert hasattr(self, "state"), (
+            "This method should not be called before the actor has been initialized."
+        )
+        sample = sample.to_device(self.device)
+        self.module.model.train()
+        self.state.optimizer.zero_grad(set_to_none=True)
+
+        # Forward pass
+        # with torch.profiler.record_function("training_step"):
+        loss, metrics = self.module.training_step(sample)
+        # self.wanddblog(metrics)
+
+        # Backward pass
+        # with torch.profiler.record_function("backward"):
+        loss.backward()
+
+        # Update weights
+        # with torch.profiler.record_function("optimizer_step"):
+        self.state.optimizer.step()
+        self.state.lr_scheduler.step()
+        self.state.optimizer.zero_grad(set_to_none=True)
+
+        # Add learning rate to metrics
+        metrics["train/learning_rate"] = self.state.optimizer.param_groups[0]["lr"]
+        metrics["train/loss"] = loss.item()
+        return metrics

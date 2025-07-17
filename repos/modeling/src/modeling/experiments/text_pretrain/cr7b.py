@@ -28,7 +28,7 @@ CR7BPretrainExperimentConfig = ExperimentConfig(
         lr=1e-5,
         sequence_length=1024,
         batch_size=8,
-        steps_per_epoch=5000,
+        num_steps=5000,
         distributed=DistributedConfig(
             devices_per_node=8,
         ),

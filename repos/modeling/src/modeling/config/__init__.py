@@ -4,7 +4,16 @@ import logging
 from abc import ABC, abstractmethod
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, Any, Generic, Optional, Self, TypeVar
+from typing import (
+    TYPE_CHECKING,
+    Annotated,
+    Any,
+    Generic,
+    Optional,
+    Self,
+    TypeVar,
+    Never,
+)
 
 from pydantic import (
     BaseModel,
@@ -22,23 +31,16 @@ from modeling.utils.git import get_git_commit_sha, get_git_commit_sha_short
 
 from .distributed import DistributedConfig, InstanceConfig
 from .wandb import WandbConfig
+from modeling.config.data import BaseDataSample, BaseDataset
 
 if TYPE_CHECKING:
     from torch.distributed.fsdp import MixedPrecisionPolicy
 
-    from modeling.data.data_module import BaseDataModule
     from modeling.modules.base_module import BaseLITModule
 
 
 logger = configure_logging(__name__, logging.DEBUG)
-# _T = TypeVar("_T")
-# _T_co = TypeVar("_T_co", covariaint=True)
-
-# _LitModule = TypeVar("_LitModule", bound="BaseLITModule", covariant=True)
-_LITDataModule = TypeVar("_LITDataModule", bound="BaseDataModule")
-
-# TODO: Make this not import torch at load, right now im jsut going to do it like this but like ya
-# For distributed stuffs
+DataSample = TypeVar("DataSample", bound="BaseDataSample")
 
 
 class RuntimeConfig(BaseModel):
@@ -253,7 +255,7 @@ class SerializedModuleConfig(ModuleConfig):
         )
 
 
-class DatapackConfig(ABC, BaseModel, Generic[_LITDataModule]):
+class DatapackConfig(ABC, BaseModel, Generic[DataSample]):
     config_path: str
 
     @model_validator(mode="after")
@@ -282,17 +284,41 @@ class DatapackConfig(ABC, BaseModel, Generic[_LITDataModule]):
         raise NotImplementedError("Subclasses must implement this method.")
 
     @abstractmethod
-    def create_datapack(
-        self, full_config: ExperimentConfig[_LITDataModule]
-    ) -> _LITDataModule:
+    async def _init_train_dataset(
+        self, full_config: ExperimentConfig[DataSample]
+    ) -> BaseDataset[DataSample, Any]:
         """
         Create a Lightning data module instance.
         This method should be implemented by subclasses to return an instance of the Lightning data module.
         """
         raise NotImplementedError("Subclasses must implement this method.")
 
+    @abstractmethod
+    async def _init_val_dataset(
+        self, full_config: ExperimentConfig[DataSample]
+    ) -> BaseDataset[DataSample, Any]:
+        """
+        Create a Lightning data module instance.
+        This method should be implemented by subclasses to return an instance of the Lightning data module.
+        """
+        raise NotImplementedError("Subclasses must implement this method.")
 
-class SerializedDatapackConfig(DatapackConfig[_LITDataModule]):
+    # @final
+    # async def train_dataloader(
+    #     self, full_config: ExperimentConfig[DataSample], generator: torch.Generator
+    # ) -> DataLoader[list[DataSample]]:
+    #     dataset = await self._init_train_dataset(full_config)
+    #     return self._make_dataloader(dataset, full_config, generator)
+
+    # @final
+    # async def val_dataloader(
+    #     self, full_config: ExperimentConfig[DataSample], generator: torch.Generator
+    # ) -> DataLoader[list[DataSample]]:
+    #     dataset = await self._init_val_dataset(full_config)
+    #     return self._make_dataloader(dataset, full_config, generator)
+
+
+class SerializedDatapackConfig(DatapackConfig[DataSample]):
     """
     Configuration for a serialized Lightning data module.
     This class is used to load a Lightning data module from a specified path.
@@ -319,13 +345,35 @@ class SerializedDatapackConfig(DatapackConfig[_LITDataModule]):
 
     def create_datapack(
         self,
-        full_config: ExperimentConfig[_LITDataModule],
-    ) -> _LITDataModule:
+        full_config: ExperimentConfig[DataSample],
+    ) -> DataSample:
         """
         Create a Lightning data module instance by loading it from the specified path.
         """
         raise NotImplementedError(
             "SerializedDatapackConfig should never be used to start an experiment directly."
+        )
+
+    def _init_train_dataset(  # type: ignore[override]
+        self, full_config: ExperimentConfig[DataSample]
+    ) -> BaseDataset[DataSample, Never]:
+        """
+        Create a Lightning data module instance for the training dataset.
+        This method should be implemented by subclasses to return an instance of the Lightning data module.
+        """
+        raise NotImplementedError(
+            "SerializedDatapackConfig should never be used directly."
+        )
+
+    def _init_val_dataset(  # type: ignore[override]
+        self, full_config: ExperimentConfig[DataSample]
+    ) -> BaseDataset[DataSample, Never]:
+        """
+        Create a Lightning data module instance for the validation dataset.
+        This method should be implemented by subclasses to return an instance of the Lightning data module.
+        """
+        raise NotImplementedError(
+            "SerializedDatapackConfig should never be used directly."
         )
 
 
@@ -381,8 +429,7 @@ class RunConfig(BaseModel):
     distributed: DistributedConfig
     profile: Optional[ProfileConfig] = None
 
-    num_epochs: int = 1
-    steps_per_epoch: int  # Number of steps per epoch
+    num_steps: int  # Number of steps per epoch
     # save_interval: int = 1000  # How often to save checkpoints
     seed: int = 42  # Random seed for reproducibility
     sequence_length: int  # Default sequence length
@@ -434,8 +481,8 @@ class RunConfig(BaseModel):
     @model_validator(mode="after")
     def check_profiler_num_steps(self) -> Self:
         if self.profile:
-            assert self.steps_per_epoch >= self.profile.total_steps, (
-                f"{self.steps_per_epoch=} must be greater than or equal to {self.profile.total_steps=}"
+            assert self.num_steps >= self.profile.total_steps, (
+                f"{self.num_steps=} must be greater than or equal to {self.profile.total_steps=}"
             )
         return self
 
@@ -463,8 +510,7 @@ class RunConfig(BaseModel):
         Create a mock instance of RunConfig for testing purposes.
         """
         return cls(
-            num_epochs=1,
-            steps_per_epoch=100,
+            num_steps=100,
             seed=42,
             sequence_length=1024,
             batch_size=4,
@@ -477,12 +523,12 @@ class RunConfig(BaseModel):
         )
 
 
-class ExperimentConfig(BaseModel, Generic[_LITDataModule]):
+class ExperimentConfig(BaseModel):
     metadata: ExperimentMetadata
     # For now, include distributed config here.
 
     module: ModuleConfig
-    datapack: DatapackConfig[_LITDataModule]
+    datapack: DatapackConfig
 
     # These maybe should be moved to module_config, but seem standard enough to keep here
     run: RunConfig
@@ -540,7 +586,7 @@ class ExperimentConfig(BaseModel, Generic[_LITDataModule]):
                 "run": self.run.model_copy(
                     update={
                         "num_epochs": 1,
-                        "steps_per_epoch": num_steps,
+                        "num_steps": num_steps,
                         "profile": profile_config,
                         "validation_every_n_steps": validation_every_n_steps,
                     }
@@ -553,6 +599,6 @@ class UnifiedExperimentConfig(ExperimentConfig):
     runtime_config: RuntimeConfig
 
 
-class SerializedExperimentConfig(ExperimentConfig["BaseDataModule"]):
+class SerializedExperimentConfig(ExperimentConfig):
     module: SerializedModuleConfig  # type: ignore[override]
     datapack: SerializedDatapackConfig  # type: ignore[override]

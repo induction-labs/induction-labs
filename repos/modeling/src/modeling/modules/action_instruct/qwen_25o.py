@@ -3,6 +3,7 @@ from __future__ import annotations
 import time
 from typing import Any, TypeVar
 
+from modeling.utils.check_nans import check_nans
 import numpy as np
 import torch
 import wandb
@@ -155,36 +156,36 @@ class Qwen25OActionLIT(
         )
         return model
 
-    # def load_weights(self, tmpdir: Path) -> Qwen2_5OmniThinkerForActionModelling:
-    #     """
-    #     Load the model weights from the specified checkpoint directory.
-    #     This method should handle the loading of pre-trained weights or checkpoint files.
-    #     """
-    #     # logger.debug(f"Loading model weights from {tmpdir}")
-    #     # Load the model weights and dispatch them to the appropriate devices
-    #     logger.debug(f"Loading model weights from {tmpdir} to device {self.device}")
-    #     self.model.to_empty(device=self.device)
-    #     # This is so stupid - but if you try to load the model on multiple devices fucking huggingface throws an error
-    #     # Huggingface for sure is real company :/
-    #     delay = self.instance_config.device_rank * 0.5
-    #     time.sleep(delay)
-    #     # loaded_model = MODEL_TYPE.from_pretrained(
-    #     #     self.module_config.model_name,
-    #     #     config=self.model.config,
-    #     #     torch_dtype=self.dtype,
-    #     #     device_map={
-    #     #         "": self.device  # Use the device index for the model
-    #     #     },  # Ensure model is loaded on the correct device
-    #     #     attn_implementation=self.attn_impl,
-    #     #     local_files_only=True,
-    #     # ).train()
+    def load_weights(self, tmpdir) -> MODEL_TYPE:
+        """
+        Load the model weights from the specified checkpoint directory.
+        This method should handle the loading of pre-trained weights or checkpoint files.
+        """
+        # logger.debug(f"Loading model weights from {tmpdir}")
+        # Load the model weights and dispatch them to the appropriate devices
+        logger.debug(f"Loading model weights from {tmpdir} to device {self.device}")
+        self.model.to_empty(device=self.device)
+        # This is so stupid - but if you try to load the model on multiple devices fucking huggingface throws an error
+        # Huggingface for sure is real company :/
+        delay = self.instance_config.device_rank * 0.5
+        time.sleep(delay)
+        loaded_model = MODEL_TYPE.from_pretrained(
+            self.module_config.model_name,
+            config=self.model.config,
+            torch_dtype=self.dtype,
+            device_map={
+                "": self.device  # Use the device index for the model
+            },  # Ensure model is loaded on the correct device
+            attn_implementation=self.attn_impl,
+            local_files_only=True,
+        ).train()
 
-    #     assert isinstance(loaded_model, MODEL_TYPE), (
-    #         f"Expected loaded_model to be of type Qwen2_5OmniThinkerForActionModelling, "
-    #         f"got {type(loaded_model)}"
-    #     )
+        assert isinstance(loaded_model, MODEL_TYPE), (
+            f"Expected loaded_model to be of type Qwen2_5OmniThinkerForActionModelling, "
+            f"got {type(loaded_model)}"
+        )
 
-    #     return cast(MODEL_TYPE, loaded_model)
+        return loaded_model
 
     def run_training_step(self, inputs: ActionDataSample):
         # Forward pass through the model
@@ -193,6 +194,7 @@ class Qwen25OActionLIT(
             action_tokens=inputs.action_tokens,
             **inputs.qwen_inputs.model_dump(),
         )
+        check_nans(outputs.action_outputs, "outputs")
         return self.compute_loss(outputs, inputs)[0]
 
     def compute_loss(

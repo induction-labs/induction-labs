@@ -8,9 +8,12 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import AsyncIterator, Iterator, Optional
+from typing import AsyncIterator, Iterator, Never, Optional
 
+from modeling.config.data import BaseDataSample, BaseDataset, DataSample
 import torch
+from torch.utils.data import DataLoader
+import tqdm
 import wandb
 from ray.util.placement_group import (
     PlacementGroup,
@@ -29,6 +32,7 @@ from modeling.distributed.ray_head import RayUrl, initialize_ray_head
 from modeling.utils.fix_rng import fix_rng
 from modeling.utils.tmpdir import TmpDirContext
 from modeling.utils.typed_remote import RemoteArgs
+from typing import cast
 
 logger = configure_logging(__name__, level=logging.DEBUG)
 
@@ -118,8 +122,13 @@ class ExperimentManager:
 
     state: ManagerState
 
-    # module: BaseLITModule[PreTrainedModel, BaseDataSample, BaseModuleConfig]
-    # datapack: BaseDataModule[BaseDataSample]
+    def wandb_log(self, metrics: dict[str, float], step: Optional[int] = None):
+        """
+        Log metrics to Weights & Biases.
+        This is a convenience method to log metrics during training.
+        """
+        if self.state.wandb is not None:
+            self.state.wandb.log(metrics, step=step, commit=True)
 
     # # TODO: Make this async
     async def run(self):
@@ -132,119 +141,57 @@ class ExperimentManager:
         #     BaseDataModule,
         #     self.exp_config.datapack.create_datapack(full_config=self.exp_config),
         # )
-        # self.datapack.setup("fit")
+        # datapack.setup("fit")
         # self.module.configure_model(self.state.mesh)
 
         # # Get training dataloader
-        # train_dataloader = self.datapack.train_dataloader(
-        #     generator=self.state.generator
-        # )
+        # TODO: Don't use torch dataloader class rewrite manually
+        train_dataset = await self.exp_config.datapack._init_train_dataset(
+            full_config=self.exp_config,
+        )
+        train_iter = iter(
+            ExperimentManager.make_dataloader(
+                dataset=train_dataset,
+                full_config=self.exp_config,
+                generator=self.state.generator,
+            )
+        )
+
         # validation_dataloader = iter(
         #     self.datapack.val_dataloader(generator=self.state.generator)
         # )
 
-        # # Configure optimizer and scheduler
-        # optimizer_config = self.module.configure_optimizers()
-        # optimizer = optimizer_config.optimizer
-        # lr_scheduler = optimizer_config.lr_scheduler.scheduler
-
         # # Training loop
-        # num_epochs = self.exp_config.run.num_epochs
-        # steps_per_epoch = self.exp_config.run.steps_per_epoch
-        # clipped_grad_norm = float("inf")
+        num_steps = self.exp_config.run.num_steps
 
-        # logger.info(
-        #     f"Starting training: {num_epochs} epochs, {steps_per_epoch} steps per epoch"
-        # )
-        # with profiler_context(
-        #     self.exp_config,
-        #     self.instance_config,
-        # ) as prof:
-        #     pbar = tqdm.tqdm(
-        #         enumerate(train_dataloader), desc="Training", total=steps_per_epoch
-        #     )
-        #     for step, batch in pbar:
-        #         with elapsed_timer("training_step"):
-        #             device = self.module.instance_config.device
-        #             assert isinstance(batch, BaseDataSample), f"{batch=}"
-        #             if step >= steps_per_epoch:
-        #                 break
+        logger.info(f"Starting training: {num_steps} steps, ")
+        pbar = tqdm.tqdm(range(num_steps), desc="Training", total=num_steps)
+        for step in pbar:
+            with elapsed_timer("training_step"):
+                batch = cast(list[BaseDataSample], next(train_iter))
+                assert isinstance(batch, list), f"{batch=}"
+                assert len(batch) == len(self.state.actors), (
+                    f"{len(batch)=} != {len(self.state.actors)=}"
+                )
 
-        #             # Move batch to device
-        #             batch = batch.to_device(device)
-        #             # Zero gradients
-        #             optimizer.zero_grad(set_to_none=True)
-        #             # Note: Need to call this or activation checkpointing won't work
-        #             # And it will silently fail
-        #             self.module.model.train()
+                all_train_metrics = await asyncio.gather(
+                    *[
+                        actor.train_step.remote(data)
+                        for actor, data in zip(
+                            self.state.actors.all_actors, batch, strict=True
+                        )
+                    ]
+                )
 
-        #             # Forward pass
-        #             # with torch.profiler.record_function("training_step"):
-        #             loss = self.module.training_step(batch, global_state=self.state)
+                # Reduce metrics to get mean
+                train_metrics = {
+                    key: torch.tensor([m[key] for m in all_train_metrics]).mean().item()
+                    for key in all_train_metrics[0].keys()
+                }
 
-        #             # Backward pass
-        #             # with torch.profiler.record_function("backward"):
-        #             loss.backward()
-        #             real_grad_norm = clip_grad_norm_(
-        #                 self.module.model.parameters(), max_norm=clipped_grad_norm
-        #             )
-
-        #             # Update weights
-        #             # with torch.profiler.record_function("optimizer_step"):
-        #             optimizer.step()
-        #             lr_scheduler.step()
-
-        #             optimizer.zero_grad(set_to_none=True)
-
-        #             if (
-        #                 self.exp_config.run.validation_every_n_steps > 0
-        #                 and (self.state.global_step)
-        #                 % self.exp_config.run.validation_every_n_steps
-        #                 == 0
-        #             ):
-        #                 logger.debug(
-        #                     f"Running validation at step {self.state.global_step}"
-        #                 )
-        #                 self.module.model.eval()
-        #                 with torch.no_grad():
-        #                     val_batch = next(validation_dataloader)
-        #                     assert isinstance(val_batch, BaseDataSample), (
-        #                         f"{val_batch=}"
-        #                     )
-        #                     val_batch = val_batch.to_device(device)
-        #                     # Forward pass for validation
-        #                     self.module.validation_step(
-        #                         val_batch, global_state=self.state
-        #                     )
-
-        #             self.module.wandb_log(
-        #                 self.state,
-        #                 {
-        #                     "lr": lr_scheduler.get_last_lr()[0],
-        #                     "real_grad_norm": real_grad_norm.item(),
-        #                     "clipped_grad_norm": clipped_grad_norm,
-        #                 },
-        #                 commit=True,
-        #             )
-        #             # logger.info(
-        #             #     {
-        #             #         "lr": lr_scheduler.get_last_lr()[0],
-        #             #         "real_grad_norm": real_grad_norm.item(),
-        #             #         "clipped_grad_norm": clipped_grad_norm,
-        #             #         "loss": loss.item(),
-        #             #         "global_step": self.state.global_step,
-        #             #         # "embedding_grad_norm": embedding_grad_norm.item(),
-        #             #         # "action_head_grad_norm": action_head_grad_norm.item(),
-        #             #     }
-        #             # )
-        #             self.state.global_step += 1
-
-        #             prof.step()
-
-        #             # Update progress bar with loss value
-        #             pbar.set_postfix(loss=f"{loss.item():.4f}")
-
-        #     logger.info(f"Training completed. Total steps: {self.state.global_step}")
+                self.wandb_log(train_metrics, step=step)
+                loss = train_metrics.get("train/loss")
+                pbar.set_postfix(loss=f"{loss:.4f}")
 
     @staticmethod
     def create_runtime_config(tmp_dir: Path) -> RuntimeConfig:
@@ -257,6 +204,34 @@ class ExperimentManager:
             start_time=datetime.now(tz=UTC),
             tmp_dir=tmp_dir,
         )
+
+    @staticmethod
+    def make_dataloader(
+        dataset: BaseDataset[DataSample, Never],
+        full_config: ExperimentConfig[DataSample],
+        generator: torch.Generator,
+    ) -> DataLoader[list[DataSample]]:
+        """
+        Create a DataLoader for the training dataset.
+        This method is used to create a DataLoader for the training dataset with the specified batch size and collate function.
+        """
+        data_loader = DataLoader(
+            dataset,
+            batch_size=full_config.run.batch_size,
+            shuffle=True,
+            drop_last=False,
+            generator=generator,
+            # Need num_workers=1 so that this runs in MP mode, so that
+            num_workers=1,
+            persistent_workers=True,
+            collate_fn=dataset.collate_fn(
+                batch_size=full_config.run.batch_size,
+                world_size=full_config.run.distributed.world_size,
+            ),
+        )
+        # We need to cast here because DataLoader should be parameterized with the return type of collate_fn
+        # but it currently isn't due to limitations in mypy https://github.com/python/mypy/issues/3737
+        return cast(DataLoader[list[DataSample]], data_loader)
 
     @staticmethod
     def init_wandb(exp_config: UnifiedExperimentConfig) -> Run | None:
@@ -403,6 +378,16 @@ class ExperimentManager:
                     )
                 logger.debug("Distributed training initialized for all actors.")
 
+                with elapsed_timer("Experiment.DownloadWeights"):
+                    await actors.rank0.download_weights.remote()
+                logger.debug("Model weights downloaded to actors.")
+
+                with elapsed_timer("Experiment.ConfigureModel"):
+                    await asyncio.gather(
+                        *[actor.configure_model.remote() for actor in actors.all_actors]
+                    )
+                logger.debug("Model configured for all actors.")
+
                 health_checks = await asyncio.gather(
                     *[actor.health_check.remote() for actor in actors.all_actors]
                 )
@@ -413,16 +398,6 @@ class ExperimentManager:
                     f"Health checks returned different values across actors. {health_checks=}"
                 )
                 logger.debug(f"Health checks completed: {health_checks}")
-
-                with elapsed_timer("Experiment.DownloadWeights"):
-                    await actors.rank0.download_weights.remote()
-                logger.debug("Model weights downloaded to actors.")
-
-                with elapsed_timer("Experiment.ConfigureModel"):
-                    await asyncio.gather(
-                        *[actor.configure_model.remote() for actor in actors.all_actors]
-                    )
-                logger.debug("Model configured for all actors.")
 
                 manager_state = ManagerState(
                     global_step=0,

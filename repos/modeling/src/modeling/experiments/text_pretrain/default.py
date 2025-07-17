@@ -23,7 +23,7 @@ TextPretrainExperimentConfig = ExperimentConfig(
     run=RunConfig(
         sequence_length=1024,  # Default sequence length
         batch_size=2,
-        steps_per_epoch=1000,  # Number of steps per epoch
+        num_steps=1000,  # Number of steps per epoch
         distributed=DistributedConfig.mock_data(),
         lr=LinearLRSchedule.constant_lr(1e-5),  # Constant learning rate
     ),

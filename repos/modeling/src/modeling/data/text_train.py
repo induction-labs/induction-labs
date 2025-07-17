@@ -13,7 +13,7 @@ import torch
 from torch.utils.data import Dataset
 from typing import List, Callable, Optional
 from synapse.utils.logging import configure_logging
-from modeling.data.data_module import BaseDataModule, BaseDataSample
+from modeling.config.data import BaseDataSample
 
 logger = configure_logging(__name__)
 
@@ -40,6 +40,18 @@ class TextPretrainDataSample(BaseDataSample):
             input_ids=self.input_ids.to(device, non_blocking=non_blocking),
             labels=self.labels.to(device, non_blocking=non_blocking),
         )
+
+    @classmethod
+    def combine_batch(  # type: ignore[override]
+        cls, batch: list[TextPretrainDataSample]
+    ) -> TextPretrainDataSample:
+        """
+        Combine a batch of TextPretrainDataSamples into a single TextPretrainDataSample.
+        This is used to prepare the data for training or evaluation.
+        """
+        input_ids = torch.stack([sample.input_ids for sample in batch])
+        labels = torch.stack([sample.labels for sample in batch])
+        return TextPretrainDataSample(input_ids=input_ids, labels=labels)
 
 
 class GenericSFTDataset(Dataset[TextPretrainDataSample]):
