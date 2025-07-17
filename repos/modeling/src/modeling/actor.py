@@ -13,7 +13,7 @@ import torch
 from modeling.distributed.distributed import init_distributed, TorchUrl
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Optional
 import os
 from modeling.config.data import BaseDataSample
 from torch.optim import Optimizer
@@ -36,8 +36,19 @@ class InstanceState:
     mesh: "torch.distributed.device_mesh.DeviceMesh"
     generator: "torch.Generator"
     module: "BaseLITModule[PreTrainedModel, Any, BaseModuleConfig]"
-    optimizer: "Optimizer"
-    lr_scheduler: "torch.optim.lr_scheduler.LRScheduler"
+
+    _optimizer: Optional["Optimizer"] = None
+    _lr_scheduler: Optional["torch.optim.lr_scheduler.LRScheduler"] = None
+
+    @property
+    def optimizer(self) -> Optimizer:
+        assert self._optimizer is not None, "Optimizer has not been set."
+        return self._optimizer
+
+    @property
+    def lr_scheduler(self) -> "torch.optim.lr_scheduler.LRScheduler":
+        assert self._lr_scheduler is not None, "LR Scheduler has not been set."
+        return self._lr_scheduler
 
 
 class ActorArgs(BaseModel):
@@ -137,14 +148,10 @@ class ExperimentActor(BaseActor[ActorArgs]):
             run_config=self.experiment_config.run,
             instance_config=self.instance_config,
         )
-        optimizer, lr_scheduler = module.configure_optimizers()
         self.state = InstanceState(
-            # global_step=0,
             generator=generator,
             mesh=device_mesh,
             module=module,
-            optimizer=optimizer,
-            lr_scheduler=lr_scheduler,
         )
 
     @property
@@ -179,6 +186,12 @@ class ExperimentActor(BaseActor[ActorArgs]):
         os.makedirs(self.model_weights_dir, exist_ok=True)
         self.state.module.configure_model(
             device_mesh=self.mesh, weights_dir=self.model_weights_dir
+        )
+        # Need to reinitialize the optimizer and lr_scheduler after model configuration
+        # This is necessary because the model configuration might change the parameters
+        # TODO: Split state into state and configured_state?
+        self.state._optimizer, self.state._lr_scheduler = (
+            self.state.module.configure_optimizers()
         )
 
     @remote_method
@@ -222,7 +235,6 @@ class ExperimentActor(BaseActor[ActorArgs]):
         # Forward pass
         # with torch.profiler.record_function("training_step"):
         loss, metrics = self.module.training_step(sample)
-        # self.wanddblog(metrics)
 
         # Backward pass
         # with torch.profiler.record_function("backward"):

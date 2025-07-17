@@ -28,8 +28,8 @@ logger = configure_logging(__name__, level=logging.INFO)
 class Qwen2_5OmniThinkerActionConfig(Qwen2_5OmniThinkerConfig):
     def __init__(
         self,
-        freeze_network=True,
-        freeze_vision=True,
+        freeze_network=False,
+        freeze_vision=False,
         freeze_action_head=False,
         freeze_action_embedding=False,
         **kwargs,
@@ -508,11 +508,11 @@ class Qwen2_5OmniActionModel(Qwen2_5OmniPreTrainedModel, GenerationMixin):
 
         self.post_init()
 
-    def forward(self, **kwargs) -> Qwen2_5OmniActionCausalLMOutputWithPast:
+    def forward(self, *args, **kwargs) -> Qwen2_5OmniActionCausalLMOutputWithPast:
         """
         Override the forward method to return the custom output type.
         """
-        return self.thinker(**kwargs)
+        return self.thinker(*args, **kwargs)
 
 
 async def main():

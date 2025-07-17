@@ -48,12 +48,6 @@ def not_none(value: T | None) -> T:
     return value
 
 
-def __call__(self, x: float):
-    """Evaluate the cubic at x (scalar or array)."""
-    c3, c2, c1 = self.coeffs()
-    return ((c3 * x + c2) * x + c1) * x  # Horner form
-
-
 def analytical_distance(
     a: torch.Tensor,  # [seq, 3]
     b: torch.Tensor,  # [seq, 3]
