@@ -187,8 +187,13 @@ class ExperimentActor(BaseActor[ActorArgs]):
         Shutdown the actor.
         This method should be called to clean up resources when the actor is no longer needed.
         """
-        logger.info(f"Shutting down actor for {self.instance_config=}")
-        self.distributed_context.__exit__(None, None, None)
+        if hasattr(self, "distributed_context"):
+            logger.info(f"Shutting down distributed context {self.instance_config=}")
+            self.distributed_context.__exit__(None, None, None)
+        else:
+            logger.warning(
+                f"No distributed context to shut down on {self.instance_config=}"
+            )
 
     @remote_method
     def health_check(self) -> float:

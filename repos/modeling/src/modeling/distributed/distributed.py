@@ -51,14 +51,13 @@ def init_distributed(
     )
     assert not dist.is_initialized(), "Distributed training is already initialized"
 
-    torch.cuda.set_device(instance_config.device_rank)
     global_rank = distributed_config.global_rank(instance_config)
 
     logger.info(
-        f"Initializing distributed training on rank {distributed_config.global_rank(instance_config)}"
+        f"Initializing distributed training on rank {global_rank=} {torch.cuda.device_count()=}"
     )
-
     try:
+        torch.cuda.set_device(instance_config.device)
         with elapsed_timer(
             f"Distributed training initialization on rank {distributed_config.global_rank(instance_config)}"
         ) as timer:

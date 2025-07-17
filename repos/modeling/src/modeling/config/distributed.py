@@ -44,10 +44,9 @@ class InstanceConfig(BaseModel):
         This assumes that the devices are ordered by their ranks.
         """
         import torch
+        # NOTE that all processes only see one device, so we just use torch.device(0)
 
-        return torch.device(
-            "cuda" if torch.cuda.is_available() else "cpu", self.device_rank
-        )
+        return torch.device("cuda" if torch.cuda.is_available() else "cpu", 0)
 
 
 class DistributedConfig(BaseModel):
