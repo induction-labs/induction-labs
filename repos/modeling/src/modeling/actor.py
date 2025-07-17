@@ -271,7 +271,6 @@ class ExperimentActor(BaseActor[ActorArgs]):
             "This method should not be called before the actor has been initialized."
         )
         logger.debug(f"Saving checkpoint to {tmpdir=}")
-        # TODO: Asyncrhronous background saving. TBH the main CPU should be responsible for uploading checkpoints, not worker.
         save_checkpoint_to_tmpdir(
             model=self.state.module.model,
             local_dir=tmpdir,

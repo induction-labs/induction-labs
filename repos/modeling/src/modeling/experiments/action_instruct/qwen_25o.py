@@ -8,6 +8,7 @@ from modeling.config import (
     GCSCheckpointConfig,
     RunConfig,
     LinearLRSchedule,
+    WandbConfig,
     # ProfileConfig
 )
 from pathlib import Path
@@ -17,29 +18,28 @@ from modeling.modules.action_instruct.qwen_25o import Qwen25OActionLITConfig
 from modeling.utils.cloud_path import CloudPath
 # from modeling.modules.base_module import CompileConfig
 
-run_name = "qwen25o_7B_checkpoint_saving"
+run_name = "qwen25o_7B_uninitialized"
 num_devices = 2
 Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
     metadata=ExperimentMetadata(
-        # wandb=WandbConfig(project="mouse_following", name=run_name),
-        wandb=None,
+        wandb=WandbConfig(project="mouse_following", name=run_name),
         output_dir=Path("./output") / run_name,
         # checkpoint=None,
         checkpoint=GCSCheckpointConfig(
             checkpoint_prefix=CloudPath.from_str(
                 f"gs://induction-labs/checkpoints/{run_name}",
             ),
-            checkpoint_frequency=2,  # Save every 1000 steps
-            checkpoint_first_step=True,  # Save the first step
+            checkpoint_frequency=1000,  # Save every 1000 steps
+            checkpoint_first_step=False,  # Save the first step
             checkpoint_last_step=True,  # Save the last step
         ),
     ),
     module=Qwen25OActionLITConfig(
-        # checkpoint_path=CloudPath.from_str(
-        #     "gs://induction-labs/checkpoints/qwen25o_mouse_follow/test_noise_2/2025-07-04T04-05-09/step_-1"
-        # )
-        model_name="Qwen/Qwen2.5-Omni-3B",
-        tokenizer_name="Qwen/Qwen2.5-Omni-3B",
+        checkpoint_path=CloudPath.from_str(
+            "gs://induction-labs/checkpoints/qwen25o_7B_checkpoint_saving/2025-07-17T22-36-41/step_0"
+        ),
+        model_name="Qwen/Qwen2.5-Omni-7B",
+        tokenizer_name="Qwen/Qwen2.5-Omni-7B",
         freeze_vision=True,
         freeze_network=True,
         freeze_action_embedding=False,
@@ -51,8 +51,8 @@ Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
         # prefix="gs://induction-labs/jonathan/synth/garbage_cursor_follow_v1/sample_",
         prefix="gs://induction-labs/jonathan/synth/cursor_follow_v3/sample_",
         # prefix="gs://induction-labs/jonathan/synth/noise_cursor_follow_v1/sample_",
-        # end_index=60_000,  # 60k samples
-        end_index=5000,  # 60k samples
+        end_index=60_000,  # 60k samples
+        # end_index=5000,  # 60k samples
     ),
     run=RunConfig(
         lr=LinearLRSchedule(
@@ -62,8 +62,8 @@ Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
             end_step=3_000,  # 10k steps
         ),
         sequence_length=4096,
-        batch_size=num_devices,
-        num_steps=4,
+        batch_size=num_devices * 4,
+        num_steps=5000,
         validation_every_n_steps=20,
         distributed=DistributedConfig(
             devices_per_node=num_devices,
@@ -72,7 +72,6 @@ Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
         accelerator=Accelerator.CUDA,
         precision=DType.bf16,
         seed=52,
-        # profile=ProfileConfig(),
     ),
 )
 
