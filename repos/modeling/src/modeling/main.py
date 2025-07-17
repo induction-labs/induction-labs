@@ -133,5 +133,48 @@ def export(
         asyncio.run(run(config_path=export_path.as_posix(), ray_head_worker=True))
 
 
+@app.command()
+def sweep(
+    config_path: str = typer.Argument(..., help="Path to the sweep configuration file"),
+):
+    """
+    Load and process a sweep configuration.
+
+    Args:
+        config_path (str): Path to the sweep configuration file.
+    """
+    assert "LOCAL_RANK" not in os.environ, (
+        "This command should not be run with torchrun. "
+    )
+    from modeling.config.sweep import Sweep
+    from modeling.utils.dynamic_import import import_from_string
+
+    sweep_config = import_from_string(config_path)
+    assert isinstance(sweep_config, Sweep), f"{sweep_config=} is not a Sweep"
+    from modeling.utils.exp_module_path import exp_module_path
+
+    sweep_export_path = exp_module_path(config_path, file_extension="")
+
+    configs = sweep_config.collect()
+    logger.info(f"Generated {len(configs)} experiment configurations from sweep")
+
+    for i, config in enumerate(configs):
+        export_path = sweep_export_path / f"config_{i}.toml"
+        export_path.parent.mkdir(parents=True, exist_ok=True)
+        from modeling.config.serde import serialize_experiment_config
+
+        run_command = f"mdl run {export_path} -rhw"
+
+        serialize_experiment_config(config, export_path, eof_comments=run_command)
+
+    logger.info(
+        "##################################\n"
+        f"Sweep configurations exported to: {sweep_export_path}\n"
+        "Run the following command to execute the sweep:\n"
+        f"TODO\n"
+        "##################################"
+    )
+
+
 if __name__ == "__main__":
     app()
