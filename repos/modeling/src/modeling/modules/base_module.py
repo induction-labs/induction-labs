@@ -1,35 +1,32 @@
 from __future__ import annotations
 
+import logging
 from abc import ABC, abstractmethod
 from enum import Enum
-from glob import glob
-from pathlib import Path
 from functools import partial
+from pathlib import Path
+from typing import Any, Generic, Literal, Optional, TypeVar, cast, final
 
-from accelerate import init_empty_weights
-from modeling.utils.cloud_path import CloudPath
-from safetensors import safe_open
 import torch
+from pydantic import BaseModel
+from synapse.utils.logging import configure_logging
+from torch.distributed.device_mesh import DeviceMesh
+from torch.distributed.fsdp import FSDPModule, MixedPrecisionPolicy
+from torch.optim import Optimizer
+from torch.optim.lr_scheduler import LRScheduler
+from transformers.configuration_utils import PretrainedConfig
+from transformers.modeling_utils import PreTrainedModel
+
+from modeling.checkpoints.load import download_model_checkpoint
 from modeling.config import (
     InstanceConfig,
     ModuleConfig,
     RunConfig,
 )
+from modeling.utils.class_property import class_property
+from modeling.utils.cloud_path import CloudPath
 from modeling.utils.elapsed_timer import elapsed_timer
 from modeling.utils.get_attn_impl import check_attn_impl
-from torch.distributed.device_mesh import DeviceMesh
-from transformers.configuration_utils import PretrainedConfig
-
-from torch.distributed.fsdp import FSDPModule, MixedPrecisionPolicy
-from transformers.modeling_utils import PreTrainedModel
-from typing import Any, Generic, Literal, Optional, TypeVar, final
-from synapse.utils.logging import configure_logging
-from modeling.checkpoints.load import download_model_checkpoint
-from pydantic import BaseModel
-from torch.optim import Optimizer
-from torch.optim.lr_scheduler import LRScheduler
-import logging
-from modeling.utils.class_property import class_property
 
 logger = configure_logging(
     __file__,
@@ -171,7 +168,7 @@ class BaseLITModule(ABC, Generic[MODEL_TYPE, DATA_TYPE, CONFIG_TYPE]):
         logger.debug(f"Using attention implementation: {self.attn_impl}, {self.dtype=}")
         if self.run_config.accelerator == "cuda":
             torch.cuda.reset_peak_memory_stats()
-        with init_empty_weights():
+        with torch.device("meta"):
             self.model = self.init_model_meta()
 
     # @abstractmethod
@@ -278,185 +275,18 @@ class BaseLITModule(ABC, Generic[MODEL_TYPE, DATA_TYPE, CONFIG_TYPE]):
         This method should handle the loading of pre-trained weights or checkpoint files.
         """
         logger.debug(f"Loading model weights from {tmpdir} to device {self.device}")
-        should_err = False
-        PARTIALLY_INITIALIZED = "_PARTIALLY_INITIALIZED"
-        # Load the model weights and dispatch them to the appropriate devices
-        for module in self.model.modules():
-            # This property is set by the HF load_checkpoint_and_dispatch method
-            if getattr(module, "_is_hf_initialized", False):
-                setattr(module, "_is_hf_initialized", False)
-        if should_err:
-            raise RuntimeError(
-                "Some modules were already initialized. "
-                "This may cause issues with training or inference. "
-                "Please check your model configuration and ensure that the model is not already initialized."
-            )
-
-        unused_params: list[str] = []
-        with torch.no_grad():
-            for shard in sorted(glob(str(tmpdir / "*.safetensors"))):
-                with safe_open(
-                    shard, framework="pt", device=self.instance_config.device_rank
-                ) as f:
-                    for name in f.keys():
-                        assert isinstance(name, str)
-                        pair = get_param_with_parent_module(self.model, name)
-                        if pair is None:
-                            unused_params.append(name)
-                            continue
-                        mod, param, param_name = pair
-                        tensor: torch.Tensor = f.get_tensor(name)
-                        target_dtype = (
-                            self.dtype
-                            if isinstance(param, torch.nn.Parameter)
-                            else torch.float32
-                        )
-                        # convert tensor to the correct dtype
-                        if tensor.dtype != target_dtype:
-                            tensor = tensor.to(target_dtype)
-                        param = torch.nn.Parameter(
-                            torch.empty_like(
-                                param, device=self.device, dtype=target_dtype
-                            ),
-                            requires_grad=param.requires_grad,
-                        )
-                        param.data.copy_(tensor)
-                        # TODO: For now we use hf `_is_hf_initialized` convention.
-                        setattr(param, "_is_hf_initialized", True)
-                        setattr(mod, param_name, param)
-                        setattr(mod, PARTIALLY_INITIALIZED, True)
-
-        # print(f"{all_params=}")
-        if len(unused_params) > 0:
-            logger.warning(
-                f"Some parameters were not used when initializing the model: {len(unused_params)=}"
-                f"{unused_params[:10]}..."
-            )
-
-        # logger.debug(f"{unused_params=}")
-
-        uninitialized_modules: list[str] = []
-        for module_name, module in self.model.named_modules():
-            child_parameters = list(module.named_parameters(recurse=False))
-            # Check that the module has direct child parameters
-            if len(child_parameters) == 0:
-                # If it has no child parameters, don't need to check it
-                setattr(module, "_is_hf_initialized", True)
-                continue
-
-            # check partially initialized modules
-            if getattr(module, PARTIALLY_INITIALIZED, False):
-                # Check that all direct child params are initialized
-                for param_name, param in child_parameters:
-                    if not param.device == self.device:
-                        raise RuntimeError(
-                            f"{module_name=} was partially initialized, uninitialized parameter {param_name}. "
-                        )
-                setattr(module, "_is_hf_initialized", True)
-
-            else:
-                # Here none of the parameters are initialized
-                for param_name, param in child_parameters:
-                    param = torch.nn.Parameter(
-                        torch.empty_like(param, device=self.device, dtype=self.dtype),
-                        requires_grad=param.requires_grad,
-                    )
-                    setattr(module, param_name, param)
-                uninitialized_modules.append(module_name)
-
-        if len(uninitialized_modules) > 0:
-            logger.warning(
-                f"Some modules were not loaded from weights: {len(uninitialized_modules)=}"
-                f"{uninitialized_modules[:10]}..."
-            )
-
-        # Now we init rest of the model weights
-        self.model.init_weights()
-
-        # Finally check that all modules were initialized
-        for name, module in self.model.named_modules():
-            # This property is set by the HF load_checkpoint_and_dispatch method
-            if not getattr(module, "_is_hf_initialized", False):
-                logger.warning(f"Module {name} was not loaded or initialized. ")
-                should_err = True
-        if should_err:
-            raise RuntimeError(
-                "Some modules were not initialized. "
-                "This may cause issues with training or inference. "
-                "Please check your model configuration and ensure that the model is properly initialized."
-            )
-        # Transfer model buffers to current device, model weights should already be on the correct device
-        self.model = self.model.to(  # type: ignore[arg]
-            device=self.device,
+        model_cls = cast(type[MODEL_TYPE], self.model_cls)
+        loaded_model = model_cls.from_pretrained(
+            tmpdir,
+            config=self.model.config,
+            torch_dtype=self.dtype,
+            device_map={
+                "": self.device  # Use the device index for the model
+            },  # Ensure model is loaded on the correct device
+            attn_implementation=self.attn_impl,
+            local_files_only=True,
         )
-
-        # loaded_model = self.model_cls.from_pretrained(
-        #     self.module_config.model_name,
-        #     config=self.model.config,
-        #     torch_dtype=self.dtype,
-        #     device_map={
-        #         "": self.device  # Use the device index for the model
-        #     },  # Ensure model is loaded on the correct device
-        #     attn_implementation=self.attn_impl,
-        #     local_files_only=True,
-        # )
-        # # Check the difference between the loaded model and the current model
-        # for name, param in self.model.named_parameters():
-        #     pair = get_param_with_parent_module(loaded_model, name)
-        #     if pair is None:
-        #         logger.warning(
-        #             f"Loaded model has parameter {name} that is not in the current model."
-        #         )
-        #         continue
-
-        #     current_mod, current_param, _ = pair
-        #     # Check dtype and device
-        #     if current_param.dtype != param.dtype:
-        #         logger.warning(
-        #             f"Parameter {name} in loaded model has dtype {param.dtype}, "
-        #             f"but current model has dtype {current_param.dtype}."
-        #         )
-        #     if current_param.device != param.device:
-        #         logger.warning(
-        #             f"Parameter {name} in loaded model is on device {param.device}, "
-        #             f"but current model is on device {current_param.device}."
-        #         )
-
-        #     if not torch.equal(param.data, current_param.data):
-        #         logger.warning(
-        #             f"Parameter {name} in loaded model does not match current model."
-        #         )
-        #         # then copy the data from the loaded model to the current model
-        #         current_param.data.copy_(param.data)
-
-        # our_named_buffers = dict(self.model.named_buffers())
-        # their_named_buffers = dict(loaded_model.named_buffers())
-
-        # for k, v in our_named_buffers.items():
-        #     if k not in their_named_buffers:
-        #         logger.warning(f"Buffer {k} is not in the loaded model.")
-        #         continue
-        #     their_v = their_named_buffers[k]
-        #     if v.dtype != their_v.dtype:
-        #         logger.warning(
-        #             f"Buffer {k} has dtype {v.dtype}, but loaded model has dtype {their_v.dtype}."
-        #         )
-        #     if v.device != their_v.device:
-        #         logger.warning(
-        #             f"Buffer {k} is on device {v.device}, but loaded model is on device {their_v.device}."
-        #         )
-        #     if not torch.equal(v, their_v):
-        #         logger.warning(f"Buffer {k} does not match loaded model.")
-        #         # print(f"{v=}, {their_v=}")
-        #         # v.copy_(their_v)
-
-        # for k, v in their_named_buffers.items():
-        #     if k not in our_named_buffers:
-        #         logger.warning(
-        #             f"Buffer {k} is in the loaded model, but not in our model."
-        #         )
-
-        return self.model
+        return loaded_model
 
     # @final
     # def wandb_log(

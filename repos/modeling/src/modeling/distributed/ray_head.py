@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from contextlib import contextmanager
 
-from modeling.modules.base_module import cast
+from typing import cast
 import ray
 import ray.scripts.scripts as ray_cli
 from pydantic import AnyUrl, UrlConstraints
