@@ -1,19 +1,29 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Self, List, Optional
 
 import datasets
 from modeling.config import DatapackConfig, ExperimentConfig, ModuleConfig
 from modeling.modules.text_module import TextLITConfig
 from pydantic import BaseModel, ConfigDict
-from torch.utils.data import DataLoader
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
+from transformers import AutoTokenizer
 
 import torch
-from torch.utils.data import Dataset
-from typing import List, Callable, Optional
 from synapse.utils.logging import configure_logging
-from modeling.config.data import BaseDataSample
+from modeling.config.data import BaseDataSample, BaseDataset
+
+import functools
+
+
+@functools.lru_cache(maxsize=1)
+def get_tokenizer(tokenizer_name: str) -> PreTrainedTokenizerBase:
+    """
+    Lazy load the tokenizer from the Hugging Face model hub.
+    This function caches the tokenizer to avoid loading it multiple times.
+    """
+    return AutoTokenizer.from_pretrained(tokenizer_name)
+
 
 logger = configure_logging(__name__)
 
@@ -54,47 +64,79 @@ class TextPretrainDataSample(BaseDataSample):
         return TextPretrainDataSample(input_ids=input_ids, labels=labels)
 
 
-class GenericSFTDataset(Dataset[TextPretrainDataSample]):
-    """
-    A generic PyTorch Dataset for sequence fine-tuning (SFT) tasks.
+class TextDatasetArgs(BaseModel):
+    dataset_path: str
+    dataset_name: str
+    seq_len: int
+    tokenizer_name: str
+    stride: Optional[int] = None
 
-    Args:
-        texts (List[str]): A list of raw text strings to tokenize and chunk.
-        tokenizer (Callable[[str], dict]): A tokenizer function that takes a string
-            and returns a dict with at least the key 'input_ids'.
-        seq_len (int): The sequence length for each example.
-        stride (Optional[int]): The stride for sliding window, defaults to seq_len (no overlap).
+
+class TextDataset(BaseDataset[TextPretrainDataSample, TextDatasetArgs]):
+    """
+    A PyTorch Dataset for text pretraining tasks.
     """
 
-    def __init__(
-        self,
-        texts: List[str],
-        tokenizer: Callable[[str], dict],
-        seq_len: int,
-        stride: Optional[int] = None,
-    ):
-        self.tokenizer = tokenizer
-        self.seq_len = seq_len
-        self.stride = stride or seq_len
+    examples: List[List[int]]
+
+    @classmethod
+    def data_cls(cls) -> type[TextPretrainDataSample]:
+        """
+        Class property that should return the data class type.
+        This is used to ensure that the dataset is compatible with the data class.
+        """
+        return TextPretrainDataSample
+
+    @classmethod
+    async def constructor(cls, args: TextDatasetArgs) -> Self:
+        """
+        Asynchronous constructor for the dataset.
+        This allows for any necessary asynchronous setup before the dataset is used.
+        """
+        logger.info(f"Loading {args.dataset_name} dataset...")
+        dataset = datasets.load_dataset(
+            args.dataset_path, args.dataset_name, split="train"
+        )
+        assert isinstance(dataset, datasets.Dataset), (
+            f"Expected Dataset, got {type(dataset)}"
+        )
+        logger.info(f"Dataset loaded with {len(dataset)} examples")
+
+        # Extract text from the dataset
+        texts = [example["text"] for example in dataset if example["text"].strip()]
+        logger.info(f"Filtered to {len(texts)} non-empty text examples")
+
+        seq_len = args.seq_len
+        stride = args.stride or seq_len
+        tokenizer = get_tokenizer(args.tokenizer_name)
+
+        # Create temporary instance to access tokenizer property
 
         # Tokenize and flatten all texts into a single list of token IDs
         all_ids = []
         for txt in texts:
-            tokens = tokenizer(txt)
+            tokens = tokenizer(txt, return_tensors=None)
             if "input_ids" not in tokens:
                 raise ValueError("Tokenizer output must contain 'input_ids'")
             all_ids.extend(tokens["input_ids"])
 
         # Calculate number of chunks
-        self.examples = []
-        for start_idx in range(0, len(all_ids) - seq_len + 1, self.stride):
+        examples = []
+        for start_idx in range(0, len(all_ids) - seq_len + 1, stride):
             chunk = all_ids[start_idx : start_idx + seq_len]
-            self.examples.append(chunk)
+            examples.append(chunk)
 
-    def __len__(self) -> int:
-        return len(self.examples)
+        return cls(
+            args=args,
+            length=len(examples),
+            examples=examples,
+        )
 
-    def __getitem__(self, idx: int) -> TextPretrainDataSample:
+    async def get_item(self, idx: int) -> TextPretrainDataSample:
+        """
+        Asynchronously fetch a data sample.
+        This method should be implemented to load the actual data from the paths.
+        """
         input_ids = self.examples[idx]
         # For SFT, labels are the same as inputs (language modeling)
         labels = input_ids.copy()
@@ -103,85 +145,16 @@ class GenericSFTDataset(Dataset[TextPretrainDataSample]):
             labels=torch.tensor(labels, dtype=torch.long),
         )
 
-    @classmethod
-    def combine_batch(
-        cls, batch: list[TextPretrainDataSample]
-    ) -> TextPretrainDataSample:
-        """
-        Combine a batch of TextPretrainDataSamples into a single TextPretrainDataSample.
-        This is used to prepare the data for training or evaluation.
-        """
-        input_ids = torch.stack([sample.input_ids for sample in batch])
-        labels = torch.stack([sample.labels for sample in batch])
-        return TextPretrainDataSample(input_ids=input_ids, labels=labels)
 
-
-class TextPretrainDataModule(BaseDataModule[TextPretrainDataSample]):
-    def __init__(
-        self,
-        config: TextPretrainDatapackConfig,
-        extra_args: TextPretrainDataModuleExtraArgs,
-    ):
-        super().__init__()
-        self.config = config
-        self.extra_args = extra_args
-        # ...
-
-    def setup(self, stage: str | None = None) -> None:
-        logger.info("Loading wikitext-2 dataset...")
-        dataset = datasets.load_dataset("wikitext", "wikitext-2-raw-v1", split="train")
-        logger.info(f"Dataset loaded with {len(dataset)} examples")
-
-        # Extract text from the dataset
-        texts = [example["text"] for example in dataset if example["text"].strip()]
-        logger.info(f"Filtered to {len(texts)} non-empty text examples")
-
-        # Create the training dataset using GenericSFTDataset
-        logger.info("Creating training dataset...")
-        self.train_data = GenericSFTDataset(
-            texts=texts,
-            tokenizer=lambda x: self.extra_args.tokenizer(x, return_tensors=None),
-            seq_len=self.extra_args.seq_length,
-        )
-        logger.info(f"Training dataset created with {len(self.train_data)} examples")
-
-    def train_dataloader(self, generator: torch.Generator) -> DataLoader:
-        return DataLoader(
-            self.train_data,  # type: ignore # noqa: PGH003
-            batch_size=self.extra_args.batch_size,
-            shuffle=True,
-            drop_last=True,
-            collate_fn=GenericSFTDataset.combine_batch,  # type: ignore
-            generator=generator,
-        )
-
-    def val_dataloader(self, generator: torch.Generator) -> DataLoader:
-        # For pretraining, we typically don't have a validation set
-        return DataLoader(
-            self.train_data,  # Using the same data for validation
-            batch_size=self.extra_args.batch_size,
-            shuffle=False,
-            drop_last=False,
-            collate_fn=GenericSFTDataset.combine_batch,  # type: ignore
-            generator=generator,
-        )
-
-
-class TextPretrainDataModuleExtraArgs(BaseModel):
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-    seq_length: int = 1024  # Default sequence length
-    tokenizer: PreTrainedTokenizerBase
-    batch_size: int
-
-
-class TextPretrainDatapackConfig(DatapackConfig[TextPretrainDataModule]):
+class TextPretrainDatapackConfig(DatapackConfig[TextPretrainDataSample]):
     """
     Configuration class for the Text Pretraining Data Module.
     This class is used to configure the data module for text pretraining tasks.
     """
 
     config_path: str = "modeling.data.text_train.TextPretrainDatapackConfig"
-    dataset_name: str = "wikitext"
+    dataset_path: str = "wikitext"
+    dataset_name: str = "wikitext-2-raw-v1"
     num_workers: int = 2
 
     def validate_module_compatibility(
@@ -196,17 +169,19 @@ class TextPretrainDatapackConfig(DatapackConfig[TextPretrainDataModule]):
         )
         return module_config
 
-    def create_datapack(
-        self,
-        full_config: ExperimentConfig[TextPretrainDataModule],
-    ) -> TextPretrainDataModule:
+    async def _init_train_dataset(self, full_config: ExperimentConfig) -> TextDataset:
         module_config = self.validate_module_compatibility(full_config.module)
-        extra_args = TextPretrainDataModuleExtraArgs(
-            seq_length=full_config.run.sequence_length,
-            tokenizer=module_config.get_tokenizer,
-            batch_size=full_config.run.batch_size,
+        return await TextDataset.constructor(
+            TextDatasetArgs(
+                dataset_path=self.dataset_path,
+                dataset_name=self.dataset_name,
+                seq_len=full_config.run.sequence_length,
+                tokenizer_name=module_config.get_tokenizer.name_or_path,
+            )
         )
-        return TextPretrainDataModule(self, extra_args)
+
+    async def _init_val_dataset(self, full_config: ExperimentConfig) -> TextDataset:
+        return await self._init_train_dataset(full_config)
 
 
-__all__ = ["TextPretrainDataModule", "TextPretrainDatapackConfig"]
+__all__ = ["TextPretrainDatapackConfig"]

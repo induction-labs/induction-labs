@@ -527,12 +527,6 @@ class ActionDataset(BaseDataset[ActionDataSample, ActionDatasetArgs]):
         )
 
 
-class ActionDataModuleExtraArgs(BaseModel):
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-    seq_length: int = 1024  # Default sequence length
-    batch_size: int
-
-
 class ActionDatapackConfig(DatapackConfig[ActionDataSample]):
     """
     Configuration class for the Text Pretraining Data Module.
