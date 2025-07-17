@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import time
 from typing import Any, TypeVar
 
 from modeling.utils.check_nans import check_nans
@@ -133,8 +132,6 @@ class Qwen25OActionLIT(
         self,
     ):
         module_config = self.module_config
-        delay = self.instance_config.device_rank * 0.5
-        time.sleep(delay)
         config = Qwen2_5OmniThinkerActionConfig.from_pretrained(
             module_config.model_name,
             freeze_network=module_config.freeze_network,
@@ -312,7 +309,7 @@ class Qwen25OActionLIT(
             "mesh": device_mesh[MeshAxis.FSDP],
             "mp_policy": mp_policy,
         }
-        # fully_shard(self.model.visual, **fsdp_config)
+        fully_shard(self.model.thinker.visual, **fsdp_config)
 
         for layer_id, transformer_block in enumerate(self.model.thinker.model.layers):
             # Activation checkpointing kinda broken

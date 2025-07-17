@@ -1,3 +1,4 @@
+from modeling.checkpoints.save import save_checkpoint_to_tmpdir
 from modeling.modules.base_module import BaseModuleConfig, PreTrainedModel
 from modeling.utils.typed_remote import (
     remote_method,
@@ -162,6 +163,14 @@ class ExperimentActor(BaseActor[ActorArgs]):
         """
         return self.experiment_config.runtime_config.tmp_dir / "model_weights"
 
+    @property
+    def tmp_ckpt_path(self) -> Path:
+        """
+        Return the temporary checkpoint path for the actor.
+        This is used to store temporary checkpoints during training.
+        """
+        return self.experiment_config.runtime_config.tmp_dir / "checkpoints"
+
     @remote_method
     def download_weights(self) -> None:
         """
@@ -249,4 +258,21 @@ class ExperimentActor(BaseActor[ActorArgs]):
         # Add learning rate to metrics
         metrics["train/learning_rate"] = self.state.optimizer.param_groups[0]["lr"]
         metrics["train/loss"] = loss.item()
+        # logger.debug(f"Training step completed with loss: {loss.item()}")
         return metrics
+
+    @remote_method
+    def save_checkpoint_to_tmpdir(self, tmpdir: Path) -> None:
+        """
+        Save the model checkpoint to the specified temporary directory.
+        This method should be called to save the model state.
+        """
+        assert hasattr(self, "state"), (
+            "This method should not be called before the actor has been initialized."
+        )
+        logger.debug(f"Saving checkpoint to {tmpdir=}")
+        # TODO: Asyncrhronous background saving. TBH the main CPU should be responsible for uploading checkpoints, not worker.
+        save_checkpoint_to_tmpdir(
+            model=self.state.module.model,
+            local_dir=tmpdir,
+        )

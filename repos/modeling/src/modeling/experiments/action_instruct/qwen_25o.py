@@ -7,7 +7,6 @@ from modeling.config import (
     ExperimentMetadata,
     GCSCheckpointConfig,
     RunConfig,
-    WandbConfig,
     LinearLRSchedule,
     # ProfileConfig
 )
@@ -18,18 +17,20 @@ from modeling.modules.action_instruct.qwen_25o import Qwen25OActionLITConfig
 from modeling.utils.cloud_path import CloudPath
 # from modeling.modules.base_module import CompileConfig
 
-run_name = "qwen25o_7B_overfit"
+run_name = "qwen25o_7B_checkpoint_saving"
+num_devices = 2
 Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
     metadata=ExperimentMetadata(
-        wandb=WandbConfig(project="mouse_following", name=run_name),
+        # wandb=WandbConfig(project="mouse_following", name=run_name),
+        wandb=None,
         output_dir=Path("./output") / run_name,
         # checkpoint=None,
         checkpoint=GCSCheckpointConfig(
             checkpoint_prefix=CloudPath.from_str(
                 f"gs://induction-labs/checkpoints/{run_name}",
             ),
-            checkpoint_frequency=1000,  # Save every 1000 steps
-            checkpoint_first_step=False,  # Save the first step
+            checkpoint_frequency=2,  # Save every 1000 steps
+            checkpoint_first_step=True,  # Save the first step
             checkpoint_last_step=True,  # Save the last step
         ),
     ),
@@ -40,7 +41,7 @@ Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
         model_name="Qwen/Qwen2.5-Omni-3B",
         tokenizer_name="Qwen/Qwen2.5-Omni-3B",
         freeze_vision=True,
-        freeze_network=False,
+        freeze_network=True,
         freeze_action_embedding=False,
         freeze_action_head=False,
         # compile=None,
@@ -57,15 +58,15 @@ Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
         lr=LinearLRSchedule(
             peak_lr=1e-4,
             end_lr=1e-5,
-            warmup_steps=20,
+            warmup_steps=0,
             end_step=3_000,  # 10k steps
         ),
         sequence_length=4096,
-        batch_size=1,
-        num_steps=5000,
+        batch_size=num_devices,
+        num_steps=4,
         validation_every_n_steps=20,
         distributed=DistributedConfig(
-            devices_per_node=1,
+            devices_per_node=num_devices,
         ),
         attn_impl=AttentionImplementation.SDPA,
         accelerator=Accelerator.CUDA,

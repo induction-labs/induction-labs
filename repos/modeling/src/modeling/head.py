@@ -25,7 +25,11 @@ from synapse.utils.logging import configure_logging
 from wandb.sdk.wandb_run import Run
 
 from modeling.actor import ActorArgs, ExperimentActor
-from modeling.config import ExperimentConfig, RuntimeConfig, UnifiedExperimentConfig
+from modeling.config import (
+    ExperimentConfig,
+    RuntimeConfig,
+    UnifiedExperimentConfig,
+)
 from modeling.config.distributed import DistributedConfig, InstanceConfig
 from modeling.distributed.distributed import TorchUrl
 from modeling.distributed.ray_head import RayUrl, initialize_ray_head
@@ -33,6 +37,7 @@ from modeling.utils.fix_rng import fix_rng
 from modeling.utils.tmpdir import TmpDirContext
 from modeling.utils.typed_remote import RemoteArgs
 from typing import cast
+from modeling.checkpoints.save import upload_to_gcs
 
 logger = configure_logging(__name__, level=logging.DEBUG)
 
@@ -130,19 +135,32 @@ class ExperimentManager:
         if self.state.wandb is not None:
             self.state.wandb.log(metrics, step=step, commit=True)
 
+    async def save_checkpoint(self, suffix: str):
+        """
+        Save a checkpoint of the experiment.
+        """
+        assert self.exp_config.metadata.checkpoint is not None, (
+            "Checkpointing is not enabled in the experiment configuration."
+        )
+        local_dir = self.state.tmp_dir / "checkpoints" / suffix
+
+        promises = [
+            actor.save_checkpoint_to_tmpdir.remote(tmpdir=local_dir)
+            for actor in self.state.actors.all_actors
+        ]
+        await asyncio.gather(*promises)
+        upload_to_gcs(
+            local_dir=local_dir,
+            gcs_bucket=self.exp_config.metadata.checkpoint.bucket_and_path[0],
+            gcs_prefix=self.exp_config.metadata.checkpoint.bucket_and_path[1] / suffix,
+        )
+
     # # TODO: Make this async
     async def run(self):
         """
         Run the experiment instance.
         This method is a placeholder for the actual run logic.
         """
-        # # Setup data and model
-        # datapack = cast(
-        #     BaseDataModule,
-        #     self.exp_config.datapack.create_datapack(full_config=self.exp_config),
-        # )
-        # datapack.setup("fit")
-        # self.module.configure_model(self.state.mesh)
 
         # # Get training dataloader
         # TODO: Don't use torch dataloader class rewrite manually
@@ -163,6 +181,10 @@ class ExperimentManager:
 
         # # Training loop
         num_steps = self.exp_config.run.num_steps
+        if (c := self.exp_config.metadata.checkpoint) and c.checkpoint_first_step:
+            # Save the checkpoint to GCS
+            logger.info(f"Saving checkpoint at step 0 to {c.checkpoint_prefix}")
+            await self.save_checkpoint(suffix="step_0")
 
         logger.info(f"Starting training: {num_steps} steps, ")
         pbar = tqdm.tqdm(range(num_steps), desc="Training", total=num_steps)
@@ -191,7 +213,20 @@ class ExperimentManager:
 
                 self.wandb_log(train_metrics, step=step)
                 loss = train_metrics.get("train/loss")
-                pbar.set_postfix(loss=f"{loss:.4f}")
+
+            # TODO: Make this a callback
+            if (c := self.exp_config.metadata.checkpoint) and c.should_checkpoint(step):
+                # Save the checkpoint to GCS
+                logger.info(f"Saving checkpoint at step {step} to {c.bucket_and_path}")
+                await self.save_checkpoint(suffix=f"step_{step}")
+            pbar.set_postfix(loss=f"{loss:.4f}")
+
+        # Post training stuff
+        # TODO: Write a finished training cleanup hook
+        if (c := self.exp_config.metadata.checkpoint) and c.checkpoint_last_step:
+            # Save the checkpoint to GCS
+            logger.info(f"Saving checkpoint at last step to {c.checkpoint_prefix}")
+            await self.save_checkpoint(suffix="step_-1")
 
     @staticmethod
     def create_runtime_config(tmp_dir: Path) -> RuntimeConfig:

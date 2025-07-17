@@ -33,10 +33,10 @@ Qwen3PretrainExperimentConfig = ExperimentConfig(
     run=RunConfig(
         lr=LinearLRSchedule.constant_lr(1e-5),
         sequence_length=4096,
-        batch_size=1,
+        batch_size=4,
         num_steps=5000,
         distributed=DistributedConfig(
-            devices_per_node=1,
+            devices_per_node=4,
         ),
         attn_impl=AttentionImplementation.SDPA,
         accelerator=Accelerator.CUDA,

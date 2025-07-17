@@ -116,7 +116,9 @@ class GCSCheckpointConfig(BaseModel):
         Determine if a checkpoint should be saved at the given step.
         Step should be strictly positive
         """
-        assert step > 0, "Step must be strictly positive for checkpointing."
+        # This is checked against with the `checkpoint_first_step` and `checkpoint_last_step` flags.
+        if step == 0:
+            return False
         if self.checkpoint_frequency == 0:
             return False
         return step % self.checkpoint_frequency == 0
