@@ -17,12 +17,12 @@ class Sweep:
 
     class S:
         @staticmethod
-        def lr_sweep(lr: LinearLRSchedule, exp: ExperimentConfig) -> ExperimentConfig:
+        def lr(lr: LinearLRSchedule, exp: ExperimentConfig) -> ExperimentConfig:
             exp.run.lr = lr
             return exp
 
         @staticmethod
-        def seed_sweep(seed: int, exp: ExperimentConfig) -> ExperimentConfig:
+        def seed(seed: int, exp: ExperimentConfig) -> ExperimentConfig:
             exp.run.seed = seed
             return exp
 

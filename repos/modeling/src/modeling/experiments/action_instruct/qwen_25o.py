@@ -100,13 +100,15 @@ Qwen25oActionSweep = (
             )
             for peak_lr in [1e-4, 5e-5, 1e-5]
         ],
-        Sweep.S.lr_sweep,
+        Sweep.S.lr,
     )
     .sweep(
         [52, 42, 69],
-        Sweep.S.seed_sweep,
+        Sweep.S.seed,
     )
 )
+
+# (lambda a: (x := 12 + a, x + 2)[-1])(2)
 
 # mdl export modeling.experiments.action_instruct.qwen_25o.Qwen25OActionExperimentConfig_CPU
 # mdl export modeling.experiments.action_instruct.qwen_25o.Qwen25OActionExperimentConfig_GPU
