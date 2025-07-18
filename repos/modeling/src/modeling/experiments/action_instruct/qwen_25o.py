@@ -8,7 +8,6 @@ from modeling.config import (
     GCSCheckpointConfig,
     RunConfig,
     LinearLRSchedule,
-    WandbConfig,
     # ProfileConfig
 )
 from pathlib import Path
@@ -19,11 +18,12 @@ from modeling.utils.cloud_path import CloudPath
 from modeling.config.sweep import Sweep
 # from modeling.modules.base_module import CompileConfig
 
-run_name = "qwen25o_7B_uninitialized"
+run_name = "qwen25o_7B_sweep_test"
 num_devices = 1
 Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
     metadata=ExperimentMetadata(
-        wandb=WandbConfig(project="mouse_following", name=run_name),
+        # wandb=WandbConfig(project="mouse_following", name=run_name),
+        wandb=None,
         output_dir=Path("./output") / run_name,
         # checkpoint=None,
         checkpoint=GCSCheckpointConfig(
@@ -32,7 +32,7 @@ Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
             ),
             checkpoint_frequency=100,  # Save every 1000 steps
             checkpoint_first_step=False,  # Save the first step
-            checkpoint_last_step=True,  # Save the last step
+            checkpoint_last_step=False,  # Save the last step
         ),
     ),
     module=Qwen25OActionLITConfig(
@@ -64,7 +64,7 @@ Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
         ),
         sequence_length=4096,
         batch_size=num_devices,
-        num_steps=5000,
+        num_steps=2,
         validation_every_n_steps=20,
         distributed=DistributedConfig(
             devices_per_node=num_devices,

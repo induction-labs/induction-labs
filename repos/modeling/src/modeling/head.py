@@ -258,6 +258,7 @@ class ExperimentManager:
 
         # Post training stuff
         # TODO: Write a finished training cleanup hook
+        logger.info("🚀🚀🚀🚀🚀🚀🚀 Run completed 🚀🚀🚀🚀🚀🚀🚀")
         if (c := self.exp_config.metadata.checkpoint) and c.checkpoint_last_step:
             # Save the checkpoint to GCS
             logger.info(f"Saving checkpoint at last step to {c.checkpoint_prefix}")

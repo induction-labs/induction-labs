@@ -12,6 +12,8 @@ import warnings
 import builtins
 from synapse.video_loader.main import AsyncTyper
 import asyncio
+from modeling.queue import queue_app
+
 
 logger = configure_logging(
     __name__,
@@ -171,10 +173,12 @@ def sweep(
         "##################################\n"
         f"Sweep configurations exported to: {sweep_export_path}\n"
         "Run the following command to execute the sweep:\n"
-        f"TODO\n"
+        f"mdl queue run {sweep_export_path}\n"
         "##################################"
     )
 
+
+app.add_typer(queue_app, name="queue")
 
 if __name__ == "__main__":
     app()
