@@ -26,6 +26,11 @@
       strace
       vim
       ffmpeg-full
+      (
+        pkgs.google-cloud-sdk.withExtraComponents [
+          pkgs.google-cloud-sdk.components.gke-gcloud-auth-plugin
+        ]
+      )
     ]
     ++ lib.optionals pkgs.stdenv.isLinux [
       # TODO: Build depot for all platforms (mac)
@@ -38,26 +43,22 @@
         pkgs.stdenv.mkDerivation rec {
           inherit pname version;
 
-          src = builtins.fetchTarball {
-            # nix-prefetch-url https://github.com/depot/cli/releases/download/v2.95.0/depot_2.95.0_linux_amd64.tar.gz
+          src = fetchurl {
             url = "https://github.com/depot/cli/releases/download/v${version}/depot_${version}_linux_amd64.tar.gz";
-            sha256 = "1fmy30y4hbhd15wg65vicq2r6hvf7xj31c327hlc7d0x8bva7154"; # Fill in after testing
+            # You can prefetch to get the right hash, then paste it here:
+            sha256 = "sha256-LuFqYtduqFpvaV9xQlKfKPrCuyv0LiMP+9WHIZ8pQQQ=";
           };
-          dontBuild = true;
-          unpackPhase = "true";
 
+          dontBuild = true;
+          unpackPhase = ''
+            tar xzf $src
+            mv bin source
+          '';
           # Convert the install script logic here
           installPhase = ''
             mkdir -p $out/bin
-            # copy the binary (not mv)
-            install -m755 $src/bin/depot $out/bin/depot
+            install -m755 source/depot $out/bin/depot
           '';
-          meta = {
-            description = "Depot CLI – version ${version}";
-            homepage = "https://github.com/depot/cli";
-            # license = stdenv.lib.licenses.mit;
-            # maintainers = with stdenv.lib.maintainers; [yourGitHubHandle];
-          };
         })
     ];
 
@@ -78,11 +79,6 @@
 
   # https://devenv.sh/services/
   # services.postgres.enable = true;
-
-  # https://devenv.sh/scripts/
-  scripts.hello.exec = ''
-    echo hello from $GREET
-  '';
 
   enterShell = ''
     # We need to set this manually otherwise triton tries to call `ldconfig` which is UB in nix.

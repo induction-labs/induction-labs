@@ -13,10 +13,14 @@ target "local" {
         "modeling:latest",
         "modeling:${COMMIT_SHA}",
     ]
+    args = {
+    }
     secret = [
     "id=wandb_key,src=./secrets/wandb_key",
-    "id=huggingface_key,src=./secrets/huggingface_key"
+    "id=huggingface_key,src=./secrets/huggingface_key",
+    "id=gcp_service_account_key,src=./secrets/gcp_service_account_key.json"
     ]
+    ssh = ["default"]  # Add this line
 }
 
 target "remote" {
@@ -31,7 +35,7 @@ target "remote" {
 }
 
 group "default" {
-    targets = ["local", "remote"]
+    targets = ["remote"]
 }
 
 # CI-specific target

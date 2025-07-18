@@ -19,8 +19,17 @@ COPY repos/modeling/devenv.* ./repos/modeling/
 WORKDIR /workspace/repos/modeling
 # Setup the devenv shell. This install all non-cuda deps needed. 
 # This will be cached for future RUN commands.
+
 RUN devenv shell
 SHELL ["devenv", "shell", "--", "/bin/bash", "-c"]
+
+# Check that ssh is mounted properly
+RUN --mount=type=ssh \
+  ssh-add -l
+
+# Need to run this otherwise git will fail to clone private repos.
+# https://stackoverflow.com/questions/43418188/ssh-agent-forwarding-during-docker-build
+RUN mkdir -p -m 0600 ~/.ssh && ssh-keyscan github.com >> ~/.ssh/known_hosts
 
 # We need the parents path otherwise it will overwrite at root level.
 COPY --parents ./repos/*/pyproject.toml /workspace/
@@ -36,18 +45,20 @@ COPY uv.lock /workspace/uv.lock
 ENV SETUPTOOLS_SCM_PRETEND_VERSION="0.0.0"
 
 ENV UV_LINK_MODE=copy
-# RUN uv sync --locked --no-group workspace --no-install-workspace
-RUN --mount=type=cache,target=/root/.cache/uv \
+
+
+RUN --mount=type=cache,target=/root/.cache/uv --mount=type=ssh \
   uv sync --locked --no-install-workspace --group flash-attn
 
-# TODO: Make this build depend on vllm build, so we dont do this giant copy and have a huge layer.
+# # TODO: Make this build depend on vllm build, so we dont do this giant copy and have a huge layer.
 COPY repos/modeling/ /workspace/repos/modeling/
 COPY repos/synapse/ /workspace/repos/synapse/
 
 
-RUN --mount=type=cache,target=/root/.cache/uv \
+RUN --mount=type=cache,target=/root/.cache/uv --mount=type=ssh \
   uv sync --locked --group flash-attn
 
+# TODO: Don't bake these into the image, mount them as secrets at runtime.
 RUN --mount=type=secret,id=wandb_key \
   wandb login $(cat /run/secrets/wandb_key)
 
@@ -55,6 +66,16 @@ RUN --mount=type=secret,id=wandb_key \
 RUN --mount=type=secret,id=huggingface_key \
   huggingface-cli login --token $(cat /run/secrets/huggingface_key)
 
+RUN --mount=type=secret,id=gcp_service_account_key \
+  gcloud auth activate-service-account --key-file=/run/secrets/gcp_service_account_key
+
+RUN --mount=type=secret,id=gcp_service_account_key \
+  gcloud config set project "induction-labs"
+
+RUN mkdir -p /secrets
+RUN --mount=type=secret,id=gcp_service_account_key \
+  cp /run/secrets/gcp_service_account_key /secrets/gcp-service-account.json
+ENV GOOGLE_APPLICATION_CREDENTIALS=/secrets/gcp-service-account.json
 # COPY ../../ ../../
 # For now don't sync vllm :/
 
