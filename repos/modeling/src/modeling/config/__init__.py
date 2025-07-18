@@ -58,7 +58,9 @@ class GCSCheckpointConfig(BaseModel):
     """
 
     checkpoint_frequency: int = Field(
-        0, description="How often to save checkpoints in steps. Set to 0 to disable."
+        0,
+        ge=0,
+        description="How often to save checkpoints in steps. Set to 0 to disable.",
     )
     checkpoint_last_step: bool = Field(
         True,

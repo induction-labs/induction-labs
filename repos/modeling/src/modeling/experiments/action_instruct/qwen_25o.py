@@ -31,7 +31,7 @@ Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
             checkpoint_prefix=CloudPath.from_str(
                 f"gs://induction-labs/checkpoints/{run_name}",
             ),
-            checkpoint_frequency=-1,  # Save every 1000 steps
+            checkpoint_frequency=0,  # Save every 1000 steps
             checkpoint_first_step=False,  # Save the first step
             checkpoint_last_step=True,  # Save the last step
         ),
