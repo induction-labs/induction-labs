@@ -181,6 +181,14 @@ class ExperimentMetadata(BaseModel):
 class ModuleConfig(BaseModel, ABC):
     config_path: str
 
+    @classmethod
+    def module_cls(cls) -> type["BaseLITModule"]:
+        """
+        Return the class of the Lightning module.
+        This method should be implemented by subclasses to return the actual module class.
+        """
+        return BaseLITModule
+
     @model_validator(mode="after")
     def check_config_path(self) -> Self:
         """

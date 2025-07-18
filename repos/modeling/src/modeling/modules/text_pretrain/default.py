@@ -94,7 +94,9 @@ class TextPretrainLIT(TextLIT[MODEL_TYPE, TextPretrainDataSample, ConfigType]):
             self.model.model.layers[layer_id] = transformer_block
         return fully_shard(self.model, **fsdp_config)
 
-    def run_training_step(self, inputs: TextPretrainDataSample) -> torch.Tensor:
+    def run_training_step(
+        self, inputs: TextPretrainDataSample
+    ) -> tuple[torch.Tensor, dict]:
         """
         Run a training step with the provided inputs.
         The inputs should be a dictionary containing the necessary data for the model.
@@ -106,7 +108,7 @@ class TextPretrainLIT(TextLIT[MODEL_TYPE, TextPretrainDataSample, ConfigType]):
         assert isinstance(outputs.loss, torch.Tensor), (
             f"Expected outputs.loss to be a Tensor, got {type(outputs.loss)}"
         )
-        return outputs.loss
+        return outputs.loss, {}
 
     def run_validation_step(
         self, inputs: TextPretrainDataSample, global_step: int

@@ -155,7 +155,7 @@ class Qwen25OActionLIT(
             **inputs.qwen_inputs.model_dump(),
         )
         check_nans(outputs.action_outputs, "outputs")
-        return self.compute_loss(outputs, inputs)[0]
+        return self.compute_loss(outputs, inputs)[0], {}
 
     def compute_loss(
         self, outputs: Qwen2_5OmniActionCausalLMOutputWithPast, inputs: ActionDataSample
@@ -213,39 +213,16 @@ class Qwen25OActionLIT(
             cursor_path,
         )
 
-    def run_validation_step(self, inputs: ActionDataSample, global_step: int):
-        # Forward pass through the model
-        outputs = self.model(
-            cursor_path=inputs.cursor_path,
-            action_tokens=inputs.action_tokens,
-            **inputs.qwen_inputs.model_dump(),
-        )
-        (
-            loss,
-            predicted_xs,
-            predicted_ys,
-            actual_xs,
-            actual_ys,
-            output_actions,
-            cursor_path,
-        ) = self.compute_loss(outputs, inputs)
+    @classmethod
+    def validation_wandb_metrics(
+        cls, all_metrics: list[dict[str, Any]], global_step: int
+    ) -> dict[str, Any]:
+        first_metrics = all_metrics[0]
+        cursor_path = first_metrics.get("val/cursor_path", [])
+        action_outputs = first_metrics.get("val/action_outputs", [])
 
-        computed_predicted_image = generate_image_from_segments(
-            to_numpy_clean(predicted_xs[0]) + 0.5,
-            to_numpy_clean(predicted_ys[0]) + 0.5,
-            SCREEN_SIZE,
-        )
-
-        computed_real_image = generate_image_from_segments(
-            to_numpy_clean(actual_xs[0]) + 0.5,
-            to_numpy_clean(actual_ys[0]) + 0.5,
-            SCREEN_SIZE,
-        )
-        action_outputs = outputs.action_outputs[inputs.action_tokens]
-        cursor_path = inputs.cursor_path[inputs.action_tokens].reshape(-1, 6)
-
-        np_predicted_xs, np_predicted_ys = self.visualize_action(action_outputs)
-        np_actual_xs, np_actual_ys = self.visualize_action(cursor_path)
+        np_predicted_xs, np_predicted_ys = cls.visualize_action(action_outputs)
+        np_actual_xs, np_actual_ys = cls.visualize_action(cursor_path)
 
         real_image = generate_image_from_segments(
             np_actual_xs, np_actual_ys, SCREEN_SIZE
@@ -265,18 +242,46 @@ class Qwen25OActionLIT(
         )
 
         metrics = {
-            f"validation/cubics/{global_step}": table,
-            "validation/real_image": [wandb.Image(real_image)],
-            "validation/predicted_image": [wandb.Image(predicted_image)],
-            "validation/computed_predicted_image": [
-                wandb.Image(computed_predicted_image)
-            ],
-            "validation/computed_real_image": [wandb.Image(computed_real_image)],
+            f"val/cubics/{global_step}": table,
+            "val/real_image": [wandb.Image(real_image)],
+            "val/predicted_image": [wandb.Image(predicted_image)],
+            "val/loss": first_metrics.get("val/loss", 0.0),
         }
-        return loss, metrics
+        return metrics
 
+    def run_validation_step(self, inputs: ActionDataSample, global_step: int):
+        # Forward pass through the model
+        outputs = self.model(
+            cursor_path=inputs.cursor_path,
+            action_tokens=inputs.action_tokens,
+            **inputs.qwen_inputs.model_dump(),
+        )
+        (
+            loss,
+            predicted_xs,
+            predicted_ys,
+            actual_xs,
+            actual_ys,
+            output_actions,
+            cursor_path,
+        ) = self.compute_loss(outputs, inputs)
+        action_outputs = outputs.action_outputs[inputs.action_tokens]
+        cursor_path = cursor_path.reshape(-1, 6)
+        return loss, {
+            "val/loss": loss,
+            "val/predicted_xs": predicted_xs,
+            "val/predicted_ys": predicted_ys,
+            "val/actual_xs": actual_xs,
+            "val/actual_ys": actual_ys,
+            "val/output_actions": output_actions,
+            "val/cursor_path": cursor_path,
+            "val/action_tokens": inputs.action_tokens,
+            "val/action_outputs": action_outputs,
+        }
+
+    @classmethod
     def visualize_action(
-        self,
+        cls,
         actions: torch.Tensor,  # [n, 6]
     ):
         predicted_cubics_x = []
@@ -362,3 +367,7 @@ class Qwen25OActionLITConfig(BaseModuleConfig):
         instance_config: InstanceConfig,
     ) -> Qwen25OActionLIT:
         return Qwen25OActionLIT(self, run_config, instance_config)
+
+    @classmethod
+    def module_cls(cls) -> type[Qwen25OActionLIT]:
+        return Qwen25OActionLIT

@@ -1,6 +1,7 @@
 from abc import ABCMeta, abstractmethod
 
 
+# TODO: Make this not show up on pydantic
 class class_property:
     def __init__(self, fget):
         self.fget = fget

@@ -262,6 +262,26 @@ class ExperimentActor(BaseActor[ActorArgs]):
         return metrics
 
     @remote_method
+    def validation_step(
+        self, sample: "BaseDataSample", global_step: int
+    ) -> dict[str, float]:
+        """
+        Perform a validation step for the actor.
+        This method should be called to validate the model.
+        """
+        assert hasattr(self, "state"), (
+            "This method should not be called before the actor has been initialized."
+        )
+        sample = sample.to_device(self.device)
+        self.module.model.eval()
+        with torch.no_grad():
+            metrics = self.module.validation_step(sample)
+
+        # Add learning rate to metrics
+        # logger.debug(f"Validation step completed with loss: {loss.item()}")
+        return metrics
+
+    @remote_method
     def save_checkpoint_to_tmpdir(self, tmpdir: Path) -> None:
         """
         Save the model checkpoint to the specified temporary directory.

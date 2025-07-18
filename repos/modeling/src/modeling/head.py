@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import AsyncIterator, Iterator, Never, Optional
 
 from modeling.config.data import BaseDataSample, BaseDataset, DataSample
+from modeling.modules.base_module import BaseLITModule
 import torch
 from torch.utils.data import DataLoader
 import tqdm
@@ -127,13 +128,15 @@ class ExperimentManager:
 
     state: ManagerState
 
-    def wandb_log(self, metrics: dict[str, float], step: Optional[int] = None):
+    def wandb_log(
+        self, metrics: dict[str, float], step: Optional[int] = None, commit=False
+    ):
         """
         Log metrics to Weights & Biases.
         This is a convenience method to log metrics during training.
         """
         if self.state.wandb is not None:
-            self.state.wandb.log(metrics, step=step, commit=True)
+            self.state.wandb.log(metrics, step=step, commit=commit)
 
     async def save_checkpoint(self, suffix: str):
         """
@@ -164,9 +167,18 @@ class ExperimentManager:
 
         # # Get training dataloader
         # TODO: Don't use torch dataloader class rewrite manually
-        train_dataset = await self.exp_config.datapack._init_train_dataset(
-            full_config=self.exp_config,
+
+        train_dataset, validation_dataset = await asyncio.gather(
+            self.exp_config.datapack._init_train_dataset(
+                full_config=self.exp_config,
+            ),
+            self.exp_config.datapack._init_val_dataset(
+                full_config=self.exp_config,
+            ),
         )
+
+        module_cls = cast(type[BaseLITModule], self.exp_config.module.module_cls())
+
         train_iter = iter(
             ExperimentManager.make_dataloader(
                 dataset=train_dataset,
@@ -175,9 +187,13 @@ class ExperimentManager:
             )
         )
 
-        # validation_dataloader = iter(
-        #     self.datapack.val_dataloader(generator=self.state.generator)
-        # )
+        validation_dataloader = iter(
+            ExperimentManager.make_dataloader(
+                dataset=validation_dataset,
+                full_config=self.exp_config,
+                generator=self.state.generator,
+            )
+        )
 
         # # Training loop
         num_steps = self.exp_config.run.num_steps
@@ -204,16 +220,35 @@ class ExperimentManager:
                         )
                     ]
                 )
-
                 # Reduce metrics to get mean
-                train_metrics = {
-                    key: torch.tensor([m[key] for m in all_train_metrics]).mean().item()
-                    for key in all_train_metrics[0].keys()
-                }
+
+                train_metrics = module_cls.training_wandb_metrics(all_train_metrics)
 
                 self.wandb_log(train_metrics, step=step)
                 loss = train_metrics.get("train/loss")
 
+            if (
+                val_steps := self.exp_config.run.validation_every_n_steps
+            ) >= 1 and step % val_steps == 0:
+                logger.debug(f"Running validation step at {step=}")
+                validation_batch = cast(
+                    list[BaseDataSample], next(validation_dataloader)
+                )
+                all_validation_metrics = await asyncio.gather(
+                    *[
+                        actor.validation_step.remote(data, global_step=step)
+                        for actor, data in zip(
+                            self.state.actors.all_actors, validation_batch, strict=True
+                        )
+                    ]
+                )
+                # Reduce metrics to get mean
+                validation_metrics = module_cls.validation_wandb_metrics(
+                    all_validation_metrics, global_step=step
+                )
+                self.wandb_log(validation_metrics, step=step)
+
+            self.wandb_log({}, step=step, commit=True)
             # TODO: Make this a callback
             if (c := self.exp_config.metadata.checkpoint) and c.should_checkpoint(step):
                 # Save the checkpoint to GCS

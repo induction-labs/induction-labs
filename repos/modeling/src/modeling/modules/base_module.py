@@ -171,7 +171,6 @@ class BaseLITModule(ABC, Generic[MODEL_TYPE, DATA_TYPE, CONFIG_TYPE]):
         with torch.device("meta"):
             self.model = self.init_model_meta()
 
-    # @abstractmethod
     @final
     def activation_checkpoint_model(self) -> MODEL_TYPE:
         """
@@ -288,20 +287,6 @@ class BaseLITModule(ABC, Generic[MODEL_TYPE, DATA_TYPE, CONFIG_TYPE]):
         )
         return loaded_model
 
-    # @final
-    # def wandb_log(
-    #     self, global_state: GlobalState, metrics: dict[str, Any], commit: bool = False
-    # ) -> None:
-    #     """
-    #     Log metrics to Wandb if available.
-    #     This method is a wrapper around the logger's log_dict method.
-    #     Should not call wandb commit except in trainer.
-    #     # TODO: Rewrite with a wandb commit callback thing.
-    #     """
-    #     # logger.info(metrics)
-    #     if global_state.wandb is not None:
-    #         global_state.wandb.log(metrics, commit=commit)
-
     @abstractmethod
     def run_validation_step(
         self,
@@ -317,7 +302,7 @@ class BaseLITModule(ABC, Generic[MODEL_TYPE, DATA_TYPE, CONFIG_TYPE]):
         raise NotImplementedError("Subclasses must implement this method.")
 
     @abstractmethod
-    def run_training_step(self, inputs: DATA_TYPE) -> torch.Tensor:
+    def run_training_step(self, inputs: DATA_TYPE) -> tuple[torch.Tensor, dict]:
         """
         Abstract method to be implemented by subclasses for the training step.
         This method should handle the forward pass and return the loss.
@@ -347,7 +332,7 @@ class BaseLITModule(ABC, Generic[MODEL_TYPE, DATA_TYPE, CONFIG_TYPE]):
             f"Expected model to be in training mode, got {self.model.training}"
         )
         with elapsed_timer() as timer:
-            loss = self.run_training_step(inputs)
+            loss, metrics = self.run_training_step(inputs)
             loss = self.check_loss(loss)
             elapsed = timer()
 
@@ -357,16 +342,42 @@ class BaseLITModule(ABC, Generic[MODEL_TYPE, DATA_TYPE, CONFIG_TYPE]):
             torch.cuda.synchronize()
             memory_metrics = get_mem_stats(device=torch.cuda.current_device())
             torch.cuda.reset_peak_memory_stats()
-
         metrics = {
-            "train/step_time": elapsed,
             # "train/tokens_per_second": inputs["input_ids"].numel() / elapsed,
-            "train/loss": loss,
             # "train/lr": self.optimizers().param_groups[0]["lr"],
+            **metrics,
             **memory_metrics,
+            "train/loss": loss,
+            "train/step_time": elapsed,
         }
 
         return loss, metrics
+
+    @classmethod
+    def training_wandb_metrics(
+        cls, all_metrics: list[dict[str, Any]]
+    ) -> dict[str, Any]:
+        """
+        Convert validation metrics to a format suitable for Wandb logging.
+        This method can be overridden by subclasses to customize the logging format.
+        """
+        return {
+            key: torch.tensor([m[key] for m in all_metrics]).mean().item()
+            for key in all_metrics[0].keys()
+        }
+
+    @classmethod
+    def validation_wandb_metrics(
+        cls, all_metrics: list[dict[str, Any]], global_step: int
+    ) -> dict[str, Any]:
+        """
+        Convert validation metrics to a format suitable for Wandb logging.
+        This method can be overridden by subclasses to customize the logging format.
+        """
+        return {
+            key: torch.tensor([m[key] for m in all_metrics]).mean().item()
+            for key in all_metrics[0].keys()
+        }
 
     @final
     def validation_step(
@@ -383,9 +394,9 @@ class BaseLITModule(ABC, Generic[MODEL_TYPE, DATA_TYPE, CONFIG_TYPE]):
             elapsed = timer()
 
         metrics = {
+            **val_metrics,
             "val/step_time": elapsed,
             "val/loss": loss,
-            **val_metrics,
         }
         return metrics
 
