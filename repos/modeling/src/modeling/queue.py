@@ -7,6 +7,8 @@ from synapse.utils.logging import configure_logging
 import logging
 from tqdm import tqdm
 from datetime import datetime
+import signal
+import sys
 
 logger = configure_logging(
     __name__,
@@ -56,6 +58,25 @@ def run(
     # Create timestamp for this queue run
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
+    # Variable to track current process for signal handling
+    current_process = None
+
+    def signal_handler(signum, frame):
+        """Handle Ctrl-C by terminating the current subprocess"""
+        if current_process:
+            logger.info("Received interrupt signal, terminating current experiment...")
+            current_process.terminate()
+            # Give it a moment to terminate gracefully
+            try:
+                current_process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                logger.info("Process didn't terminate gracefully, killing it...")
+                current_process.kill()
+        sys.exit(1)
+
+    # Set up signal handler for Ctrl-C
+    signal.signal(signal.SIGINT, signal_handler)
+
     for config_file in tqdm(config_files, desc="Running experiments"):
         log_file = None  # Initialize to fix unbound variable issue
 
@@ -75,13 +96,21 @@ def run(
 
             # Run mdl run <config_file> -rhw with single log file for both stdout and stderr
             with open(log_file, "w") as log_file_handle:
-                subprocess.run(
+                current_process = subprocess.Popen(
                     ["mdl", "run", str(config_file), "-rhw"],
-                    check=True,
                     stdout=log_file_handle,
                     stderr=subprocess.STDOUT,  # Redirect stderr to stdout
                     text=True,
                 )
+
+                # Wait for process to complete
+                return_code = current_process.wait()
+                current_process = None
+
+                if return_code != 0:
+                    raise subprocess.CalledProcessError(
+                        return_code, ["mdl", "run", str(config_file), "-rhw"]
+                    )
 
             tqdm.write(f"✅ Successfully completed {config_file.name}")
 
@@ -95,5 +124,7 @@ def run(
         except Exception as e:
             tqdm.write(f"❌ Unexpected error running {config_file.name}: {e}")
             continue
+        finally:
+            current_process = None
 
     logger.info("Queue processing complete")
