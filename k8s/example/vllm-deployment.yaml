@@ -1,0 +1,59 @@
+# vllm-deployment.yaml
+#
+# Deployment for a vLLM server that serves the
+# NousResearch/Hermes-3-Llama-3.1-8B model.
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vllm-server
+  namespace: mk8s-docs-examples
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vllm-server
+  template:
+    metadata:
+      labels:
+        app: vllm-server
+    spec:
+      runtimeClassName: nvidia
+      tolerations:
+        - key: "nvidia.com/gpu"
+          operator: "Equal"
+          value: "true"
+          effect: "NoSchedule"
+      containers:
+        - name: vllm
+          image: vllm/vllm-openai:v0.9.1
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              exec python3 -m vllm.entrypoints.openai.api_server \
+              --model "$VLLM_MODEL"
+          ports:
+            - containerPort: 8000
+          env:
+            - name: HF_HOME
+              value: /root/.cache/huggingface
+            - name: VLLM_MODEL
+              value: NousResearch/Hermes-3-Llama-3.1-8B
+          volumeMounts:
+            - name: hf-cache
+              mountPath: /root/.cache/huggingface
+            - name: dev-shm
+              mountPath: /dev/shm
+          resources:
+            limits:
+              memory: "32Gi"
+              nvidia.com/gpu: "1"
+      volumes:
+        - name: hf-cache
+          persistentVolumeClaim:
+            claimName: huggingface-cache
+        - name: dev-shm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Gi
+      restartPolicy: Always
