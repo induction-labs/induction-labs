@@ -16,16 +16,50 @@
 
   # Allow buildx bake by default to access ../../ context
   env.BUILDX_BAKE_ENTITLEMENTS_FS = "0";
-  env.LD_PRELOAD = "/usr/lib/x86_64-linux-gnu/libcuda.so:/usr/lib/x86_64-linux-gnu/libnvidia-ml.so.1";
+  # env.LD_PRELOAD = "/usr/lib/x86_64-linux-gnu/libcuda.so:/usr/lib/x86_64-linux-gnu/libnvidia-ml.so.1";
 
   # https://devenv.sh/packages/
-  packages = with pkgs; [
-    # Keep these here so it is easier to debug the docker image.
-    kmod # for lsmod
-    strace
-    vim
-    ffmpeg-full
-  ];
+  packages = with pkgs;
+    [
+      # Keep these here so it is easier to debug the docker image.
+      kmod # for lsmod
+      strace
+      vim
+      ffmpeg-full
+    ]
+    ++ lib.optionals pkgs.stdenv.isLinux [
+      # TODO: Build depot for all platforms (mac)
+      # TODO: Put depot in its own nix flake
+      # For now just curl -L https://depot.dev/install-cli.sh | sh
+      (let
+        version = "2.95.0";
+        pname = "depot";
+      in
+        pkgs.stdenv.mkDerivation rec {
+          inherit pname version;
+
+          src = builtins.fetchTarball {
+            # nix-prefetch-url https://github.com/depot/cli/releases/download/v2.95.0/depot_2.95.0_linux_amd64.tar.gz
+            url = "https://github.com/depot/cli/releases/download/v${version}/depot_${version}_linux_amd64.tar.gz";
+            sha256 = "1fmy30y4hbhd15wg65vicq2r6hvf7xj31c327hlc7d0x8bva7154"; # Fill in after testing
+          };
+          dontBuild = true;
+          unpackPhase = "true";
+
+          # Convert the install script logic here
+          installPhase = ''
+            mkdir -p $out/bin
+            # copy the binary (not mv)
+            install -m755 $src/bin/depot $out/bin/depot
+          '';
+          meta = {
+            description = "Depot CLI – version ${version}";
+            homepage = "https://github.com/depot/cli";
+            # license = stdenv.lib.licenses.mit;
+            # maintainers = with stdenv.lib.maintainers; [yourGitHubHandle];
+          };
+        })
+    ];
 
   # https://devenv.sh/languages/
   languages.python = {
