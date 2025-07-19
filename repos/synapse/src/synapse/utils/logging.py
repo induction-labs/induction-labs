@@ -5,11 +5,26 @@ import sys
 
 from rich.logging import RichHandler
 
+NODE_RANK = "NODE_RANK"
+LOCAL_RANK = "LOCAL_RANK"
+
 
 class _PrefixAdapter(logging.LoggerAdapter):
     def process(self, msg, kwargs):
         # prefix and original message are combined here
-        return f"{self.extra['prefix']}{msg}", kwargs
+        import os
+
+        rank = int(os.environ[LOCAL_RANK]) if LOCAL_RANK in os.environ else None
+        node_rank = int(os.environ[NODE_RANK]) if NODE_RANK in os.environ else None
+        prefix = ""
+        if rank is not None:
+            assert node_rank is not None, (
+                f"{NODE_RANK} environment variable is not set. "
+                "Make sure to run your script with torchrun or set NODE_RANK manually."
+            )
+            prefix = f"[{node_rank}:{rank}] "
+
+        return f"{prefix}{msg}", kwargs
 
 
 # https://chatgpt.com/c/68658dcb-54b0-8006-b406-ae483cadaedd
@@ -35,10 +50,6 @@ def configure_logging(
         Configured Logger instance.
     """
 
-    import os
-
-    rank = int(os.environ["LOCAL_RANK"]) if "LOCAL_RANK" in os.environ else None
-
     # Include rank in logger name if it exists
     logger = logging.getLogger(name)
     logger.setLevel(level)
@@ -60,12 +71,8 @@ def configure_logging(
         console_handler = logging.StreamHandler(sys.stdout)
         console_handler.setLevel(level)
         # Include rank in format if it exists
-        if rank is not None:
-            fmt = f"[Rank {rank}] {fmt}"
         formatter = logging.Formatter(fmt=fmt, datefmt=datefmt)
         console_handler.setFormatter(formatter)
 
     logger.addHandler(console_handler)
-    return _PrefixAdapter(
-        logger, {"prefix": f"[Rank {rank}] " if rank is not None else ""}
-    )
+    return _PrefixAdapter(logger)

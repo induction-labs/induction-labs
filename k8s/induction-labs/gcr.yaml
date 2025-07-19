@@ -37,15 +37,16 @@ spec:
             #   value: INFO
           args:
             - |
-              mdl run exp_configs/action_instruct/qwen_25o/Qwen25OActionExperimentConfig_GPU/20250718_211225.toml -rhw
+              mdl run exp_configs/action_instruct/qwen_25o/Qwen25OActionExperimentConfig_GPU/20250719_045722.toml -rhw
+            # mdl run exp_configs/action_instruct/qwen_25o/Qwen25OActionExperimentConfig_GPU/20250718_211225.toml -rhw
           resources:
             limits:
-              memory: "64Gi"
-              cpu: "8"
+              memory: "128Gi"
+              cpu: "32"
               nvidia.com/gpu: "8"
             requests:
-              memory: "32Gi"
-              cpu: "8"
+              memory: "128Gi"
+              cpu: "32"
               nvidia.com/gpu: "8"
           volumeMounts:
             - name: dev-shm
@@ -54,4 +55,4 @@ spec:
         - name: dev-shm
           emptyDir:
             medium: Memory
-            sizeLimit: 10Gi
+            sizeLimit: 100Gi

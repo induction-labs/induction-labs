@@ -22,7 +22,7 @@ from ray.util.placement_group import (
 )
 from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 from synapse.elapsed_timer import elapsed_timer
-from synapse.utils.logging import configure_logging
+from synapse.utils.logging import configure_logging, NODE_RANK, LOCAL_RANK
 from wandb.sdk.wandb_run import Run
 
 from modeling.actor import ActorArgs, ExperimentActor
@@ -83,8 +83,24 @@ class RayActors:
         """
         Flatten the list of actors across all nodes.
         """
-        for node_actors in self.actors:
-            yield from node_actors
+        for actor, _ in self.all_actors_instances:
+            yield actor
+
+    @property
+    def all_actors_instances(self) -> Iterator[tuple[ExperimentActor, InstanceConfig]]:
+        """
+        Flatten the list of actors across all nodes, yielding each actor with its instance config.
+        """
+        for node_index, node_actors in enumerate(self.actors):
+            for device_index, actor in enumerate(node_actors):
+                # TODO: Tie InstanceConfig to the actor
+                yield (
+                    actor,
+                    InstanceConfig(
+                        node_rank=node_index,
+                        device_rank=device_index,
+                    ),
+                )
 
     @property
     def rank0(self) -> ExperimentActor:
@@ -331,6 +347,7 @@ class ExperimentManager:
         experiment_config: UnifiedExperimentConfig, pg: PlacementGroup
     ) -> AsyncIterator[RayActors]:
         distributed_config = experiment_config.run.distributed
+
         actor_args = [
             [
                 (
@@ -444,8 +461,14 @@ class ExperimentManager:
                     logger.debug(f"Setting worker environment: {worker_env}")
                     await asyncio.gather(
                         *[
-                            actor.set_environ.remote(worker_env)
-                            for actor in actors.all_actors
+                            actor.set_environ.remote(
+                                {
+                                    NODE_RANK: str(i.node_rank),
+                                    LOCAL_RANK: str(i.device_rank),
+                                    **worker_env,
+                                }
+                            )
+                            for actor, i in actors.all_actors_instances
                         ]
                     )
 
