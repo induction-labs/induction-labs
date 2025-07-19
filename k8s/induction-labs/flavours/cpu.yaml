@@ -3,5 +3,8 @@ kind: ResourceFlavor
 metadata:
   name: cpu-flavor
 spec:
-  nodeLabels:
-    node-type: cpu
+  {}
+  # This requires the k8s node to actually have the label `node-type: cpu`
+  # Check node labels with `kubectl get nodes -o wide --show-labels`
+  # nodeLabels:
+  #   node-type: cpu

@@ -1,4 +1,4 @@
-# kubectl create -f job.yaml
+# kubectl create -f mdl.yaml
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -10,6 +10,7 @@ metadata:
 
 spec:
   suspend: true # Important: Start suspended, Kueue will unsuspend
+  backoffLimit: 0 # No retries
   template:
     spec:
       restartPolicy: Never # TODO: Set to never - use jobs
@@ -38,7 +39,7 @@ spec:
           args:
             - |
               mdl run exp_configs/action_instruct/qwen_25o/Qwen25OActionExperimentConfig_GPU/20250718_211225.toml -rhw # single gpu
-            # mdl run exp_configs/action_instruct/qwen_25o/Qwen25OActionExperimentConfig_GPU/20250719_045722.toml -rhw
+            # mdl run exp_configs/action_instruct/qwen_25o/Qwen25OActionExperimentConfig_GPU/20250719_045722.toml -rhw # single node multi-gpu test
           resources:
             limits:
               memory: "128Gi"
