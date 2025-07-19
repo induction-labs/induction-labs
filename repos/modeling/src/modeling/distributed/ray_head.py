@@ -53,7 +53,6 @@ def initialize_ray_head(resources: dict[str, float] | None = None):
         with temp_env(
             {
                 "LD_LIBRARY_PATH": None,
-                "RAY_DEDUP_LOGS": "0",
                 # TODO(logging): Ray logs are chanelled through `from ray.autoscaler._private.cli_logger import cli_logger`
                 # Put these in seperate logs.
                 # Also, capture the stdout of the `ray_cli.start` command and put those in seperate logs so we can
@@ -80,7 +79,9 @@ def initialize_ray_head(resources: dict[str, float] | None = None):
                 # Otherwise click will os.exit on completion
                 standalone_mode=False,
             )
-        ray.init()
+        with temp_env({"RAY_DEDUP_LOGS": "0"}):
+            # Wait for the Ray head node to be fully initialized
+            ray.init()
         assert ray.is_initialized(), (
             "Ray failed to initialize. Please check the logs for more details."
         )

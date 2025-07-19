@@ -62,13 +62,16 @@ class RemoveKwargProxy(Generic[R]):
 # Example usage:
 
 
+# TODO: Make this depend on the model loll
 @functools.lru_cache(maxsize=1)
 def qwen_processor() -> Qwen2_5OmniProcessor:
     """
     Returns a cached instance of the Qwen2_5OmniProcessor.
     This is used to avoid reloading the processor multiple times.
     """
-    processor = Qwen2_5OmniProcessor.from_pretrained("Qwen/Qwen2.5-Omni-7B")
+    processor = Qwen2_5OmniProcessor.from_pretrained(
+        "Qwen/Qwen2.5-Omni-7B", use_fast=True
+    )
     assert isinstance(processor, Qwen2_5OmniProcessor)
     processor.video_processor = RemoveKwargProxy(processor.video_processor, "images")  # type: ignore[assignment]
     # Otherwise everytime we call it it prints "Unused or unrecognized kwargs: images." kms
