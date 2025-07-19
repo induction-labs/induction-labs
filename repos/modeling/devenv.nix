@@ -22,6 +22,8 @@
   packages = with pkgs;
     [
       # Keep these here so it is easier to debug the docker image.
+    ]
+    ++ lib.optionals pkgs.stdenv.isLinux [
       kmod # for lsmod
       strace
       vim
@@ -31,8 +33,7 @@
           pkgs.google-cloud-sdk.components.gke-gcloud-auth-plugin
         ]
       )
-    ]
-    ++ lib.optionals pkgs.stdenv.isLinux [
+
       # TODO: Build depot for all platforms (mac)
       # TODO: Put depot in its own nix flake
       # For now just curl -L https://depot.dev/install-cli.sh | sh
