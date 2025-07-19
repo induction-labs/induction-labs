@@ -12,6 +12,7 @@ from synapse.utils.async_typer import AsyncTyper
 from synapse.utils.logging import configure_logging
 
 from modeling.queue import queue_app
+from modeling.k8s import k8s_app
 
 logger = configure_logging(
     __name__,
@@ -177,6 +178,7 @@ def sweep(
 
 
 app.add_typer(queue_app, name="queue")
+app.add_typer(k8s_app, name="k8s")
 
 if __name__ == "__main__":
     app()
