@@ -22,10 +22,12 @@ spec:
           value: "true"
           effect: "NoSchedule"
       imagePullSecrets:
-        - name: gcr-artifact-secret # Reference the secret
+        - name: depot-registry-secret
+        # - name: gcr-artifact-secret # Reference the secret
       containers:
         - name: modeling
-          image: us-central1-docker.pkg.dev/induction-labs/induction-docker/modeling:latest
+          # image: us-central1-docker.pkg.dev/induction-labs/induction-docker/modeling:latest
+          image: registry.depot.dev/v2tbx2d1w1:4x3d3ctfj7-remote
           imagePullPolicy: Always # Always pull latest
           command: ["devenv", "shell"]
           env:
@@ -37,8 +39,8 @@ spec:
             #   value: INFO
           args:
             - |
-              mdl run exp_configs/action_instruct/qwen_25o/Qwen25OActionExperimentConfig_GPU/20250719_045722.toml -rhw
-            # mdl run exp_configs/action_instruct/qwen_25o/Qwen25OActionExperimentConfig_GPU/20250718_211225.toml -rhw
+              mdl run exp_configs/action_instruct/qwen_25o/Qwen25OActionExperimentConfig_GPU/20250718_211225.toml -rhw # single gpu
+            # mdl run exp_configs/action_instruct/qwen_25o/Qwen25OActionExperimentConfig_GPU/20250719_045722.toml -rhw
           resources:
             limits:
               memory: "128Gi"

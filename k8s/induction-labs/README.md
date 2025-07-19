@@ -26,6 +26,16 @@ kubectl create secret docker-registry gcr-artifact-secret \
 ```
 
 
+### Depot Registry Secret:
+```
+kubectl create secret docker-registry depot-registry-secret \
+    --namespace induction-labs \
+    --docker-server=registry.depot.dev \
+    --docker-username=x-token \
+    --docker-password= ...
+```
+
+
 
 # GCR Docker Secret
 
