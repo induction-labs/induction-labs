@@ -19,7 +19,7 @@ from modeling.utils.cloud_path import CloudPath
 from modeling.config.sweep import Sweep
 # from modeling.modules.base_module import CompileConfig
 
-run_name = "qwen25o_7B_from_init"
+run_name = "qwen25o_7B_k8s_testing"
 num_devices = 8
 Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
     metadata=ExperimentMetadata(
@@ -47,7 +47,7 @@ Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
         freeze_action_embedding=False,
         freeze_action_head=False,
         # compile=None,
-        # compile=CompileConfig(),
+        # compile=CompileConfig(),i
     ),
     datapack=RangeActionDatapackConfig(
         # prefix="gs://induction-labs/jonathan/synth/garbage_cursor_follow_v1/sample_",

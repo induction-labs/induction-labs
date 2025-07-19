@@ -17,11 +17,12 @@ gcloud iam service-accounts keys create key.json \
 
 ## Create docker registry secret
 ```
-kubectl create secret docker-registry artifact-registry-secret \
+kubectl create secret docker-registry gcr-artifact-secret \
     --docker-server=us-central1-docker.pkg.dev \
     --docker-username=_json_key \
     --docker-password="$(cat key.json)" \
-    --docker-email=your-email@example.com
+    --docker-email=jeffrey@inductionlabs.com \
+    --namespace=induction-labs
 ```
 
 

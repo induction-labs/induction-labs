@@ -53,6 +53,12 @@ flash-attn = [
 head = ["ray[default,client]"]
 [tool.uv]
 default-groups = ["dev", "head"]
+
+# Needs to be in workspace root
+# https://github.com/pytorch/pytorch/issues/153401#issuecomment-2881445494
+# override-dependencies = ["nvidia-nccl-cu12==2.26.5"]
+
+
 # TODO: figure out how to only support linux aarch64/x86, and ban windows + darwin
 
 [tool.uv.sources]

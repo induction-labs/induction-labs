@@ -11,8 +11,9 @@ from typing import Iterator
 from synapse.elapsed_timer import elapsed_timer
 from pydantic import AnyUrl, UrlConstraints
 from typing import cast
+import os
 
-logger = configure_logging(__name__, level=logging.INFO)
+logger = configure_logging(__name__, level=logging.DEBUG)
 
 
 class TorchUrl(AnyUrl):
@@ -54,23 +55,32 @@ def init_distributed(
     global_rank = distributed_config.global_rank(instance_config)
 
     logger.info(
-        f"Initializing distributed training on rank {global_rank=} {torch.cuda.device_count()=}"
+        f"Initializing distributed training on rank {global_rank=} {torch.cuda.device_count()=} {rank0_address=} "
+    )
+
+    logger.debug(
+        f"Environment variables: {os.environ['LD_PRELOAD']=} {os.environ['LD_LIBRARY_PATH']=}"
     )
     try:
         torch.cuda.set_device(instance_config.device)
         with elapsed_timer(
             f"Distributed training initialization on rank {distributed_config.global_rank(instance_config)}"
         ) as timer:
-            # Use env:// for now
+            #! NOTE: Currently on B200s there is a bug where if you specify `device_id=torch.device("cuda:0")`
+            #! Then we get the error
+            #! ncclUnhandledCudaError: Call to CUDA function failed. Cuda failure 'PTX JIT compiler library not found'
+            #! Bruh moment.
             torch.distributed.init_process_group(
                 init_method=rank0_address.encoded_string(),
-                # init_method="env://",
+                # init_method="tcp://127.0.0.1:29500",
                 backend="nccl",
-                device_id=instance_config.device,
+                # device_id=instance_config.device,
                 rank=global_rank,
                 world_size=distributed_config.world_size,
             )
-            logger.debug(f"Process group initialized on rank {dist.get_rank()}. ")
+            logger.debug(
+                f"Process group initialized on rank {dist.get_rank()}. tcp://127.0.0.1:29500 "
+            )
 
             # Validate the initialized process group
             assert dist.get_rank() == global_rank, (

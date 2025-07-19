@@ -1,23 +1,57 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: my-app
-  namespace: mk8s-docs-examples
+  name: modeling
+  namespace: induction-labs
 
 spec:
-  replicas: 3
+  replicas: 1
   selector:
     matchLabels:
-      app: my-app
+      app: modeling
   template:
     metadata:
       labels:
-        app: my-app
+        app: modeling
     spec:
+      restartPolicy: Always # TODO: Set to never - use jobs
+      runtimeClassName: nvidia
+      tolerations:
+        - key: "nvidia.com/gpu"
+          operator: "Equal"
+          value: "true"
+          effect: "NoSchedule"
       imagePullSecrets:
         - name: gcr-artifact-secret # Reference the secret
       containers:
-        - name: my-app
-          image: us-central1-docker.pkg.dev/PROJECT_ID/REPOSITORY/IMAGE:TAG
-          ports:
-            - containerPort: 8080
+        - name: modeling
+          image: us-central1-docker.pkg.dev/induction-labs/induction-docker/modeling:latest
+          imagePullPolicy: Always # Always pull latest
+          command: ["devenv", "shell"]
+          env:
+            - name: LD_PRELOAD
+              value: /usr/lib/x86_64-linux-gnu/libcuda.so:/usr/lib/x86_64-linux-gnu/libnvidia-ml.so.1:/lib/x86_64-linux-gnu/libnvidia-ptxjitcompiler.so.1
+            - name: LD_LIBRARY_PATH
+              value: /usr/local/cuda/lib64
+            # - name: NCCL_DEBUG
+            #   value: INFO
+          args:
+            - |
+              mdl run exp_configs/action_instruct/qwen_25o/Qwen25OActionExperimentConfig_GPU/20250718_211225.toml -rhw
+          resources:
+            limits:
+              memory: "64Gi"
+              cpu: "8"
+              nvidia.com/gpu: "8"
+            requests:
+              memory: "32Gi"
+              cpu: "8"
+              nvidia.com/gpu: "8"
+          volumeMounts:
+            - name: dev-shm
+              mountPath: /dev/shm
+      volumes:
+        - name: dev-shm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 10Gi

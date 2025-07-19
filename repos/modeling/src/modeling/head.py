@@ -39,6 +39,7 @@ from modeling.utils.tmpdir import TmpDirContext
 from modeling.utils.typed_remote import RemoteArgs
 from typing import cast
 from modeling.checkpoints.save import upload_to_gcs
+import os
 
 logger = configure_logging(__name__, level=logging.DEBUG)
 
@@ -393,6 +394,7 @@ class ExperimentManager:
         """
         Initialize the experiment configuration from a given path.
         """
+        logger.info("Initializing experiment...")
         global_timer = elapsed_timer("Experiment.Run").__enter__()
         (tmpdir_context, tmp_dir) = TmpDirContext().__enter__()
 
@@ -434,6 +436,18 @@ class ExperimentManager:
                 unified_config, pg
             ) as actors:
                 logger.debug(f"Actors created: {len(actors)=}")
+
+                with elapsed_timer("Experiment.SetEnviron"):
+                    worker_env = {
+                        "LD_LIBRARY_PATH": os.environ.get("LD_LIBRARY_PATH", ""),
+                    }
+                    logger.debug(f"Setting worker environment: {worker_env}")
+                    await asyncio.gather(
+                        *[
+                            actor.set_environ.remote(worker_env)
+                            for actor in actors.all_actors
+                        ]
+                    )
 
                 with elapsed_timer("Experiment.InitDistributed"):
                     rank0_host = await actors.rank0.get_ip.remote()

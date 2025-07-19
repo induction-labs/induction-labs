@@ -3,6 +3,26 @@
 FROM docker.io/nvidia/cuda:12.8.1-cudnn-devel-ubuntu24.04
 RUN apt-get update && apt-get install -y curl git && rm -rf /var/lib/apt/lists/*
 
+# # Upgrade pip for Python 3.12
+# # RUN python3.12 -m ensurepip --upgrade && \
+# #   python3.12 -m pip install --no-cache-dir --upgrade pip
+
+# # 3 — Install PyTorch 2.7.1 (CUDA 12.8 build)
+# RUN /root/.local/bin/uv venv
+
+# RUN /root/.local/bin/uv pip install --no-cache-dir \
+#   --extra-index-url https://download.pytorch.org/whl/cu128 \
+#   torch==2.7.1
+
+# Make Python 3.12 the default `python` / `python3`
+# RUN update-alternatives --install /usr/bin/python python /usr/bin/python3.12 100 && \
+#   update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.12 100
+
+# CMD ["python3.12", "--version"]
+
+# CMD ["bash", "-i"]
+
+
 RUN curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix | sh -s -- install linux \
   --extra-conf "sandbox = false" \
   --init none \
@@ -50,15 +70,7 @@ ENV UV_LINK_MODE=copy
 RUN --mount=type=cache,target=/root/.cache/uv --mount=type=ssh \
   uv sync --locked --no-install-workspace --group flash-attn
 
-# # TODO: Make this build depend on vllm build, so we dont do this giant copy and have a huge layer.
-COPY repos/modeling/ /workspace/repos/modeling/
-COPY repos/synapse/ /workspace/repos/synapse/
 
-
-RUN --mount=type=cache,target=/root/.cache/uv --mount=type=ssh \
-  uv sync --locked --group flash-attn
-
-# TODO: Don't bake these into the image, mount them as secrets at runtime.
 RUN --mount=type=secret,id=wandb_key \
   wandb login $(cat /run/secrets/wandb_key)
 
@@ -76,14 +88,18 @@ RUN mkdir -p /secrets
 RUN --mount=type=secret,id=gcp_service_account_key \
   cp /run/secrets/gcp_service_account_key /secrets/gcp-service-account.json
 ENV GOOGLE_APPLICATION_CREDENTIALS=/secrets/gcp-service-account.json
+
+# # TODO: Make this build depend on vllm build, so we dont do this giant copy and have a huge layer.
+COPY repos/modeling/ /workspace/repos/modeling/
+COPY repos/synapse/ /workspace/repos/synapse/
+
+
+RUN --mount=type=cache,target=/root/.cache/uv --mount=type=ssh \
+  uv sync --locked --group flash-attn
+
+# TODO: Don't bake these into the image, mount them as secrets at runtime.
 # COPY ../../ ../../
 # For now don't sync vllm :/
 
 ENTRYPOINT [ "devenv", "shell" ]
 # CMD ["pytest"]
-
-CMD uv run python -m src.modeling.train_llm \
-  --experiment-name gpt2-alpaca-single-gpu-$(date +%Y-%m-%dT%H-%M-%S) \
-  --dataset-name tatsu-lab/alpaca \
-  --model-name openai-community/gpt2 \
-  --num-epochs 1

@@ -10,6 +10,7 @@ from typing import (
     Coroutine,
     Generic,
     Literal,
+    Mapping,
     Optional,
     ParamSpec,
     Protocol,
@@ -118,6 +119,19 @@ class BaseActor(Generic[ActorArgs], ABC):
         Shutdown the actor.
         """
         pass
+
+    @remote_method
+    def set_environ(self, env: Mapping[str, str | None]) -> None:
+        """
+        Set the environment variables for the actor.
+        """
+        import os
+
+        for key, value in env.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
 
     @classmethod
     async def create(

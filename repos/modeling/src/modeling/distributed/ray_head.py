@@ -53,6 +53,7 @@ def initialize_ray_head(resources: dict[str, float] | None = None):
         with temp_env(
             {
                 "LD_LIBRARY_PATH": None,
+                "RAY_DEDUP_LOGS": "0",
                 # TODO(logging): Ray logs are chanelled through `from ray.autoscaler._private.cli_logger import cli_logger`
                 # Put these in seperate logs.
                 # Also, capture the stdout of the `ray_cli.start` command and put those in seperate logs so we can
@@ -73,7 +74,7 @@ def initialize_ray_head(resources: dict[str, float] | None = None):
                     f"--port={str(ray_host.port)}",
                     f"--resources={json.dumps(resources)}" if resources else "",
                     # TODO: ray dashboard configuration
-                    "--dashboard-host=0.0.0.0",
+                    # "--dashboard-host=0.0.0.0",
                 ],
                 prog_name="ray",
                 # Otherwise click will os.exit on completion
@@ -84,6 +85,7 @@ def initialize_ray_head(resources: dict[str, float] | None = None):
             "Ray failed to initialize. Please check the logs for more details."
         )
         logger.debug(f"Ray head node finished initializing at {ray_host}")
+        logger.debug(f"{ray.cluster_resources()=}")
         yield ray_host
     except Exception as e:
         logger.error(f"Failed to initialize Ray head node: {e}")

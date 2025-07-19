@@ -29,9 +29,9 @@ target "remote" {
         "${REGISTRY}/modeling:latest",
         "${REGISTRY}/modeling:${COMMIT_SHA}",
     ]
-    push = true
-    cache-from = ["type=gha"]
-    cache-to = ["type=gha,mode=max"]
+    # push = true
+    # cache-from = ["type=gha"]
+    # cache-to = ["type=gha,mode=max"]
 }
 
 group "default" {

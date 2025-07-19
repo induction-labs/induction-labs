@@ -19,7 +19,7 @@ def temp_env(environ: dict[str, str | None]):
                 os.environ.pop(key, None)
             else:
                 os.environ[key] = value
-        yield
+        yield original_environ.copy()
     finally:
         # Restore the original values
         for key, original_value in original_environ.items():
