@@ -40,6 +40,8 @@ from modeling.utils.typed_remote import RemoteArgs
 from typing import cast
 from modeling.checkpoints.save import upload_to_gcs
 import os
+from modeling.utils.max_timeout import max_timeout
+from datetime import timedelta
 
 logger = configure_logging(__name__, level=logging.DEBUG)
 
@@ -446,7 +448,11 @@ class ExperimentManager:
             # Wait here for worker processes to start
             with elapsed_timer("Experiment.WaitForPlacementGroup"):
                 # TODO: Put a timer on this and error if it takes too long
-                await pg.ready()
+                await max_timeout(
+                    pg.ready(),
+                    timeout=timedelta(seconds=60),
+                    err_msg="Placement group did not become ready in time",
+                )
             logger.debug("Placement group is ready.")
 
             async with ExperimentManager.initialize_actors(
