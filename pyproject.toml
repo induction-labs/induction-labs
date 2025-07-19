@@ -54,3 +54,6 @@ extend-exclude = ["repos/osworld", "repos/pynput", "*.ipynb"]
 
 [project.scripts]
 collect = "actioncollector.main:app"
+
+[tool.setuptools.packages.find]
+include = ["repos*"] # Only repos* are actually repos
