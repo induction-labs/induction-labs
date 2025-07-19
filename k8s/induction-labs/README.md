@@ -1,3 +1,10 @@
+# K8s Setup
+
+```sh
+kubectl config set-context --current --namespace=induction-labs
+kubectl logs -f induction-labs/mdl.yaml
+```
+
 # GCR Artifact Registry Setup
 
 ## Create service account

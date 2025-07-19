@@ -1,20 +1,17 @@
-apiVersion: apps/v1
-kind: Deployment
+apiVersion: batch/v1
+kind: Job
 metadata:
   name: modeling
   namespace: induction-labs
 
 spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: modeling
+  completions: 1 # How many successful completions needed
+  parallelism: 1 # How many pods to run in parallel
+  backoffLimit: 3 # Max retries for failed pods
+
   template:
-    metadata:
-      labels:
-        app: modeling
     spec:
-      restartPolicy: Always # TODO: Set to never - use jobs
+      restartPolicy: Never # TODO: Set to never - use jobs
       runtimeClassName: nvidia
       tolerations:
         - key: "nvidia.com/gpu"
