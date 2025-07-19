@@ -87,3 +87,4 @@ MANIFEST
 **/outputs/
 **/secrets/
 **/.pytest_cache/
+**/ruff_cache/

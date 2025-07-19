@@ -1,19 +1,17 @@
 from __future__ import annotations
 
+import asyncio
+import builtins
+import logging
+import os
+import warnings
 from pathlib import Path
 
 import typer
+from synapse.utils.async_typer import AsyncTyper
 from synapse.utils.logging import configure_logging
 
-import logging
-import os
-
-import warnings
-import builtins
-from synapse.video_loader.main import AsyncTyper
-import asyncio
 from modeling.queue import queue_app
-
 
 logger = configure_logging(
     __name__,

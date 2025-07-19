@@ -30,6 +30,8 @@ mdl = "modeling.main:app"
 
 
 [dependency-groups]
+# Pin k8s to v32 to match `Kubernetes 1.32` - use `kubectl version` to get server version
+k8s = ["kubernetes>=32.0.0,<33.0.0"]
 dev = [
   "huggingface-hub[cli]>=0.32.4",
   "ipython>=9.3.0",
@@ -52,7 +54,7 @@ flash-attn = [
 ]
 head = ["ray[default,client]"]
 [tool.uv]
-default-groups = ["dev", "head"]
+default-groups = ["dev", "head", "k8s"]
 
 # Needs to be in workspace root
 # https://github.com/pytorch/pytorch/issues/153401#issuecomment-2881445494

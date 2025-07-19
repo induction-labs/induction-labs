@@ -26,7 +26,7 @@ spec:
       containers:
         - name: modeling
           # image: us-central1-docker.pkg.dev/induction-labs/induction-docker/modeling:latest
-          image: registry.depot.dev/v2tbx2d1w1:4x3d3ctfj7-remote
+          image: registry.depot.dev/v2tbx2d1w1:snsd7rnnn4-remote
           imagePullPolicy: Always # Always pull latest
           command: ["devenv", "shell"]
           env:

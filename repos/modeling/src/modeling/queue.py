@@ -1,14 +1,15 @@
 from __future__ import annotations
 
-import subprocess
-import typer
-from pathlib import Path
-from synapse.utils.logging import configure_logging
 import logging
-from tqdm import tqdm
-from datetime import datetime
 import signal
+import subprocess
 import sys
+from datetime import datetime
+from pathlib import Path
+
+import typer
+from synapse.utils.logging import configure_logging
+from tqdm import tqdm
 
 logger = configure_logging(
     __name__,
