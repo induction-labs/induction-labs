@@ -2,18 +2,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import secrets
-import string
+import os
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import AsyncIterator, Iterator, Never, Optional
+from typing import AsyncIterator, Iterator, Never, Optional, cast
 
-from modeling.config.data import BaseDataSample, BaseDataset, DataSample
-from modeling.modules.base_module import BaseLITModule
 import torch
-from torch.utils.data import DataLoader
 import tqdm
 import wandb
 from ray.util.placement_group import (
@@ -22,33 +18,29 @@ from ray.util.placement_group import (
 )
 from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 from synapse.elapsed_timer import elapsed_timer
-from synapse.utils.logging import configure_logging, NODE_RANK, LOCAL_RANK
+from synapse.utils.logging import LOCAL_RANK, NODE_RANK, configure_logging
+from torch.utils.data import DataLoader
 from wandb.sdk.wandb_run import Run
 
 from modeling.actor import ActorArgs, ExperimentActor
+from modeling.checkpoints.save import upload_to_gcs
 from modeling.config import (
     ExperimentConfig,
     RuntimeConfig,
     UnifiedExperimentConfig,
 )
+from modeling.config.data import BaseDataSample, BaseDataset, DataSample
 from modeling.config.distributed import DistributedConfig, InstanceConfig
 from modeling.distributed.distributed import TorchUrl
 from modeling.distributed.ray_head import RayUrl, initialize_ray_head
+from modeling.modules.base_module import BaseLITModule
 from modeling.utils.fix_rng import fix_rng
+from modeling.utils.gen_id import gen_id
+from modeling.utils.max_timeout import max_timeout
 from modeling.utils.tmpdir import TmpDirContext
 from modeling.utils.typed_remote import RemoteArgs
-from typing import cast
-from modeling.checkpoints.save import upload_to_gcs
-import os
-from modeling.utils.max_timeout import max_timeout
-from datetime import timedelta
 
 logger = configure_logging(__name__, level=logging.DEBUG)
-
-
-def gen_id(length: int = 8) -> str:
-    alphabet = string.ascii_letters + string.digits
-    return "".join(secrets.choice(alphabet) for _ in range(length))
 
 
 NUM_ACTOR_CPUS = 2.0
