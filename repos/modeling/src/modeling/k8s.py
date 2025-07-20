@@ -4,6 +4,7 @@ import logging
 import re
 import subprocess
 from pathlib import Path
+from typing import cast
 
 import typer
 import yaml
@@ -93,6 +94,16 @@ def submit(
     ),
     quiet: bool = typer.Option(
         False, "--quiet", "-q", help="Hide output from the command"
+    ),
+    context: str = typer.Option(
+        None,
+        "--context",
+        help="Kubernetes context to use. If not provided, uses current context",
+    ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Perform a dry run without actually submitting the job",
     ),
 ):
     """
@@ -200,8 +211,23 @@ def submit(
     # Submit to Kubernetes
     try:
         # Load kubernetes config (from ~/.kube/config or in-cluster config)
-        k8s_config.load_kube_config()
-        logger.debug("Loaded kubernetes config")
+        contexts, active_context = k8s_config.list_kube_config_contexts()
+        if context:
+            # Verify the context exists
+            context_names = [cast(dict, ctx)["name"] for ctx in contexts]
+            if context not in context_names:
+                logger.error(
+                    f"Context '{context}' not found. Available contexts: {context_names}"
+                )
+                raise typer.Exit(1)
+
+            k8s_config.load_kube_config(context=context)
+            logger.debug(f"Loaded kubernetes config with context: {context}")
+        else:
+            k8s_config.load_kube_config(context=active_context["name"])
+            logger.debug(
+                f"Loaded kubernetes config with context {active_context['name']}"
+            )
     except Exception as e:
         logger.error(f"Failed to load kubernetes config: {e}")
         raise typer.Exit(1)
@@ -214,12 +240,17 @@ def submit(
 
     try:
         # Submit the job
-        response = batch_v1.create_namespaced_job(
-            namespace=namespace, body=job_template
-        )
-
-        job_name = response.metadata.name  # type: ignore[attr-defined]
-        logger.info(f"Successfully submitted job: {job_name}")
+        if dry_run:
+            response = batch_v1.create_namespaced_job(
+                namespace=namespace, body=job_template, dry_run="All"
+            )
+            logger.info("Dry run successful - job would be created")
+        else:
+            response = batch_v1.create_namespaced_job(
+                namespace=namespace, body=job_template
+            )
+            job_name = response.metadata.name  # type: ignore[attr-defined]
+            logger.info(f"Successfully submitted job: {job_name}")
 
     except Exception as e:
         logger.error(f"Failed to submit job to Kubernetes: {e}")
