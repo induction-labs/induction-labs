@@ -226,11 +226,11 @@ class Qwen25OActionLIT(
 
         loss = None
         match self.module_config.loss_type:
-            case CursorPredictionLoss.ANALYTICAL_DISTANCE:
+            case Qwen25OActionLITConfig.CursorPredictionLoss.ANALYTICAL_DISTANCE:
                 loss = analytical_loss.sum()
-            case CursorPredictionLoss.L2_DISTANCE:
+            case Qwen25OActionLITConfig.CursorPredictionLoss.L2_DISTANCE:
                 loss = l2_points_loss
-            case CursorPredictionLoss.COEFFICIENTS_DISTANCE:
+            case Qwen25OActionLITConfig.CursorPredictionLoss.COEFFICIENTS_DISTANCE:
                 loss = coefficients_loss
             case _:
                 raise ValueError(f"Unknown loss type: {self.module_config.loss_type}")
@@ -395,17 +395,16 @@ class Qwen25OActionLIT(
         )
 
 
-class CursorPredictionLoss(Enum):
-    """
-    Enum for cursor prediction loss types.
-    """
-
-    ANALYTICAL_DISTANCE = "analytical_distance"
-    L2_DISTANCE = "l2_distance"
-    COEFFICIENTS_DISTANCE = "coefficients_distance"
-
-
 class Qwen25OActionLITConfig(BaseModuleConfig):
+    class CursorPredictionLoss(str, Enum):
+        """
+        Enum for cursor prediction loss types.
+        """
+
+        ANALYTICAL_DISTANCE = "analytical_distance"
+        L2_DISTANCE = "l2_distance"
+        COEFFICIENTS_DISTANCE = "coefficients_distance"
+
     """
     Configuration class for Qwen-2.5O Lightning Module.
     Inherits from TextPretrainLITConfig and sets the model name.

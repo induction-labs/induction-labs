@@ -21,8 +21,8 @@ from modeling.utils.cloud_path import CloudPath
 
 # from modeling.modules.base_module import CompileConfig
 
-run_name = "sweep_qwen25o_7B_uninit"
-num_devices = 8
+run_name = "qwen25o_7B_k8s_testing"
+num_devices = 1
 Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
     metadata=ExperimentMetadata(
         wandb=WandbConfig(project="qwen25o_7B_real_data", name=run_name),
@@ -44,10 +44,11 @@ Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
         # ),
         model_name="Qwen/Qwen2.5-Omni-7B",
         tokenizer_name="Qwen/Qwen2.5-Omni-7B",
-        freeze_vision=False,
-        freeze_network=False,
+        freeze_vision=True,
+        freeze_network=True,
         freeze_action_embedding=False,
         freeze_action_head=False,
+        loss_type=Qwen25OActionLITConfig.CursorPredictionLoss.L2_DISTANCE,
         # compile=None,
         # compile=CompileConfig(),
     ),
@@ -67,7 +68,7 @@ Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
         sequence_length=4096,
         batch_size=num_devices,
         num_steps=100,
-        validation_every_n_steps=20,
+        validation_every_n_steps=5,
         distributed=DistributedConfig(
             devices_per_node=num_devices,
         ),
@@ -79,7 +80,7 @@ Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
 )
 
 Qwen25OActionGPU_Test = Qwen25OActionExperimentConfig_GPU.testing_config(
-    num_steps=2,
+    num_steps=25,
     enable_wandb=True,
     with_val=True,
     profile=False,
