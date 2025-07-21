@@ -39,6 +39,7 @@ ENV SETUPTOOLS_SCM_PRETEND_VERSION="0.0.0"
 
 ENV UV_LINK_MODE=copy
 
+# TODO: Use different FROM stages
 # Here we first sync *without* workspace and ssh required deps, because those always need docker rebuild.
 # NOTE: This stage does not require ssh mount
 RUN --mount=type=cache,target=/root/.cache/uv \
@@ -46,6 +47,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 
 # New we add secrets
+# TODO: Don't bake these into the image, mount them as secrets at runtime.
 RUN --mount=type=secret,id=wandb_key \
   wandb login $(cat /run/secrets/wandb_key)
 
@@ -81,7 +83,6 @@ RUN mkdir -p -m 0600 ~/.ssh && ssh-keyscan github.com >> ~/.ssh/known_hosts
 RUN --mount=type=cache,target=/root/.cache/uv --mount=type=ssh \
   uv sync --locked --group flash-attn --group ssh-required
 
-# TODO: Don't bake these into the image, mount them as secrets at runtime.
 # COPY ../../ ../../
 # For now don't sync vllm :/
 

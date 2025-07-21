@@ -23,19 +23,23 @@ target "local" {
     ssh = ["default"]  # Add this line
 }
 
+target "depot" {
+    inherits = ["local"]
+    # ...
+}
 target "remote" {
     inherits = ["local"]
     tags = [
         "${REGISTRY}/modeling:latest",
         "${REGISTRY}/modeling:${COMMIT_SHA}",
     ]
-    # push = true
-    # cache-from = ["type=gha"]
-    # cache-to = ["type=gha,mode=max"]
+    push = true
+    cache-from = ["type=gha"]
+    cache-to = ["type=gha,mode=max"]
 }
 
 group "default" {
-    targets = ["remote"]
+    targets = ["depot"]
 }
 
 # CI-specific target
