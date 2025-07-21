@@ -1,5 +1,14 @@
 import * as k8s from '@kubernetes/client-node';
-import { type KueueJob, type JobListItem, type JobStatus } from './types/kueue';
+import {
+  kueueJobListSchema,
+  kueueJobSchema,
+  jobStatusSchema,
+} from './schemas/kueue';
+import type {
+  KueueJob,
+  JobListItem,
+  JobStatus
+} from './schemas/kueue';
 
 class KubernetesClient {
   private kc: k8s.KubeConfig;
@@ -13,43 +22,88 @@ class KubernetesClient {
 
   async getKueueJobs(): Promise<JobListItem[]> {
     try {
-      const response = await this.customApi.listClusterCustomObject(
-        'kueue.x-k8s.io',
-        'v1beta1',
-        'workloads'
-      );
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+      const response = await this.customApi.listClusterCustomObject({
+        group: 'kueue.x-k8s.io',
+        version: 'v1beta1',
+        plural: 'workloads'
+      });
 
-      const workloads = (response.body as any).items as KueueJob[];
-      
+      // Validate the response using Zod schema
+      const parsedResponse = kueueJobListSchema.safeParse(response);
+      if (!parsedResponse.success) {
+        console.error('Validation error:', parsedResponse.error);
+        throw new Error('Invalid response format from Kueue API');
+      }
+      const validatedResponse = parsedResponse.data;
+      const workloads = validatedResponse.items;
+
       return workloads.map(workload => this.transformWorkloadToJobItem(workload));
     } catch (error) {
       console.error('Error fetching Kueue jobs:', error);
+      if (error instanceof Error) {
+        throw new Error(`Failed to fetch Kueue jobs from cluster: ${error.message}`);
+      }
       throw new Error('Failed to fetch Kueue jobs from cluster');
     }
   }
 
   async getKueueJobsByNamespace(namespace: string): Promise<JobListItem[]> {
     try {
-      const response = await this.customApi.listNamespacedCustomObject(
-        'kueue.x-k8s.io',
-        'v1beta1',
-        namespace,
-        'workloads'
-      );
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+      const response = await this.customApi.listNamespacedCustomObject({
+        group: 'kueue.x-k8s.io',
+        version: 'v1beta1',
+        namespace: namespace,
+        plural: 'workloads'
+      });
 
-      const workloads = (response.body as any).items as KueueJob[];
-      
+      // Validate the response using Zod schema
+      const validatedResponse = kueueJobListSchema.parse(response);
+      const workloads = validatedResponse.items;
+
       return workloads.map(workload => this.transformWorkloadToJobItem(workload));
     } catch (error) {
       console.error(`Error fetching Kueue jobs for namespace ${namespace}:`, error);
+      if (error instanceof Error) {
+        throw new Error(`Failed to fetch Kueue jobs from namespace ${namespace}: ${error.message}`);
+      }
       throw new Error(`Failed to fetch Kueue jobs from namespace ${namespace}`);
+    }
+  }
+
+  async getKueueJob(namespace: string, name: string): Promise<JobListItem> {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+      const response = await this.customApi.getNamespacedCustomObject({
+        group: 'kueue.x-k8s.io',
+        version: 'v1beta1',
+        namespace: namespace,
+        plural: 'workloads',
+        name: name
+      });
+
+      // Validate the response using Zod schema
+      const validatedWorkload = kueueJobSchema.parse(response);
+
+      return this.transformWorkloadToJobItem(validatedWorkload);
+    } catch (error) {
+      console.error(`Error fetching Kueue job ${namespace}/${name}:`, error);
+      if (error instanceof Error) {
+        // Check if it's a 404 error (job not found)
+        if (error.message.includes('404') || error.message.includes('Not Found')) {
+          throw new Error(`Job ${namespace}/${name} not found`);
+        }
+        throw new Error(`Failed to fetch Kueue job ${namespace}/${name}: ${error.message}`);
+      }
+      throw new Error(`Failed to fetch Kueue job ${namespace}/${name}`);
     }
   }
 
   private transformWorkloadToJobItem(workload: KueueJob): JobListItem {
     const status = this.getJobStatus(workload);
     const suspended = workload.spec.suspend ?? false;
-    
+
     return {
       name: workload.metadata.name,
       namespace: workload.metadata.namespace,
@@ -63,36 +117,33 @@ class KubernetesClient {
   }
 
   private getJobStatus(workload: KueueJob): JobStatus {
-    if (!workload.status?.conditions) {
-      return 'Pending';
-    }
+    let status = 'Pending';
 
-    const conditions = workload.status.conditions;
-    
-    // Check for completion conditions
-    const finishedCondition = conditions.find(c => c.type === 'Finished');
-    if (finishedCondition?.status === 'True') {
-      return 'Finished';
-    }
+    if (workload.status?.conditions) {
+      const conditions = workload.status.conditions;
 
-    // Check for failure conditions
-    const failedCondition = conditions.find(c => c.type === 'Failed');
-    if (failedCondition?.status === 'True') {
-      return 'Failed';
-    }
-
-    // Check for admission
-    const admittedCondition = conditions.find(c => c.type === 'Admitted');
-    if (admittedCondition?.status === 'True') {
-      return 'Running';
+      // Check for completion conditions
+      const finishedCondition = conditions.find(c => c.type === 'Finished');
+      if (finishedCondition?.status === 'True') {
+        status = 'Finished';
+      }
+      // Check for failure conditions
+      else if (conditions.find(c => c.type === 'Failed')?.status === 'True') {
+        status = 'Failed';
+      }
+      // Check for admission
+      else if (conditions.find(c => c.type === 'Admitted')?.status === 'True') {
+        status = 'Running';
+      }
     }
 
     // Check if suspended
     if (workload.spec.suspend) {
-      return 'Suspended';
+      status = 'Suspended';
     }
 
-    return 'Pending';
+    // Validate and return the status using the schema
+    return jobStatusSchema.parse(status);
   }
 
   private getAdmittedTime(workload: KueueJob): string | undefined {

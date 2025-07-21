@@ -20,12 +20,12 @@ export default async function Home() {
 
   const formatDuration = (createdAt: string, admittedAt?: string) => {
     if (!admittedAt) return '-';
-    
+
     const created = new Date(createdAt);
     const admitted = new Date(admittedAt);
     const diffMs = admitted.getTime() - created.getTime();
     const diffMinutes = Math.floor(diffMs / (1000 * 60));
-    
+
     if (diffMinutes < 60) {
       return `${diffMinutes}m`;
     } else {
@@ -45,7 +45,7 @@ export default async function Home() {
               Monitor and manage jobs in your Kubernetes cluster queues
             </p>
           </div>
-          
+
           <Card>
             <CardHeader>
               <CardTitle>Queue Jobs ({jobs.length})</CardTitle>
@@ -75,7 +75,7 @@ export default async function Home() {
                       jobs.map((job) => (
                         <TableRow key={`${job.namespace}/${job.name}`} className="hover:bg-muted/50">
                           <TableCell className="font-medium">
-                            <Link 
+                            <Link
                               href={`/jobs/${encodeURIComponent(job.namespace)}/${encodeURIComponent(job.name)}`}
                               className="block w-full hover:underline"
                             >
