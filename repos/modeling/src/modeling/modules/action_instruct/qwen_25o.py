@@ -254,9 +254,16 @@ class Qwen25OActionLIT(
     def validation_wandb_metrics(
         cls, all_metrics: list[dict[str, Any]], global_step: int
     ) -> dict[str, Any]:
-        first_metrics = all_metrics[0]
-        cursor_path = first_metrics.get("val/cursor_path", [])
-        action_outputs = first_metrics.get("val/action_outputs", [])
+        # First split off "val/image"
+
+        metrics = [
+            {k: v for k, v in m.items() if not k.startswith("val/image")}
+            for m in all_metrics
+        ]
+        first_val_image = metrics[0].get("val/image", {})
+
+        cursor_path = first_val_image.get("val/cursor_path", [])
+        action_outputs = first_val_image.get("val/action_outputs", [])
 
         np_predicted_xs, np_predicted_ys = cls.visualize_action(action_outputs)
         np_actual_xs, np_actual_ys = cls.visualize_action(cursor_path)
@@ -279,11 +286,19 @@ class Qwen25OActionLIT(
             ],
         )
 
+        # Get mean over all metrics
+        mean_metrics = {
+            k: np.mean([m[k] for m in metrics if k in m])
+            for k in metrics[0]
+            if k != "val/image"
+        }
+
         metrics = {
             f"val/cubics/{global_step}": table,
             "val/real_image": [wandb.Image(real_image)],
             "val/predicted_image": [wandb.Image(predicted_image)],
-            "val/loss": first_metrics.get("val/loss", 0.0),
+            "val/first_loss": metrics[0].get("val/loss", 0.0),
+            **mean_metrics,
         }
         return metrics
 
@@ -308,14 +323,16 @@ class Qwen25OActionLIT(
         cursor_path = cursor_path.reshape(-1, 6)
         return loss, {
             "val/loss": loss,
-            "val/predicted_xs": predicted_xs,
-            "val/predicted_ys": predicted_ys,
-            "val/actual_xs": actual_xs,
-            "val/actual_ys": actual_ys,
-            "val/output_actions": output_actions,
-            "val/cursor_path": cursor_path,
-            "val/action_tokens": inputs.action_tokens,
-            "val/action_outputs": action_outputs,
+            "val/image": {
+                "val/predicted_xs": predicted_xs,
+                "val/predicted_ys": predicted_ys,
+                "val/actual_xs": actual_xs,
+                "val/actual_ys": actual_ys,
+                "val/output_actions": output_actions,
+                "val/cursor_path": cursor_path,
+                "val/action_tokens": inputs.action_tokens,
+                "val/action_outputs": action_outputs,
+            },
             "val/analytical_loss": analytical_loss,
             "val/l2_points_loss": l2_points_loss,
             "val/coefficients_loss": coefficients_loss,
