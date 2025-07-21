@@ -4,24 +4,40 @@ import logging
 import re
 import subprocess
 from pathlib import Path
-from typing import cast
+from typing import Annotated, Optional
 
 import typer
 import yaml
 from synapse.utils.logging import configure_logging
 from modeling.utils.gen_id import gen_id
 
+
 logger = configure_logging(
     __name__,
-    level=logging.DEBUG,
+    level=logging.INFO,
 )
+
+
+# TODO: Add -i interactive option to run k8s interactively
+def load_k8s_template() -> dict:
+    import yaml
+
+    assert K8S_TEMPLATE_PATH.exists(), f"Template file not found: {K8S_TEMPLATE_PATH}"
+
+    with open(K8S_TEMPLATE_PATH, "r") as f:
+        job_template = yaml.safe_load(f)
+    logger.debug(f"Loaded job template from: {K8S_TEMPLATE_PATH}")
+    return job_template
+
 
 k8s_app = typer.Typer()
 
 
 @k8s_app.command()
 def bake(
-    quiet: bool = typer.Option(False, "--quiet", "-q", help="Hide depot build output"),
+    quiet: Annotated[
+        bool, typer.Option("--quiet", "-q", help="Hide depot build output")
+    ] = False,
 ):
     """
     Build Docker image using depot and extract image reference.
@@ -80,31 +96,37 @@ def bake(
 
 
 K8S_TEMPLATE_PATH = (
-    Path(__file__).parent.parent.parent / "k8s" / "induction-labs" / "mdl.yaml"
+    Path(__file__).parent.parent.parent.parent / "k8s" / "induction-labs" / "mdl.yaml"
 )
 
 
 @k8s_app.command()
 def submit(
-    config_path: str = typer.Argument(..., help="File to submit"),
-    image: str = typer.Option(
-        None,
-        "--image",
-        help="Docker image to use. If not provided, will run bake to build image",
-    ),
-    quiet: bool = typer.Option(
-        False, "--quiet", "-q", help="Hide output from the command"
-    ),
-    context: str = typer.Option(
-        None,
-        "--context",
-        help="Kubernetes context to use. If not provided, uses current context",
-    ),
-    dry_run: bool = typer.Option(
-        False,
-        "--dry-run",
-        help="Perform a dry run without actually submitting the job",
-    ),
+    config_path: Annotated[str, typer.Argument(help="File to submit")],
+    image: Annotated[
+        Optional[str],
+        typer.Option(
+            "--image",
+            help="Docker image to use. If not provided, will run bake to build image",
+        ),
+    ] = None,
+    quiet: Annotated[
+        bool, typer.Option("--quiet", "-q", help="Hide output from the command")
+    ] = False,
+    context: Annotated[
+        Optional[str],
+        typer.Option(
+            "--context",
+            help="Kubernetes context to use. If not provided, uses current context",
+        ),
+    ] = None,
+    dry_run: Annotated[
+        bool,
+        typer.Option(
+            "--dry-run",
+            help="Perform a dry run without actually submitting the job",
+        ),
+    ] = False,
 ):
     """
     Submit runs to kubernetes kueue.
@@ -121,43 +143,25 @@ def submit(
 
     logger.info(f"Submitting job with config: {config_path} and image: {image}")
 
-    try:
-        from kubernetes import client, config as k8s_config
+    from kubernetes import client
+    from modeling.k8s.context import load_kubernetes_config
 
-    except ImportError:
-        logger.error("kubernetes package not found. Install with: uv add --group k8s")
-        print("Error: kubernetes package not found. Install with: uv add --group k8s")
-        raise typer.Exit(1)
+    load_kubernetes_config(context=context)
 
     # Load the YAML template
-
-    if not K8S_TEMPLATE_PATH.exists():
-        logger.error(f"Template file not found: {K8S_TEMPLATE_PATH}")
-        raise typer.Exit(1)
-
-    try:
-        with open(K8S_TEMPLATE_PATH, "r") as f:
-            job_template = yaml.safe_load(f)
-        logger.info(f"Loaded job template from: {K8S_TEMPLATE_PATH}")
-    except Exception as e:
-        logger.error(f"Failed to load YAML template: {e}")
-        print(f"Error: Failed to load YAML template: {e}")
-        raise typer.Exit(1)
+    job_template = load_k8s_template()
 
     # Load and validate the experiment config
-    try:
-        from modeling.config.serde import build_experiment_config
 
-        config_path_obj = Path(config_path)
-        if not config_path_obj.exists():
-            logger.error(f"Config file not found: {config_path}")
-            raise typer.Exit(1)
+    from modeling.config.serde import build_experiment_config
 
-        experiment_config = build_experiment_config(config_path_obj)
-        logger.info(f"Loaded experiment config from: {config_path}")
-    except Exception as e:
-        logger.error(f"Failed to load experiment config: {e}")
-        raise typer.Exit(1)
+    config_path_obj = Path(config_path)
+    assert config_path_obj.exists() and config_path_obj.is_file(), (
+        f"{config_path} is not a file"
+    )
+
+    experiment_config = build_experiment_config(config_path_obj)
+    logger.info(f"Loaded experiment config from: {config_path}")
 
     # Calculate resources based on experiment config
     distributed_config = experiment_config.run.distributed
@@ -208,30 +212,6 @@ def submit(
         logger.error(f"Failed to save k8s config: {e}")
         raise typer.Exit(1)
 
-    # Submit to Kubernetes
-    try:
-        # Load kubernetes config (from ~/.kube/config or in-cluster config)
-        contexts, active_context = k8s_config.list_kube_config_contexts()
-        if context:
-            # Verify the context exists
-            context_names = [cast(dict, ctx)["name"] for ctx in contexts]
-            if context not in context_names:
-                logger.error(
-                    f"Context '{context}' not found. Available contexts: {context_names}"
-                )
-                raise typer.Exit(1)
-
-            k8s_config.load_kube_config(context=context)
-            logger.debug(f"Loaded kubernetes config with context: {context}")
-        else:
-            k8s_config.load_kube_config(context=active_context["name"])
-            logger.debug(
-                f"Loaded kubernetes config with context {active_context['name']}"
-            )
-    except Exception as e:
-        logger.error(f"Failed to load kubernetes config: {e}")
-        raise typer.Exit(1)
-
     # Create batch API client
     batch_v1 = client.BatchV1Api()
 
@@ -255,3 +235,82 @@ def submit(
     except Exception as e:
         logger.error(f"Failed to submit job to Kubernetes: {e}")
         raise typer.Exit(1)
+
+
+def get_sweep_tomls(directory: str) -> list[Path]:
+    """
+    Get all .toml files in the specified directory.
+    """
+    config_dir = Path(directory)
+
+    assert config_dir.exists(), f"{config_dir} does not exist"
+    assert config_dir.is_dir(), f"{config_dir} is not a directory"
+
+    # Find all .toml files in the directory
+    config_files = list(config_dir.glob("*.toml"))
+
+    assert len(config_files) > 0, f"No .toml files found in {config_dir}"
+    return config_files
+
+
+@k8s_app.command()
+def sweep(
+    directory: Annotated[
+        str, typer.Argument(help="Directory containing experiment configuration files")
+    ],
+    image: Annotated[
+        Optional[str],
+        typer.Option(
+            "--image",
+            help="Docker image to use. If not provided, will run bake to build image",
+        ),
+    ] = None,
+    quiet: Annotated[
+        bool, typer.Option("--quiet", "-q", help="Hide output from the command")
+    ] = False,
+    context: Annotated[
+        Optional[str],
+        typer.Option(
+            "--context",
+            help="Kubernetes context to use. If not provided, uses current context",
+        ),
+    ] = None,
+    dry_run: Annotated[
+        bool,
+        typer.Option(
+            "--dry-run",
+            help="Perform a dry run without actually submitting the job",
+        ),
+    ] = False,
+):
+    """
+    Submit runs to kubernetes kueue.
+    """
+    # Get the image - either from parameter or by running bake
+
+    if image is None:
+        logger.info("No image provided, running bake to build image...")
+        image = bake(quiet=quiet)
+        if image is None:
+            logger.error("Failed to build image")
+            raise typer.Exit(1)
+    else:
+        logger.info(f"Using provided image: {image}")
+
+    sweep_tomls = get_sweep_tomls(directory)
+    logger.info(f"Submitting sweep tomls at {directory} and image: {image}")
+    for config_path in sweep_tomls:
+        logger.debug(f"Sweep Submitting config: {config_path}")
+        try:
+            submit(
+                config_path=config_path.as_posix(),
+                image=image,
+                quiet=quiet,
+                context=context,
+                dry_run=dry_run,
+            )
+        except Exception as e:
+            logger.error(f"Failed to submit config {config_path}: {e}")
+            if not quiet:
+                print(f"Error submitting {config_path}: {e}")
+            continue

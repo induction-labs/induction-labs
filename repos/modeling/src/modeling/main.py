@@ -6,13 +6,14 @@ import logging
 import os
 import warnings
 from pathlib import Path
+from typing import Annotated
 
 import typer
 from synapse.utils.async_typer import AsyncTyper
 from synapse.utils.logging import configure_logging
 
 from modeling.queue import queue_app
-from modeling.k8s import k8s_app
+from modeling.k8s.cli import k8s_app
 
 logger = configure_logging(
     __name__,
@@ -39,18 +40,20 @@ def silence_everything():
     builtins.print = lambda *args, **kwargs: None
 
 
-@app.async_command()
-async def run(
-    config_path: str = typer.Argument(
-        ..., help="Path to experiment configuration toml file"
-    ),
-    ray_head_worker: bool = typer.Option(
-        False,
-        "--ray-head-worker",
-        "-rhw",
-        help="Run the Ray head worker. "
-        "This is useful for debugging and local development. ",
-    ),
+@app.async_command(name="run")
+async def do_run(
+    config_path: Annotated[
+        str, typer.Argument(help="Path to experiment configuration toml file")
+    ],
+    ray_head_worker: Annotated[
+        bool,
+        typer.Option(
+            "--ray-head-worker",
+            "-rhw",
+            help="Run the Ray head worker. "
+            "This is useful for debugging and local development. ",
+        ),
+    ] = False,
 ):
     """
     Run the modeling application with the specified configuration and extra arguments.
@@ -80,12 +83,18 @@ async def run(
 
 @app.command()
 def export(
-    config_path: str = typer.Argument(
-        ..., help="Path to the module configuration file"
-    ),
-    submit: bool = typer.Option(
-        False, help="Run the experiment after exporting the configuration"
-    ),
+    config_path: Annotated[
+        str, typer.Argument(help="Path to the module configuration file")
+    ],
+    run: Annotated[
+        bool, typer.Option(help="Run the experiment after exporting the configuration")
+    ] = False,
+    submit: Annotated[
+        bool,
+        typer.Option(
+            help="Submit the experiment to Kubernetes after exporting the configuration",
+        ),
+    ] = False,
 ):
     """
     Export the module configuration to a file.
@@ -96,6 +105,11 @@ def export(
     assert "LOCAL_RANK" not in os.environ, (
         "This command should not be run with torchrun. "
     )
+
+    # Check mutual exclusivity
+    if run and submit:
+        logger.error("--submit and --submit-k8s options are mutually exclusive")
+        raise typer.Exit(1)
     from modeling.config import ExperimentConfig
     from modeling.config.serde import (
         serialize_experiment_config,
@@ -110,14 +124,6 @@ def export(
     export_path = exp_module_path(config_path, file_extension=".toml")
     export_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # run_command = (
-    #     f"torchrun --nproc_per_node={exp_config.run.distributed.devices_per_node}"
-    #     f" --nnodes {exp_config.run.distributed.num_nodes}"
-    #     " --node_rank 0"
-    #     " --rdzv_endpoint=127.0.0.1:29500"
-    #     f" src/modeling/main.py run {export_path} --node-rank 0"
-    # )
-
     run_command = f"mdl run {export_path} -rhw"
 
     serialize_experiment_config(exp_config, export_path, eof_comments=run_command)
@@ -129,14 +135,27 @@ def export(
         "##################################"
     )
 
-    if submit:
+    if run:
         logger.info("Running the experiment...")
-        asyncio.run(run(config_path=export_path.as_posix(), ray_head_worker=True))
+        asyncio.run(do_run(config_path=export_path.as_posix(), ray_head_worker=True))
+    elif submit:
+        logger.info("Submitting experiment to Kubernetes...")
+        from modeling.k8s.cli import submit as k8s_submit
+
+        k8s_submit(config_path=export_path.as_posix())
 
 
 @app.command()
 def sweep(
-    config_path: str = typer.Argument(..., help="Path to the sweep configuration file"),
+    config_path: Annotated[
+        str, typer.Argument(help="Path to the sweep configuration file")
+    ],
+    submit: Annotated[
+        bool,
+        typer.Option(
+            help="Submit the sweep to Kubernetes after exporting the configuration",
+        ),
+    ] = False,
 ):
     """
     Load and process a sweep configuration.
@@ -175,6 +194,12 @@ def sweep(
         f"mdl queue run {sweep_export_path}\n"
         "##################################"
     )
+
+    if submit:
+        logger.info("Submitting sweep to Kubernetes...")
+        from modeling.k8s.cli import sweep as k8s_sweep
+
+        k8s_sweep(directory=sweep_export_path.as_posix())
 
 
 app.add_typer(queue_app, name="queue")

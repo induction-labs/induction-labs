@@ -1,24 +1,27 @@
-from modeling.checkpoints.save import save_checkpoint_to_tmpdir
-from modeling.modules.base_module import BaseModuleConfig, PreTrainedModel
-from modeling.utils.typed_remote import (
-    remote_method,
-    BaseActor,
-)
-from pydantic import BaseModel
-from modeling.config.distributed import InstanceConfig
-from modeling.config import UnifiedExperimentConfig
-from modeling.utils.fix_rng import fix_rng
-from synapse.utils.logging import configure_logging, logging
+import os
 from contextlib import AbstractContextManager
-import torch
-from modeling.distributed.distributed import init_distributed, TorchUrl
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional
-import os
-from modeling.config.data import BaseDataSample
+
+import torch
+from pydantic import BaseModel
+from synapse.utils.logging import configure_logging, logging
 from torch.optim import Optimizer
+from transformers.modeling_utils import PreTrainedModel
+
+from modeling.checkpoints.save import save_checkpoint_to_tmpdir
+from modeling.config import UnifiedExperimentConfig
+from modeling.config.data import BaseDataSample
+from modeling.config.distributed import InstanceConfig
+from modeling.distributed.distributed import TorchUrl, init_distributed
+from modeling.modules.base_module import BaseModuleConfig
 from modeling.utils.check_nans import check_nans
+from modeling.utils.fix_rng import fix_rng
+from modeling.utils.typed_remote import (
+    BaseActor,
+    remote_method,
+)
 
 if TYPE_CHECKING:
     from modeling.modules.base_module import BaseLITModule

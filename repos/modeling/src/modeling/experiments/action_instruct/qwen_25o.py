@@ -111,7 +111,6 @@ Qwen25oActionSweep = Sweep(Qwen25OActionExperimentConfig_GPU).sweep(
     Sweep.S.lr,
 )
 
-# (lambda a: (x := 12 + a, x + 2)[-1])(2)
 
 # mdl export modeling.experiments.action_instruct.qwen_25o.Qwen25OActionExperimentConfig_CPU
 # mdl export modeling.experiments.action_instruct.qwen_25o.Qwen25OActionExperimentConfig_GPU
