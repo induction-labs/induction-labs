@@ -21,11 +21,11 @@ from modeling.utils.cloud_path import CloudPath
 
 # from modeling.modules.base_module import CompileConfig
 
-run_name = "qwen25o_7B_k8s_testing"
+run_name = "sweep_qwen25o_7B_uninit"
 num_devices = 8
 Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
     metadata=ExperimentMetadata(
-        wandb=WandbConfig(project="mouse_following", name=run_name),
+        wandb=WandbConfig(project="qwen25o_7B_real_data", name=run_name),
         # wandb=None,
         output_dir=Path("./output") / run_name,
         # checkpoint=None,
@@ -39,9 +39,9 @@ Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
         ),
     ),
     module=Qwen25OActionLITConfig(
-        checkpoint_path=CloudPath.from_str(
-            "gs://induction-labs/checkpoints/qwen25o_7B_uninitialized/2025-07-17T23-05-38/step_100"
-        ),
+        # checkpoint_path=CloudPath.from_str(
+        #     "gs://induction-labs/checkpoints/qwen25o_7B_uninitialized/2025-07-17T23-05-38/step_100"
+        # ),
         model_name="Qwen/Qwen2.5-Omni-7B",
         tokenizer_name="Qwen/Qwen2.5-Omni-7B",
         freeze_vision=False,
@@ -49,7 +49,7 @@ Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
         freeze_action_embedding=False,
         freeze_action_head=False,
         # compile=None,
-        # compile=CompileConfig(),i
+        # compile=CompileConfig(),
     ),
     datapack=RangeActionDatapackConfig(
         # prefix="gs://induction-labs/jonathan/synth/garbage_cursor_follow_v1/sample_",
@@ -112,6 +112,7 @@ Qwen25oActionSweep = Sweep(Qwen25OActionExperimentConfig_GPU).sweep(
     ],
     Sweep.S.lr,
 )
+# 0.0005
 
 
 # mdl export modeling.experiments.action_instruct.qwen_25o.Qwen25OActionExperimentConfig_CPU

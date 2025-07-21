@@ -40,6 +40,11 @@ def lr_lambda(
     if step < warmup_steps:
         return step / warmup_steps  # scales 0 → 1
     else:
+        if start_lr == 0:
+            assert end_lr == 0, (
+                "If start_lr is 0, end_lr must also be 0 to avoid division by zero."
+            )
+            return 1.0
         progress = (step - warmup_steps) / max(1, end_steps - warmup_steps)
         progress = min(progress, 1.0)  # clamp to 1.0
         return 1 + (end_lr / start_lr - 1) * progress  # 1 → end_lr/start_lr

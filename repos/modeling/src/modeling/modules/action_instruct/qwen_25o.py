@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from enum import Enum
 from typing import Any, TypeVar
 
 import numpy as np
@@ -11,6 +12,7 @@ from synapse.actions.mouse_movements import (
     generate_image_from_segments,
 )
 from synapse.utils.logging import configure_logging, logging
+from torch import nn
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.fsdp import MixedPrecisionPolicy, fully_shard
 
@@ -34,6 +36,7 @@ from .qwen_25o_actions import (
 logger = configure_logging(__name__, level=logging.DEBUG)
 
 MODEL_TYPE = Qwen2_5OmniActionModel
+l2_loss = nn.MSELoss(reduce=False)
 
 T = TypeVar("T")
 
@@ -155,7 +158,23 @@ class Qwen25OActionLIT(
             **inputs.qwen_inputs.model_dump(),
         )
         check_nans(outputs.action_outputs, "outputs")
-        return self.compute_loss(outputs, inputs)[0], {}
+
+        (
+            loss,
+            predicted_xs,
+            predicted_ys,
+            actual_xs,
+            actual_ys,
+            output_actions,
+            cursor_path,
+            (analytical_loss, l2_points_loss, coefficients_loss),
+        ) = self.compute_loss(outputs, inputs)
+
+        return loss, {
+            "train/analytical_loss": analytical_loss,
+            "train/l2_points_loss": l2_points_loss,
+            "train/coefficients_loss": coefficients_loss,
+        }
 
     def compute_loss(
         self, outputs: Qwen2_5OmniActionCausalLMOutputWithPast, inputs: ActionDataSample
@@ -190,15 +209,32 @@ class Qwen25OActionLIT(
         )
 
         # if inputs.cursor_path is not None:
-        loss = analytical_distance(
+        analytical_loss = analytical_distance(
             a=output_actions[:, 0, :],
             b=cursor_path[:, 0, :],
         ) + analytical_distance(
             a=output_actions[:, 1, :],
             b=cursor_path[:, 1, :],
-        )  # [k, num_points]
+        )
+        l2_points_loss = (
+            l2_loss(predicted_xs, actual_xs) + l2_loss(predicted_ys, actual_ys)
+        ).sum()
+        coefficients_loss = (
+            l2_loss(output_actions[:, 0, :], cursor_path[:, 0, :])
+            + l2_loss(output_actions[:, 1, :], cursor_path[:, 1, :])
+        ).sum()
 
-        loss = loss.sum()
+        loss = None
+        match self.module_config.loss_type:
+            case CursorPredictionLoss.ANALYTICAL_DISTANCE:
+                loss = analytical_loss.sum()
+            case CursorPredictionLoss.L2_DISTANCE:
+                loss = l2_points_loss
+            case CursorPredictionLoss.COEFFICIENTS_DISTANCE:
+                loss = coefficients_loss
+            case _:
+                raise ValueError(f"Unknown loss type: {self.module_config.loss_type}")
+
         assert isinstance(loss, torch.Tensor), (
             f"Expected outputs.loss to be a Tensor, got {type(outputs.loss)}"
         )
@@ -211,6 +247,7 @@ class Qwen25OActionLIT(
             actual_ys,
             output_actions,
             cursor_path,
+            (analytical_loss, l2_points_loss, coefficients_loss),
         )
 
     @classmethod
@@ -265,6 +302,7 @@ class Qwen25OActionLIT(
             actual_ys,
             output_actions,
             cursor_path,
+            (analytical_loss, l2_points_loss, coefficients_loss),
         ) = self.compute_loss(outputs, inputs)
         action_outputs = outputs.action_outputs[inputs.action_tokens]
         cursor_path = cursor_path.reshape(-1, 6)
@@ -278,6 +316,9 @@ class Qwen25OActionLIT(
             "val/cursor_path": cursor_path,
             "val/action_tokens": inputs.action_tokens,
             "val/action_outputs": action_outputs,
+            "val/analytical_loss": analytical_loss,
+            "val/l2_points_loss": l2_points_loss,
+            "val/coefficients_loss": coefficients_loss,
         }
 
     @classmethod
@@ -337,6 +378,16 @@ class Qwen25OActionLIT(
         )
 
 
+class CursorPredictionLoss(Enum):
+    """
+    Enum for cursor prediction loss types.
+    """
+
+    ANALYTICAL_DISTANCE = "analytical_distance"
+    L2_DISTANCE = "l2_distance"
+    COEFFICIENTS_DISTANCE = "coefficients_distance"
+
+
 class Qwen25OActionLITConfig(BaseModuleConfig):
     """
     Configuration class for Qwen-2.5O Lightning Module.
@@ -353,6 +404,7 @@ class Qwen25OActionLITConfig(BaseModuleConfig):
     freeze_vision: bool = False
     freeze_action_head: bool = False
     freeze_action_embedding: bool = False
+    loss_type: CursorPredictionLoss = CursorPredictionLoss.ANALYTICAL_DISTANCE
 
     def validate_datapack_compatibility(
         self, datapack_config: DatapackConfig[Any]
