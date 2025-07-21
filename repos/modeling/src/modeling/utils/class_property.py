@@ -1,4 +1,4 @@
-from abc import ABCMeta, abstractmethod
+from abc import abstractmethod
 
 
 # TODO: Make this not show up on pydantic
@@ -26,21 +26,20 @@ def abstract_classproperty(func):
 # —— example —— #
 
 
-class MyBase(metaclass=ABCMeta):
-    @abstract_classproperty
-    def identifier(cls):
-        """Must be overridden as a class‐level property."""
-        ...
+# class MyBase(metaclass=ABCMeta):
+#     @abstract_classproperty
+#     def identifier(cls):
+#         """Must be overridden as a class-level property."""
 
 
-class Good(MyBase):
-    @class_property
-    def identifier(cls):
-        return "I work"
+# class Good(MyBase):
+#     @class_property
+#     def identifier(cls):
+#         return "I work"
 
 
-class Bad(MyBase):
-    pass
+# class Bad(MyBase):
+#     pass
 
 
 # print(Good.identifier)   # → "I work"

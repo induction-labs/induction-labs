@@ -1,21 +1,19 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from modeling.config import (
     DistributedConfig,
     ExperimentConfig,
     ExperimentMetadata,
+    LinearLRSchedule,
+    ProfileConfig,
     RunConfig,
     WandbConfig,
-    ProfileConfig,
-    LinearLRSchedule,
 )
-from pathlib import Path
 from modeling.data.text_train import TextPretrainDatapackConfig
-
 from modeling.modules.text_pretrain.llama3 import Llama3LITConfig
-from modeling.types import AttentionImplementation
-
-from modeling.types import Accelerator, DType
+from modeling.types import Accelerator, AttentionImplementation, DType
 
 bs = 8
 experiment_name = "llama3_text_pretrain.shard_test"

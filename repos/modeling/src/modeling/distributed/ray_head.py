@@ -1,16 +1,16 @@
 from __future__ import annotations
 
+import json
 import logging
 from contextlib import contextmanager
-
 from typing import cast
+
 import ray
 import ray.scripts.scripts as ray_cli
 from pydantic import AnyUrl, UrlConstraints
 from synapse.utils.logging import configure_logging
 
 from modeling.utils.temp_env import temp_env
-import json
 
 logger = configure_logging(__name__, level=logging.DEBUG)
 
@@ -70,7 +70,7 @@ def initialize_ray_head(resources: dict[str, float] | None = None):
                     # TODO: Setting address on head node programatically does not work right now.
                     # TODO: Read address from ray_cli return
                     # f"--address={ray_host.host}:{ray_host.port}",
-                    f"--port={str(ray_host.port)}",
+                    f"--port={ray_host.port!s}",
                     f"--resources={json.dumps(resources)}" if resources else "",
                     # TODO: ray dashboard configuration
                     # "--dashboard-host=0.0.0.0",

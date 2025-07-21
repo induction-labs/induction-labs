@@ -8,9 +8,7 @@ from modeling.config import (
     WandbConfig,
 )
 from modeling.data.text_train import TextPretrainDatapackConfig
-
 from modeling.modules.text_pretrain.llama3 import Llama3LITConfig
-
 from modeling.types import Accelerator, DType
 
 CR7BPretrainExperimentConfig = ExperimentConfig(

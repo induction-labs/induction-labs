@@ -21,6 +21,16 @@ exclude = ["repos/vllm", "repos/output", "repos/lingua", "k8s/"]
 [dependency-groups]
 dev = ["pre-commit>=4.2.0", "ruff>=0.11.8"]
 
+
+[tool.ruff]
+fix = true
+extend-exclude = [
+    "repos/osworld",
+    "repos/pynput",
+    "*.ipynb",
+    "repos/modeling/tests",
+]
+
 [tool.ruff.lint]
 select = [
     "E",   # pycodestyle (error)
@@ -35,7 +45,8 @@ select = [
     "PGH", # pygrep-hooks
     "PYI", # flake8-pyi
     "RUF",
-]
+] # Enable isort rules
+
 
 ignore = [
     # only relevant if you run a script with `python -0`,
@@ -48,9 +59,6 @@ ignore = [
 
 [tool.ruff.lint.isort]
 required-imports = ["from __future__ import annotations"]
-
-[tool.ruff]
-extend-exclude = ["repos/osworld", "repos/pynput", "*.ipynb"]
 
 [project.scripts]
 collect = "actioncollector.main:app"

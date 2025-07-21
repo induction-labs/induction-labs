@@ -1,7 +1,7 @@
 import asyncio
-
-from typing import Awaitable, TypeVar
+from collections.abc import Awaitable
 from datetime import timedelta
+from typing import TypeVar
 
 T = TypeVar("T")
 
@@ -32,5 +32,5 @@ async def max_timeout(
 
     try:
         return await asyncio.wait_for(promise, timeout.total_seconds())
-    except asyncio.TimeoutError as exc:
+    except TimeoutError as exc:
         raise MaxTimeoutError(f"[{timeout=}] {err_msg}") from exc

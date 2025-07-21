@@ -1,14 +1,12 @@
+import logging
+import os
+import shutil
 from pathlib import Path
 
-import os
 from google.cloud import storage
-import shutil
-
-from transformers.modeling_utils import PreTrainedModel
 from synapse.utils.logging import configure_logging
-
-import logging
 from tqdm import tqdm
+from transformers.modeling_utils import PreTrainedModel
 
 logger = configure_logging(__name__, level=logging.INFO)
 

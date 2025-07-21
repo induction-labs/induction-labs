@@ -3,10 +3,10 @@ from __future__ import annotations
 import tempfile
 import textwrap
 from pathlib import Path
-import tomli
 from unittest.mock import patch
 
 import pytest
+import tomli
 from pydantic import BaseModel, ValidationError
 
 from modeling.config import (

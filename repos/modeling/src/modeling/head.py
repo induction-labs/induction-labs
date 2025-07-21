@@ -3,11 +3,12 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import AsyncIterator, Iterator, Never, Optional, cast
+from typing import Never, cast
 
 import torch
 import tqdm
@@ -120,10 +121,10 @@ class ManagerState:
 
     global_step: int
     tmp_dir: Path
-    generator: "torch.Generator"
+    generator: torch.Generator
     ray_host: RayUrl
     actors: RayActors
-    wandb: Optional["Run"]
+    wandb: Run | None
 
 
 @dataclass
@@ -140,7 +141,7 @@ class ExperimentManager:
     state: ManagerState
 
     def wandb_log(
-        self, metrics: dict[str, float], step: Optional[int] = None, commit=False
+        self, metrics: dict[str, float], step: int | None = None, commit=False
     ):
         """
         Log metrics to Weights & Biases.

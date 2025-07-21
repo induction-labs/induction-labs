@@ -1,15 +1,16 @@
 from __future__ import annotations
 
 from abc import abstractmethod
+from typing import TypeVar
 
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
+
 from modeling.modules.base_module import (
-    BaseLITModule,
-    MODEL_TYPE,
     DATA_TYPE,
+    MODEL_TYPE,
+    BaseLITModule,
     BaseModuleConfig,
 )
-from typing import TypeVar
 
 CONFIG_TYPE = TypeVar("CONFIG_TYPE", bound="TextLITConfig", covariant=True)
 

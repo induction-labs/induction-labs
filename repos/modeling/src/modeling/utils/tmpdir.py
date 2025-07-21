@@ -1,7 +1,8 @@
+import shutil
+import tempfile
 from contextvars import ContextVar, Token
 from pathlib import Path
-import tempfile
-import shutil
+
 from synapse.utils.logging import configure_logging
 
 logger = configure_logging(__name__)
@@ -24,7 +25,7 @@ class TmpDirContext:
         return self, self.tmpdir
 
     def __exit__(self, exc_type, exc, tb):
-        # restore the previous value (or clear it if there wasn’t one)
+        # restore the previous value (or clear it if there wasn't one)
         assert self._token is not None
         assert self.tmpdir is not None, "Temporary directory was not set"
         logger.debug(f"Cleaning up temporary directory: {self.tmpdir}")

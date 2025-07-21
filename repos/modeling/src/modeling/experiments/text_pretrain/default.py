@@ -1,16 +1,17 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from modeling.config import (
     DistributedConfig,
     ExperimentConfig,
     ExperimentMetadata,
+    LinearLRSchedule,
     RunConfig,
     WandbConfig,
-    LinearLRSchedule,
 )
 from modeling.data.text_train import TextPretrainDatapackConfig
 from modeling.modules.text_pretrain.default import TextPretrainLITConfig
-from pathlib import Path
 
 TextPretrainExperimentConfig = ExperimentConfig(
     metadata=ExperimentMetadata(

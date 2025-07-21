@@ -1,10 +1,10 @@
 from abc import ABC, abstractmethod
-from typing import Sequence, TypeVar, Self, cast, final
-from pydantic import BaseModel, ConfigDict
-from typing import TYPE_CHECKING
+from collections.abc import Sequence
 from itertools import batched
+from typing import TYPE_CHECKING, Generic, Self, TypeVar, cast, final
+
+from pydantic import BaseModel, ConfigDict
 from torch.utils.data import Dataset
-from typing import Generic
 
 if TYPE_CHECKING:
     import torch
@@ -23,7 +23,6 @@ class BaseDataSample(BaseModel, ABC):
         Move the data sample to the specified device.
         This is used to ensure that the data is on the correct device for training or evaluation.
         """
-        pass
 
     def __eq__(self, other: object) -> bool:
         import torch
@@ -57,7 +56,6 @@ class BaseDataSample(BaseModel, ABC):
         Combine a batch of data samples into a single data sample.
         This is used to prepare the data for training or evaluation.
         """
-        pass
 
 
 DataSample = TypeVar("DataSample", bound=BaseDataSample, covariant=True)
@@ -83,7 +81,6 @@ class BaseDataset(Dataset[DataSample], BaseModel, Generic[DataSample, DatasetArg
         """
         Class property that should return the data class type.
         """
-        pass
 
     @final
     @classmethod
@@ -124,7 +121,6 @@ class BaseDataset(Dataset[DataSample], BaseModel, Generic[DataSample, DatasetArg
         Asynchronous constructor for the dataset.
         This allows for any necessary asynchronous setup before the dataset is used.
         """
-        pass
 
     @final
     def __getitem__(self, idx: int) -> DataSample:
@@ -143,4 +139,3 @@ class BaseDataset(Dataset[DataSample], BaseModel, Generic[DataSample, DatasetArg
         This allows for any necessary asynchronous operations to retrieve the data sample.
         This returns **1** sample, the batching logic is handled by the base class.
         """
-        pass

@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-import tomli
-
 from pathlib import Path
 from typing import Any
+
+import tomli
 
 from . import DatapackConfig, ExperimentConfig, ModuleConfig, SerializedExperimentConfig
 

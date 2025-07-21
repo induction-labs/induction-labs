@@ -12,8 +12,8 @@ import typer
 from synapse.utils.async_typer import AsyncTyper
 from synapse.utils.logging import configure_logging
 
-from modeling.queue import queue_app
 from modeling.k8s.cli import k8s_app
+from modeling.queue import queue_app
 
 logger = configure_logging(
     __name__,

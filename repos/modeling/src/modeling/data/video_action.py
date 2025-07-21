@@ -1,28 +1,25 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Self, cast
-
-from modeling.config import DatapackConfig, ExperimentConfig, ModuleConfig
-from modeling.config.data import BaseDataSample, BaseDataset
-from pydantic import BaseModel, ConfigDict, model_validator
+import functools
+import logging
 from abc import abstractmethod
+from collections.abc import Callable
+from typing import Any, Generic, Literal, Self, TypeVar, cast
+
+import numpy as np
+import torch
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+from synapse.combined.combined_loader import CombinedLoaderArgs, combined_loader
+from synapse.utils.logging import configure_logging
 from synapse.video_loader.read_frames import fetch_metadata_from_zarr
 from synapse.video_loader.typess import StreamMetadata
-from synapse.combined.combined_loader import combined_loader, CombinedLoaderArgs
-import numpy as np
-from typing import Callable, Generic, TypeVar
-from typing import Literal
-
 from transformers.models.qwen2_5_omni import (
     Qwen2_5OmniProcessor,
 )
 
-import functools
-import torch
-
-from synapse.utils.logging import configure_logging
-import logging
+from modeling.config import DatapackConfig, ExperimentConfig, ModuleConfig
+from modeling.config.data import BaseDataSample, BaseDataset
 
 logger = configure_logging(__name__, level=logging.INFO)
 
@@ -286,7 +283,7 @@ def prompt_token_len(raw_prompt: str) -> int:
 def insert_every_n(t: torch.Tensor, n: int, fill_value=0) -> torch.Tensor:
     assert t.ndim == 1
     L = t.numel()
-    # how many zeros we’ll end up inserting
+    # how many zeros we'll end up inserting
     num_insert = L // n
 
     # new length = original + inserted zeros
@@ -591,7 +588,9 @@ class ListActionDatapackConfig(ActionDatapackConfig):
     """
 
     config_path: str = "modeling.data.video_action.ListActionDatapackConfig"
-    data_paths_list: list[str] = []
+    data_paths_list: list[str] = Field(
+        default_factory=list,
+    )
 
     @property
     def data_paths(self) -> list[str]:

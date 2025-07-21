@@ -1,14 +1,14 @@
 # 1) Install dependencies
 # pip install google-cloud-storage transformers safetensors
 
-from google.cloud import storage
 from pathlib import Path
-from modeling.utils.cloud_path import CloudPath
+
+from google.cloud import storage
+from huggingface_hub import snapshot_download
+from synapse.utils.logging import configure_logging
 from tqdm import tqdm
 
-from synapse.utils.logging import configure_logging
-
-from huggingface_hub import snapshot_download
+from modeling.utils.cloud_path import CloudPath
 
 logger = configure_logging(__name__)
 

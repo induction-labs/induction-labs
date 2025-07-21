@@ -4,13 +4,13 @@ import logging
 import re
 import subprocess
 from pathlib import Path
-from typing import Annotated, Optional
+from typing import Annotated
 
 import typer
 import yaml
 from synapse.utils.logging import configure_logging
-from modeling.utils.gen_id import gen_id
 
+from modeling.utils.gen_id import gen_id
 
 logger = configure_logging(
     __name__,
@@ -24,7 +24,7 @@ def load_k8s_template() -> dict:
 
     assert K8S_TEMPLATE_PATH.exists(), f"Template file not found: {K8S_TEMPLATE_PATH}"
 
-    with open(K8S_TEMPLATE_PATH, "r") as f:
+    with open(K8S_TEMPLATE_PATH) as f:
         job_template = yaml.safe_load(f)
     logger.debug(f"Loaded job template from: {K8S_TEMPLATE_PATH}")
     return job_template
@@ -76,6 +76,7 @@ def bake(
 
         if matches:
             image_ref = matches[-1]  # Take the last match (most recent)
+            assert isinstance(image_ref, str), "Image reference should be a string"
             logger.info(f"Successfully built image: {image_ref}")
             print(f"Built image: {image_ref}")
             return image_ref
@@ -88,11 +89,11 @@ def bake(
         logger.error(f"Depot bake failed with exit code {e.returncode}")
         logger.error(f"Error output: {e.stderr}")
         print(f"Error: Depot bake failed - {e.stderr}")
-        raise typer.Exit(1)
-    except FileNotFoundError:
+        raise typer.Exit(1) from e
+    except FileNotFoundError as e:
         logger.error("depot command not found. Please ensure depot CLI is installed")
         print("Error: depot command not found. Please ensure depot CLI is installed")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from e
 
 
 K8S_TEMPLATE_PATH = (
@@ -104,7 +105,7 @@ K8S_TEMPLATE_PATH = (
 def submit(
     config_path: Annotated[str, typer.Argument(help="File to submit")],
     image: Annotated[
-        Optional[str],
+        str | None,
         typer.Option(
             "--image",
             help="Docker image to use. If not provided, will run bake to build image",
@@ -114,7 +115,7 @@ def submit(
         bool, typer.Option("--quiet", "-q", help="Hide output from the command")
     ] = False,
     context: Annotated[
-        Optional[str],
+        str | None,
         typer.Option(
             "--context",
             help="Kubernetes context to use. If not provided, uses current context",
@@ -135,15 +136,14 @@ def submit(
     if image is None:
         logger.info("No image provided, running bake to build image...")
         image = bake(quiet=quiet)
-        if image is None:
-            logger.error("Failed to build image")
-            raise typer.Exit(1)
+
     else:
         logger.info(f"Using provided image: {image}")
 
     logger.info(f"Submitting job with config: {config_path} and image: {image}")
 
     from kubernetes import client
+
     from modeling.k8s.context import load_kubernetes_config
 
     load_kubernetes_config(context=context)
@@ -210,7 +210,7 @@ def submit(
         logger.info(f"Saved k8s config to: {yaml_config_path}")
     except Exception as e:
         logger.error(f"Failed to save k8s config: {e}")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from e
 
     # Create batch API client
     batch_v1 = client.BatchV1Api()
@@ -234,7 +234,7 @@ def submit(
 
     except Exception as e:
         logger.error(f"Failed to submit job to Kubernetes: {e}")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from e
 
 
 def get_sweep_tomls(directory: str) -> list[Path]:
@@ -259,7 +259,7 @@ def sweep(
         str, typer.Argument(help="Directory containing experiment configuration files")
     ],
     image: Annotated[
-        Optional[str],
+        str | None,
         typer.Option(
             "--image",
             help="Docker image to use. If not provided, will run bake to build image",
@@ -269,7 +269,7 @@ def sweep(
         bool, typer.Option("--quiet", "-q", help="Hide output from the command")
     ] = False,
     context: Annotated[
-        Optional[str],
+        str | None,
         typer.Option(
             "--context",
             help="Kubernetes context to use. If not provided, uses current context",
@@ -291,9 +291,7 @@ def sweep(
     if image is None:
         logger.info("No image provided, running bake to build image...")
         image = bake(quiet=quiet)
-        if image is None:
-            logger.error("Failed to build image")
-            raise typer.Exit(1)
+
     else:
         logger.info(f"Using provided image: {image}")
 

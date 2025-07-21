@@ -1,9 +1,10 @@
 from __future__ import annotations
-from pathlib import Path
-from typing import Union, Type, Any, Annotated
-from pydantic import BaseModel, field_serializer, BeforeValidator
 
 from enum import StrEnum
+from pathlib import Path
+from typing import Annotated, Any
+
+from pydantic import BaseModel, BeforeValidator, field_serializer
 
 
 def path_validator(path: Any) -> Path:
@@ -40,7 +41,7 @@ class CloudPath(BaseModel):
     path: Annotated[Path, BeforeValidator(path_validator)]
 
     @classmethod
-    def from_str(cls: Type[CloudPath], uri: str) -> CloudPath:
+    def from_str(cls: type[CloudPath], uri: str) -> CloudPath:
         """
         Parse a URI like 's3://bucket/folder/file.txt' or '/local/path'.
         """
@@ -62,7 +63,7 @@ class CloudPath(BaseModel):
             return self.path.as_posix()
         return f"{self.cloud}://{self.path.as_posix()}"
 
-    def __truediv__(self, other: Union[str, Path]) -> CloudPath:
+    def __truediv__(self, other: str | Path) -> CloudPath:
         """
         Support the / operator for path joining.
 
@@ -89,4 +90,4 @@ if __name__ == "__main__":
     print(cp2.to_str())  # gs://mybucket/folder/subdir/file.txt
     local = CloudPath.from_str("/tmp/data")
     print(local)  # /tmp/data
-    print((local / "notes.md"))  # /tmp/data/notes.md
+    print(local / "notes.md")  # /tmp/data/notes.md

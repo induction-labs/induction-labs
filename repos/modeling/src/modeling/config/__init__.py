@@ -9,10 +9,9 @@ from typing import (
     Annotated,
     Any,
     Generic,
-    Optional,
+    Never,
     Self,
     TypeVar,
-    Never,
 )
 
 from pydantic import (
@@ -25,13 +24,13 @@ from pydantic import (
 )
 from synapse.utils.logging import configure_logging
 
+from modeling.config.data import BaseDataSample, BaseDataset
 from modeling.types import Accelerator, AttentionImplementation, DType
 from modeling.utils.cloud_path import BeforeValidator, CloudPath, path_validator
 from modeling.utils.git import get_git_commit_sha, get_git_commit_sha_short
 
 from .distributed import DistributedConfig, InstanceConfig
 from .wandb import WandbConfig
-from modeling.config.data import BaseDataSample, BaseDataset
 
 if TYPE_CHECKING:
     from torch.distributed.fsdp import MixedPrecisionPolicy
@@ -70,7 +69,7 @@ class GCSCheckpointConfig(BaseModel):
         False, description="Whether to save the first step checkpoint."
     )
 
-    loaded_at: Optional[datetime] = Field(
+    loaded_at: datetime | None = Field(
         default=None,
         description="Timestamp when the checkpoint was loaded. Used to determine if the checkpoint is fresh.",
     )
@@ -139,7 +138,7 @@ class GCSCheckpointConfig(BaseModel):
 
 
 class ExperimentMetadata(BaseModel):
-    wandb: Optional[WandbConfig]
+    wandb: WandbConfig | None
 
     # TODO: Write a dedicated class for serializing paths to strings
     @field_serializer("output_dir")
@@ -147,7 +146,7 @@ class ExperimentMetadata(BaseModel):
         return output_dir.as_posix()
 
     output_dir: Annotated[Path, BeforeValidator(path_validator)]
-    checkpoint: Optional[GCSCheckpointConfig]
+    checkpoint: GCSCheckpointConfig | None
 
     @classmethod
     def mock_data(cls) -> ExperimentMetadata:
@@ -184,7 +183,7 @@ class ModuleConfig(BaseModel, ABC):
     config_path: str
 
     @classmethod
-    def module_cls(cls) -> type["BaseLITModule"]:
+    def module_cls(cls) -> type[BaseLITModule]:
         """
         Return the class of the Lightning module.
         This method should be implemented by subclasses to return the actual module class.
@@ -221,7 +220,7 @@ class ModuleConfig(BaseModel, ABC):
         self,
         run_config: RunConfig,
         instance_config: InstanceConfig,
-    ) -> "BaseLITModule":
+    ) -> BaseLITModule:
         """
         Create a Lightning module instance.
         This method should be implemented by subclasses to return an instance of the Lightning module.
@@ -258,7 +257,7 @@ class SerializedModuleConfig(ModuleConfig):
         self,
         run_config: RunConfig,
         instance_config: InstanceConfig,
-    ) -> "BaseLITModule":
+    ) -> BaseLITModule:
         """
         Create a Lightning module instance by loading it from the specified path.
         """
@@ -439,7 +438,7 @@ class RunConfig(BaseModel):
     """
 
     distributed: DistributedConfig
-    profile: Optional[ProfileConfig] = None
+    profile: ProfileConfig | None = None
 
     num_steps: int  # Number of steps per epoch
     # save_interval: int = 1000  # How often to save checkpoints
@@ -458,7 +457,7 @@ class RunConfig(BaseModel):
     quantize_model: bool = True  # Quantize the model if True. If False, only cast the optimizer weights to precision
 
     @property
-    def mp_policy(self) -> "MixedPrecisionPolicy":
+    def mp_policy(self) -> MixedPrecisionPolicy:
         from torch.distributed.fsdp import MixedPrecisionPolicy
 
         return MixedPrecisionPolicy(
@@ -571,7 +570,7 @@ class ExperimentConfig(BaseModel):
         Create a testing configuration for the experiment.
         This is useful for unit tests to avoid running the full experiment.
         """
-        profile_config: Optional[ProfileConfig] = (
+        profile_config: ProfileConfig | None = (
             ProfileConfig() if profile else self.run.profile
         )
         validation_every_n_steps = self.run.validation_every_n_steps if with_val else -1

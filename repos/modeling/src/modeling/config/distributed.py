@@ -2,10 +2,9 @@ from __future__ import annotations
 
 from enum import Enum
 from functools import reduce
-
-from pydantic import BaseModel, Field, model_validator
 from typing import TYPE_CHECKING, Self
 
+from pydantic import BaseModel, Field, model_validator
 
 if TYPE_CHECKING:
     import torch
@@ -38,7 +37,7 @@ class InstanceConfig(BaseModel):
         return self.node_rank == 0 and self.device_rank == 0
 
     @property
-    def device(self) -> "torch.device":
+    def device(self) -> torch.device:
         """
         Get the device for this instance based on its device rank.
         This assumes that the devices are ordered by their ranks.

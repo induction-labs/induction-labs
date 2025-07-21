@@ -1,23 +1,19 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from modeling.config import (
     DistributedConfig,
     ExperimentConfig,
     ExperimentMetadata,
+    LinearLRSchedule,
     RunConfig,
     WandbConfig,
 )
 from modeling.data.text_train import TextPretrainDatapackConfig
 from modeling.modules.text_pretrain.qwen_25o import Qwen25OLITConfig
+from modeling.types import Accelerator, AttentionImplementation, DType
 
-
-from modeling.config import (
-    LinearLRSchedule,
-)
-
-from modeling.types import AttentionImplementation
-from pathlib import Path
-from modeling.types import Accelerator, DType
 # from modeling.modules.base_module import CompileConfig
 
 

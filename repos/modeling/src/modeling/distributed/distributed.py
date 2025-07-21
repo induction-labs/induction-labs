@@ -1,17 +1,19 @@
 from __future__ import annotations
 
+import logging
+import os
+from collections.abc import Iterator
+from contextlib import contextmanager
+from typing import cast
+
+import torch
 import torch.distributed as dist
+from pydantic import AnyUrl, UrlConstraints
+from synapse.elapsed_timer import elapsed_timer
 from synapse.utils.logging import configure_logging
+
 from modeling.config import DistributedConfig, InstanceConfig
 from modeling.config.distributed import MeshAxis
-import logging
-import torch
-from contextlib import contextmanager
-from typing import Iterator
-from synapse.elapsed_timer import elapsed_timer
-from pydantic import AnyUrl, UrlConstraints
-from typing import cast
-import os
 
 logger = configure_logging(__name__, level=logging.DEBUG)
 

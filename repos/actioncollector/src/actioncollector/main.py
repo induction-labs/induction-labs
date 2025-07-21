@@ -4,13 +4,13 @@ import datetime
 import os
 import random
 import re
+import socket
 import string
 import subprocess
 import sys
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-import signal
-import socket, threading, sys, os, time
 
 import typer
 from tqdm import tqdm
@@ -51,21 +51,35 @@ def start_screen_record(
     if sys.platform.startswith("win"):
         cmd = [
             ffmpeg_path,
-            "-f", "gdigrab",                     # <-- Windows screen-capture device
-            "-framerate", str(framerate),
-            "-use_wallclock_as_timestamps", "1",
-            "-draw_mouse", "1",                 # <-- equivalent to -capture_cursor 1
-            "-vsync", "vfr",
-            "-i", "desktop",                    # <-- no device index needed on Windows
-            "-c:v", "libx264",
-            "-g", "15",
-            "-c:a", "aac",                      # harmless if no audio stream is present
-            "-preset", "veryfast",
-            "-crf", "17",
+            "-f",
+            "gdigrab",  # <-- Windows screen-capture device
+            "-framerate",
+            str(framerate),
+            "-use_wallclock_as_timestamps",
+            "1",
+            "-draw_mouse",
+            "1",  # <-- equivalent to -capture_cursor 1
+            "-vsync",
+            "vfr",
+            "-i",
+            "desktop",  # <-- no device index needed on Windows
+            "-c:v",
+            "libx264",
+            "-g",
+            "15",
+            "-c:a",
+            "aac",  # harmless if no audio stream is present
+            "-preset",
+            "veryfast",
+            "-crf",
+            "17",
             "-copyts",
-            "-muxdelay", "0",
-            "-f", "segment",
-            "-segment_time", str(segment_time),
+            "-muxdelay",
+            "0",
+            "-f",
+            "segment",
+            "-segment_time",
+            str(segment_time),
             output_path,
         ]
     else:
@@ -105,8 +119,13 @@ def start_screen_record(
         ]
     # open stdin so we can send 'q' to stop cleanly
     return subprocess.Popen(
-        cmd, stdin=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-        creationflags=subprocess.CREATE_NO_WINDOW if sys.platform.startswith("win") else 0
+        cmd,
+        stdin=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        creationflags=subprocess.CREATE_NO_WINDOW
+        if sys.platform.startswith("win")
+        else 0,
     )
 
 
@@ -206,7 +225,9 @@ def run(
         print("[info] available video devices:")
         for idx, name in devices:
             print(f"  [{idx}] {name}")
-        print("[info] using device index:", device_id, "which is", devices[device_id][1])
+        print(
+            "[info] using device index:", device_id, "which is", devices[device_id][1]
+        )
 
     print("[info] starting screen recording…")
     ffmpeg_proc = start_screen_record(
@@ -231,6 +252,7 @@ def run(
     )
 
     if sys.platform.startswith("win"):
+
         def shutdown(server_sock):
             print("[child] shutdown request received")
             server_sock.close()  # breaks the accept loop
@@ -240,7 +262,7 @@ def run(
 
         def serve_control(port=50572):
             srv = socket.socket()
-            srv.bind(('127.0.0.1', port))
+            srv.bind(("127.0.0.1", port))
             srv.listen(1)
             print(f"[child] PID {os.getpid()} control on port {port}")
             conn, _ = srv.accept()  # blocks until parent connects

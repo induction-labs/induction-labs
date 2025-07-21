@@ -1,5 +1,6 @@
-from synapse.utils.logging import configure_logging, logging
 from typing import cast
+
+from synapse.utils.logging import configure_logging, logging
 
 logger = configure_logging(__name__, level=logging.INFO)
 

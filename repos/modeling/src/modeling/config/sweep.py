@@ -1,10 +1,8 @@
-from . import ExperimentConfig, LinearLRSchedule
-
-from typing import Any, TypeVar, Sequence, Callable
-from typing import Self
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
+from typing import Any, Self, TypeVar
 
-from typing import List, Tuple
+from . import ExperimentConfig, LinearLRSchedule
 
 T = TypeVar("T")
 
@@ -31,7 +29,7 @@ class Sweep:
             return exp
 
         @staticmethod
-        def product(list_a: List[A], list_b: List[B]) -> List[Tuple[A, B]]:
+        def product(list_a: list[A], list_b: list[B]) -> list[tuple[A, B]]:
             """
             Returns the Cartesian product of list_a and list_b as a list of tuples.
 

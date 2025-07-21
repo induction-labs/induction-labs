@@ -1,20 +1,22 @@
 from __future__ import annotations
-from typing import Any, Generator, Optional
-from modeling.distributed.distributed import InstanceConfig
-from modeling.config import UnifiedExperimentConfig
-from synapse.utils.logging import configure_logging
+
 import logging
+from collections.abc import Generator
 from contextlib import contextmanager
-
 from pathlib import Path
+from typing import Any
 
+from synapse.utils.logging import configure_logging
 from torch.profiler.profiler import profile
+
+from modeling.config import UnifiedExperimentConfig
+from modeling.distributed.distributed import InstanceConfig
 
 logger = configure_logging(__name__, level=logging.INFO)
 
 
 def tensorboard_trace_handler(
-    dir_name: Path, worker_name: Optional[str] = None, use_gzip: bool = False
+    dir_name: Path, worker_name: str | None = None, use_gzip: bool = False
 ):
     """
     Outputs tracing files to directory of ``dir_name``, then that directory can be
@@ -61,7 +63,7 @@ def profiler_context(
         if config.run.profile is None or not instance.is_main:
             yield DummyProfiler()  # Replace with actual profiling logic
         else:
-            from torch.profiler import profile, ProfilerActivity, schedule
+            from torch.profiler import ProfilerActivity, profile, schedule
 
             profile_dir = config.metadata.output_dir / "profiler"
             profile_schedule = schedule(

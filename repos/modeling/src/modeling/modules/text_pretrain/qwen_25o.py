@@ -1,13 +1,14 @@
 from __future__ import annotations
 
-from modeling.config import RunConfig, InstanceConfig
-from modeling.modules.text_pretrain.default import TextPretrainLITConfig
 from transformers.models.qwen2_5_omni import (
     Qwen2_5OmniProcessor,
     Qwen2_5OmniThinkerForConditionalGeneration,
 )
+
+from modeling.config import InstanceConfig, RunConfig
 from modeling.modules.text_pretrain.default import (
     TextPretrainLIT,
+    TextPretrainLITConfig,
 )
 from modeling.utils.class_property import class_property
 

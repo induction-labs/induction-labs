@@ -3,20 +3,16 @@ from __future__ import annotations
 
 import types
 from abc import ABC
+from collections.abc import Callable, Coroutine, Mapping
 from typing import (
     Any,
-    Callable,
     Concatenate,
-    Coroutine,
     Generic,
     Literal,
-    Mapping,
-    Optional,
     ParamSpec,
     Protocol,
     Self,
     TypeVar,
-    Union,
     cast,
     overload,
     runtime_checkable,
@@ -24,10 +20,9 @@ from typing import (
 
 import ray
 from pydantic import BaseModel, ConfigDict
-
 from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 
-P = ParamSpec("P")  # parameters after  ‘self’
+P = ParamSpec("P")  # parameters after  'self'
 R = TypeVar("R", covariant=True)  # return type
 ActorArgs = TypeVar("ActorArgs", bound=BaseModel)
 ConfiguredState = TypeVar("ConfiguredState")
@@ -49,18 +44,18 @@ class _WithCustomCall(Protocol[P, R]):
 #! For now, in practice we should not be using async remote methods because Ray
 #! does not allow for threading if the method is async for some reason. :/
 @overload
-def remote_method(
+def remote_method[SelfT, **P, R](
     func: Callable[Concatenate[SelfT, P], Coroutine[Any, Any, R]],
 ) -> _WithCustomCall[P, Coroutine[Any, Any, R]]: ...
 
 
 @overload
-def remote_method(
+def remote_method[SelfT, **P, R](
     func: Callable[Concatenate[SelfT, P], R],
 ) -> _WithCustomCall[P, Coroutine[Any, Any, R]]: ...
 
 
-def remote_method(  # type: ignore
+def remote_method(  # type: ignore[override]
     func,
 ):  # -> _Wrapped[Callable[..., Any], Any, Callable[..., Any], Any]:
     """
@@ -78,13 +73,13 @@ def remote_method(  # type: ignore
 
     def _custom(self, *args, **kwargs):
         #! Note that this is never actually called, this is only used for typing
-        #! because ray overrides with `setattr(obj,method, ActorMethod(...))` which ignores
-        #! the additional properties on the method we add.
+        #! because ray overrides with `setattr(obj,method, ActorMethod(...))` which
+        #! ignores the additional properties on the method we add.
         raise NotImplementedError("This method should be called on a remote actor.")
         assert hasattr(func, "remote"), (
             f"Function {func.__name__} does not have a 'remote' attribute."
         )
-        return func.remote(self, *args, **kwargs)  # type: ignore
+        return func.remote(self, *args, **kwargs)  # type: ignore [return-value]
 
     # ---- Descriptor trick so attribute access works on the *bound* method ----
     def _get_bound(
@@ -118,7 +113,6 @@ class BaseActor(Generic[ActorArgs], ABC):
         """
         Shutdown the actor.
         """
-        pass
 
     @remote_method
     def set_environ(self, env: Mapping[str, str | None]) -> None:
@@ -135,7 +129,7 @@ class BaseActor(Generic[ActorArgs], ABC):
 
     @classmethod
     async def create(
-        cls, *, args: ActorArgs, remote_args: Optional[RemoteArgs] = None
+        cls, *, args: ActorArgs, remote_args: RemoteArgs | None = None
     ) -> Self:
         """
         A no-op method that allows the class to be used with `ray.remote`.
@@ -173,16 +167,14 @@ class BaseActor(Generic[ActorArgs], ABC):
 
 class RemoteArgs(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
-    num_cpus: Optional[float] = None
-    num_gpus: Optional[float] = None
-    resources: Optional[dict[str, float]] = None
-    runtime_env: Optional[dict[str, Any]] = None
-    label_selector: Optional[dict[str, str]] = None
-    scheduling_strategy: Optional[
-        Union[
-            Literal["DEFAULT"], Literal["SPREAD"], PlacementGroupSchedulingStrategy
-        ]  # ,
-    ] = None
+    num_cpus: float | None = None
+    num_gpus: float | None = None
+    resources: dict[str, float] | None = None
+    runtime_env: dict[str, Any] | None = None
+    label_selector: dict[str, str] | None = None
+    scheduling_strategy: (
+        Literal["DEFAULT", "SPREAD"] | PlacementGroupSchedulingStrategy | None
+    ) = None
 
 
 C = TypeVar("C", bound=type[BaseActor])  # “any class object”

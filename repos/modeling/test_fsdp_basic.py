@@ -4,10 +4,11 @@ torchrun --standalone --nproc_per_node=2 test_fsdp_basic.py
 """
 
 import os
+
 import torch
-from torch import nn
 import torch.distributed as dist
-from torch.distributed.fsdp import fully_shard, MixedPrecisionPolicy
+from torch import nn
+from torch.distributed.fsdp import MixedPrecisionPolicy, fully_shard
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     ModelArgs,
     Transformer,

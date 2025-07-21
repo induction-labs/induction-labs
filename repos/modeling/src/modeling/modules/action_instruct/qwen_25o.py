@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from typing import Any, TypeVar
 
-from modeling.utils.check_nans import check_nans
 import numpy as np
 import torch
 import wandb
@@ -23,12 +22,13 @@ from modeling.config import (
 from modeling.config.distributed import MeshAxis
 from modeling.data.video_action import ActionDatapackConfig, ActionDataSample
 from modeling.modules.base_module import BaseLITModule, BaseModuleConfig
+from modeling.utils.check_nans import check_nans
 from modeling.utils.class_property import class_property
 
 from .qwen_25o_actions import (
     Qwen2_5OmniActionCausalLMOutputWithPast,
-    Qwen2_5OmniThinkerActionConfig,
     Qwen2_5OmniActionModel,
+    Qwen2_5OmniThinkerActionConfig,
 )
 
 logger = configure_logging(__name__, level=logging.DEBUG)
@@ -237,6 +237,7 @@ class Qwen25OActionLIT(
                 for actual, predicted in zip(
                     to_numpy_clean(cursor_path),
                     to_numpy_clean(action_outputs),
+                    strict=False,
                 )
             ],
         )

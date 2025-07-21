@@ -1,13 +1,14 @@
 from __future__ import annotations
 
-from modeling.config import RunConfig, InstanceConfig
 from transformers.models.qwen3.modeling_qwen3 import (
     Qwen3ForCausalLM,
 )
+
+from modeling.config import InstanceConfig, RunConfig
 from modeling.modules.text_pretrain.default import (
+    ConfigType,
     TextPretrainLIT,
     TextPretrainLITConfig,
-    ConfigType,
 )
 from modeling.utils.class_property import class_property
 

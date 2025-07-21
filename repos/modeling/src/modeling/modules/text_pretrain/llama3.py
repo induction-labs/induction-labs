@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from modeling.config import RunConfig, InstanceConfig
 from transformers.models.llama.modeling_llama import LlamaForCausalLM
+
+from modeling.config import InstanceConfig, RunConfig
 from modeling.modules.text_pretrain.default import (
-    TextPretrainLIT,
     ConfigType,
+    TextPretrainLIT,
     TextPretrainLITConfig,
 )
 from modeling.utils.class_property import class_property

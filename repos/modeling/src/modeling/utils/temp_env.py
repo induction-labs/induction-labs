@@ -10,7 +10,7 @@ def temp_env(environ: dict[str, str | None]):
     """
     # Store the original values
 
-    original_environ = {key: os.environ.get(key, None) for key in environ.keys()}
+    original_environ = {key: os.environ.get(key, None) for key in environ}
 
     try:
         # Set the new path

@@ -1,17 +1,14 @@
 from __future__ import annotations
 
-from typing import TypeVar
-from typing import Any, cast
+import logging
+from typing import Any, TypeVar, cast
 
-from modeling.config import (
-    DatapackConfig,
-    RunConfig,
-    InstanceConfig,
-)
-from modeling.data.text_train import TextPretrainDatapackConfig, TextPretrainDataSample
-from modeling.modules.text_module import TextLIT, TextLITConfig, MODEL_TYPE
-from modeling.utils.class_property import class_property
+import torch
+from accelerate import init_empty_weights
+from synapse.utils.logging import configure_logging
 from torch import nn
+from torch.distributed.device_mesh import DeviceMesh
+from torch.distributed.fsdp import MixedPrecisionPolicy, fully_shard
 from transformers import (
     AutoConfig,
     AutoModelForCausalLM,
@@ -19,15 +16,15 @@ from transformers import (
 )
 from transformers.modeling_utils import PreTrainedModel
 
-import torch
-from torch.distributed.device_mesh import DeviceMesh
-
-from torch.distributed.fsdp import MixedPrecisionPolicy, fully_shard
-
-from synapse.utils.logging import configure_logging
-from accelerate import init_empty_weights
+from modeling.config import (
+    DatapackConfig,
+    InstanceConfig,
+    RunConfig,
+)
 from modeling.config.distributed import MeshAxis
-import logging
+from modeling.data.text_train import TextPretrainDatapackConfig, TextPretrainDataSample
+from modeling.modules.text_module import MODEL_TYPE, TextLIT, TextLITConfig
+from modeling.utils.class_property import class_property
 
 logger = configure_logging(__name__, level=logging.DEBUG)
 

@@ -1,25 +1,25 @@
-import torch
-from torch import nn
+from dataclasses import dataclass
 
-from typing import Optional, Union
+import torch
+from synapse.utils.logging import configure_logging, logging
+from torch import nn
 from transformers.generation.utils import GenerationMixin
-from transformers.models.qwen2_5_omni import Qwen2_5OmniPreTrainedModel
-from transformers.models.qwen2_5_omni.modeling_qwen2_5_omni import (
-    Qwen2_5OmniThinkerTextModel,
-    Qwen2_5OmniVisionEncoder,
-    Qwen2_5OmniPreTrainedModelForConditionalGeneration,
-    Qwen2_5OmniThinkerCausalLMOutputWithPast,
-    Qwen2_5OmniThinkerForConditionalGeneration,  # Same as Qwen2_5OmniMLP
-)
-from transformers.models.qwen2_5_omni.configuration_qwen2_5_omni import (
-    Qwen2_5OmniThinkerConfig,
-)
 from transformers.masking_utils import (
     create_causal_mask,
     create_sliding_window_causal_mask,
 )
-from dataclasses import dataclass
-from synapse.utils.logging import configure_logging, logging
+from transformers.models.qwen2_5_omni import Qwen2_5OmniPreTrainedModel
+from transformers.models.qwen2_5_omni.configuration_qwen2_5_omni import (
+    Qwen2_5OmniThinkerConfig,
+)
+from transformers.models.qwen2_5_omni.modeling_qwen2_5_omni import (
+    Qwen2_5OmniPreTrainedModelForConditionalGeneration,
+    Qwen2_5OmniThinkerCausalLMOutputWithPast,
+    Qwen2_5OmniThinkerForConditionalGeneration,  # Same as Qwen2_5OmniMLP
+    Qwen2_5OmniThinkerTextModel,
+    Qwen2_5OmniVisionEncoder,
+)
+
 # from modeling.utils.check_nans import check_nans
 
 logger = configure_logging(__name__, level=logging.INFO)
@@ -44,7 +44,7 @@ class Qwen2_5OmniThinkerActionConfig(Qwen2_5OmniThinkerConfig):
 
 @dataclass
 class Qwen2_5OmniActionCausalLMOutputWithPast(Qwen2_5OmniThinkerCausalLMOutputWithPast):
-    action_outputs: Optional[torch.FloatTensor] = None
+    action_outputs: torch.FloatTensor | None = None
 
 
 class Qwen2_5OmniThinkerForActionModelling(
@@ -58,7 +58,7 @@ class Qwen2_5OmniThinkerForActionModelling(
 
     config_class = Qwen2_5OmniThinkerActionConfig
     base_model_prefix = "thinker"
-    _no_split_modules = ["Qwen2_5OmniAudioEncoder", "Qwen2_5OmniVisionEncoder"]
+    _no_split_modules = ["Qwen2_5OmniAudioEncoder", "Qwen2_5OmniVisionEncoder"]  # noqa: RUF012
 
     def __init__(self, config: Qwen2_5OmniThinkerActionConfig):
         super().__init__(config)
@@ -119,7 +119,7 @@ class Qwen2_5OmniThinkerForActionModelling(
     def get_video_features(
         self,
         pixel_values_videos: torch.FloatTensor,
-        video_grid_thw: Optional[torch.LongTensor] = None,
+        video_grid_thw: torch.LongTensor | None = None,
     ):
         """
         Encodes videos into continuous embeddings that can be forwarded to the language model.
@@ -137,7 +137,7 @@ class Qwen2_5OmniThinkerForActionModelling(
     def get_image_features(
         self,
         pixel_values: torch.FloatTensor,
-        image_grid_thw: Optional[torch.LongTensor] = None,
+        image_grid_thw: torch.LongTensor | None = None,
     ):
         """
         Encodes images into continuous embeddings that can be forwarded to the language model.
@@ -155,8 +155,8 @@ class Qwen2_5OmniThinkerForActionModelling(
     def get_audio_features(
         self,
         input_features: torch.FloatTensor,
-        feature_attention_mask: Optional[torch.LongTensor] = None,
-        audio_feature_lengths: Optional[torch.LongTensor] = None,
+        feature_attention_mask: torch.LongTensor | None = None,
+        audio_feature_lengths: torch.LongTensor | None = None,
     ):
         """
         Encodes audios into continuous embeddings that can be forwarded to the language model.
@@ -205,30 +205,30 @@ class Qwen2_5OmniThinkerForActionModelling(
 
     def forward(
         self,
-        input_ids: Optional[torch.LongTensor] = None,
-        input_features: Optional[torch.FloatTensor] = None,
-        pixel_values: Optional[torch.FloatTensor] = None,
-        pixel_values_videos: Optional[torch.FloatTensor] = None,
-        image_grid_thw: Optional[torch.LongTensor] = None,
-        video_grid_thw: Optional[torch.LongTensor] = None,
-        attention_mask: Optional[torch.Tensor] = None,
-        feature_attention_mask: Optional[torch.Tensor] = None,
-        audio_feature_lengths: Optional[torch.LongTensor] = None,
-        position_ids: Optional[torch.LongTensor] = None,
-        past_key_values: Optional[list[torch.FloatTensor]] = None,
-        inputs_embeds: Optional[torch.FloatTensor] = None,
-        rope_deltas: Optional[torch.LongTensor] = None,
+        input_ids: torch.LongTensor | None = None,
+        input_features: torch.FloatTensor | None = None,
+        pixel_values: torch.FloatTensor | None = None,
+        pixel_values_videos: torch.FloatTensor | None = None,
+        image_grid_thw: torch.LongTensor | None = None,
+        video_grid_thw: torch.LongTensor | None = None,
+        attention_mask: torch.Tensor | None = None,
+        feature_attention_mask: torch.Tensor | None = None,
+        audio_feature_lengths: torch.LongTensor | None = None,
+        position_ids: torch.LongTensor | None = None,
+        past_key_values: list[torch.FloatTensor] | None = None,
+        inputs_embeds: torch.FloatTensor | None = None,
+        rope_deltas: torch.LongTensor | None = None,
         # labels: Optional[torch.LongTensor] = None,
-        cursor_path: Optional[torch.Tensor] = None,
-        action_tokens: Optional[torch.Tensor] = None,
-        use_cache: Optional[bool] = None,
-        output_attentions: Optional[bool] = None,
-        output_hidden_states: Optional[bool] = None,
-        return_dict: Optional[bool] = None,
-        use_audio_in_video: Optional[bool] = None,
-        cache_position: Optional[torch.LongTensor] = None,
-        video_second_per_grid: Optional[torch.LongTensor] = None,
-    ) -> Union[tuple, Qwen2_5OmniActionCausalLMOutputWithPast]:
+        cursor_path: torch.Tensor | None = None,
+        action_tokens: torch.Tensor | None = None,
+        use_cache: bool | None = None,
+        output_attentions: bool | None = None,
+        output_hidden_states: bool | None = None,
+        return_dict: bool | None = None,
+        use_audio_in_video: bool | None = None,
+        cache_position: torch.LongTensor | None = None,
+        video_second_per_grid: torch.LongTensor | None = None,
+    ) -> tuple | Qwen2_5OmniActionCausalLMOutputWithPast:
         r"""
         input_features (`torch.FloatTensor` of shape `(batch_size, feature_size, feature_sequence_length)`):
             Float values mel features extracted from the raw speech waveform. Raw speech waveform can be obtained by
@@ -325,22 +325,21 @@ class Qwen2_5OmniThinkerForActionModelling(
                 # inputs_embeds[action_tokens] = self.action_token_embedding.weight[0]
 
         # 2. Merge text , audios , image and video
-        if input_ids is not None and input_ids.shape[1] != 1:  # Prefill stage
-            if pixel_values_videos is not None:
-                video_embeds = self.get_video_features(
-                    pixel_values_videos, video_grid_thw
-                )
-                # check_nans(video_embeds, "video_embeds")
-                video_mask = (
-                    (input_ids == self.config.video_token_id)
-                    .unsqueeze(-1)
-                    .expand_as(inputs_embeds)
-                    .to(inputs_embeds.device)
-                )
-                video_embeds = video_embeds.to(
-                    inputs_embeds.device, inputs_embeds.dtype
-                )
-                inputs_embeds = inputs_embeds.masked_scatter(video_mask, video_embeds)
+        if (
+            input_ids is not None
+            and input_ids.shape[1] != 1
+            and pixel_values_videos is not None
+        ):  # Prefill stage
+            video_embeds = self.get_video_features(pixel_values_videos, video_grid_thw)
+            # check_nans(video_embeds, "video_embeds")
+            video_mask = (
+                (input_ids == self.config.video_token_id)
+                .unsqueeze(-1)
+                .expand_as(inputs_embeds)
+                .to(inputs_embeds.device)
+            )
+            video_embeds = video_embeds.to(inputs_embeds.device, inputs_embeds.dtype)
+            inputs_embeds = inputs_embeds.masked_scatter(video_mask, video_embeds)
 
         # check_nans(inputs_embeds, "input_embeds")
         audio_feature_lengths = None
@@ -516,8 +515,9 @@ class Qwen2_5OmniActionModel(Qwen2_5OmniPreTrainedModel, GenerationMixin):
 
 
 async def main():
-    from modeling.data.video_action import fetch_data, ActionDataSample
     from transformers import AutoTokenizer
+
+    from modeling.data.video_action import ActionDataSample, fetch_data
 
     # default: Load the model on the available device(s)
     t = AutoTokenizer.from_pretrained("Qwen/Qwen2.5-Omni-3B")

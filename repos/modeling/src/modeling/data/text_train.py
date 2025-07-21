@@ -1,19 +1,18 @@
 from __future__ import annotations
 
-from typing import Any, Self, List, Optional
+import functools
+from typing import Any, Self
 
 import datasets
-from modeling.config import DatapackConfig, ExperimentConfig, ModuleConfig
-from modeling.modules.text_module import TextLITConfig
-from pydantic import BaseModel, ConfigDict
-from transformers.tokenization_utils_base import PreTrainedTokenizerBase
-from transformers import AutoTokenizer
-
 import torch
+from pydantic import BaseModel, ConfigDict
 from synapse.utils.logging import configure_logging
-from modeling.config.data import BaseDataSample, BaseDataset
+from transformers import AutoTokenizer
+from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 
-import functools
+from modeling.config import DatapackConfig, ExperimentConfig, ModuleConfig
+from modeling.config.data import BaseDataSample, BaseDataset
+from modeling.modules.text_module import TextLITConfig
 
 
 @functools.lru_cache(maxsize=1)
@@ -69,7 +68,7 @@ class TextDatasetArgs(BaseModel):
     dataset_name: str
     seq_len: int
     tokenizer_name: str
-    stride: Optional[int] = None
+    stride: int | None = None
 
 
 class TextDataset(BaseDataset[TextPretrainDataSample, TextDatasetArgs]):
@@ -77,7 +76,7 @@ class TextDataset(BaseDataset[TextPretrainDataSample, TextDatasetArgs]):
     A PyTorch Dataset for text pretraining tasks.
     """
 
-    examples: List[List[int]]
+    examples: list[list[int]]
 
     @classmethod
     def data_cls(cls) -> type[TextPretrainDataSample]:

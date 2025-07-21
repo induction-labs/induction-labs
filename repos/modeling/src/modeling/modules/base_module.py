@@ -5,7 +5,7 @@ from abc import ABC, abstractmethod
 from enum import Enum
 from functools import partial
 from pathlib import Path
-from typing import Any, Generic, Literal, Optional, TypeVar, cast, final
+from typing import Any, Generic, Literal, TypeVar, cast, final
 
 import torch
 from pydantic import BaseModel
@@ -83,7 +83,7 @@ class BaseModuleConfig(ModuleConfig):
         self,
         run_config: RunConfig,
         instance_config: InstanceConfig,
-    ) -> "BaseLITModule": ...
+    ) -> BaseLITModule: ...
 
 
 MODEL_TYPE = TypeVar("MODEL_TYPE", bound=PreTrainedModel, covariant=True)
@@ -105,7 +105,7 @@ def get_mem_stats(device=None):
 
 def get_param_with_parent_module(
     module: torch.nn.Module, name: str
-) -> Optional[tuple[torch.nn.Module, torch.nn.Parameter, str]]:
+) -> tuple[torch.nn.Module, torch.nn.Parameter, str] | None:
     module_path, _, param_name = name.rpartition(".")
 
     try:
@@ -136,7 +136,6 @@ class BaseLITModule(ABC, Generic[MODEL_TYPE, DATA_TYPE, CONFIG_TYPE]):
         Class property that should return the model class type.
         This is used to instantiate the model in meta mode and load weights.
         """
-        pass
 
     @property
     def device(self) -> torch.device:
@@ -363,7 +362,7 @@ class BaseLITModule(ABC, Generic[MODEL_TYPE, DATA_TYPE, CONFIG_TYPE]):
         """
         return {
             key: torch.tensor([m[key] for m in all_metrics]).mean().item()
-            for key in all_metrics[0].keys()
+            for key in all_metrics[0]
         }
 
     @classmethod
@@ -376,7 +375,7 @@ class BaseLITModule(ABC, Generic[MODEL_TYPE, DATA_TYPE, CONFIG_TYPE]):
         """
         return {
             key: torch.tensor([m[key] for m in all_metrics]).mean().item()
-            for key in all_metrics[0].keys()
+            for key in all_metrics[0]
         }
 
     @final
