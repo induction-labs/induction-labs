@@ -75,22 +75,10 @@
   };
   # languages.rust.enable = true;
 
-  # https://devenv.sh/processes/
-  # processes.cargo-watch.exec = "cargo-watch";
-
-  # https://devenv.sh/services/
-  # services.postgres.enable = true;
-
   enterShell = ''
     # We need to set this manually otherwise triton tries to call `ldconfig` which is UB in nix.
     export TRITON_LIBCUDA_PATH="$LD_LIBRARY_PATH";
   '';
-
-  # https://devenv.sh/tasks/
-  # tasks = {
-  #   "myproj:setup".exec = "mytool build";
-  #   "devenv:enterShell".after = [ "myproj:setup" ];
-  # };
 
   # https://devenv.sh/tests/
   enterTest = ''
@@ -98,9 +86,4 @@
     uv sync --all-extras
     pytest
   '';
-
-  # https://devenv.sh/git-hooks/
-  # git-hooks.hooks.shellcheck.enable = true;
-
-  # See full reference at https://devenv.sh/reference/options/
 }
