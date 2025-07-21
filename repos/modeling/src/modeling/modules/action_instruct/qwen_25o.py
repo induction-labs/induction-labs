@@ -209,13 +209,17 @@ class Qwen25OActionLIT(
         )
 
         # if inputs.cursor_path is not None:
-        analytical_loss = analytical_distance(
-            a=output_actions[:, 0, :],
-            b=cursor_path[:, 0, :],
-        ) + analytical_distance(
-            a=output_actions[:, 1, :],
-            b=cursor_path[:, 1, :],
-        )
+        analytical_loss = (
+            analytical_distance(
+                a=output_actions[:, 0, :],
+                b=cursor_path[:, 0, :],
+            )
+            + analytical_distance(
+                a=output_actions[:, 1, :],
+                b=cursor_path[:, 1, :],
+            )
+        ).sum()
+
         l2_points_loss = (
             l2_loss(predicted_xs, actual_xs) + l2_loss(predicted_ys, actual_ys)
         ).sum()
