@@ -14,13 +14,13 @@ dependencies = [
   "torchaudio>=2.7.1",
   "triton >=3.3.1",
   "tqdm>=4.67.1",
-  "transformers>=4.52.4",
+  # "transformers>=4.52.4",
   "wandb>=0.19.11",
   "accelerate>=1.7.0",
   "pillow>=11.2.1",
   "pydantic>=2.11.5",
-  "tomli",
-  "tomli-w>=1.2.0",
+  # "tomli",
+  # "tomli-w>=1.2.0",
   "typer>=0.16.0",
   "einops>=0.8.1",
   "synapse",
@@ -48,13 +48,19 @@ dev = [
   "torch-tb-profiler>=0.4.3",
   "expecttest>=0.3.0",
 ]
+ssh-required = [
+  # Split deps that require ssh github auth because they require always rebuilding in docker
+  "transformers>=4.52.4",
+  "tomli",
+  "tomli-w>=1.2.0",
+]
 # TODO: Validate that this is always correct version of torch + other deps
 flash-attn = [
   "flash-attn @ https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.3.9/flash_attn-2.6.3+cu128torch2.7-cp312-cp312-linux_x86_64.whl ; sys_platform == 'linux' and platform_machine == 'x86_64'",
 ]
 head = ["ray[default,client]"]
 [tool.uv]
-default-groups = ["dev", "head", "k8s"]
+default-groups = ["dev", "head", "k8s", "ssh-required"]
 
 # Needs to be in workspace root
 # https://github.com/pytorch/pytorch/issues/153401#issuecomment-2881445494

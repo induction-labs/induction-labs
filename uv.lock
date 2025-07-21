@@ -2527,8 +2527,6 @@ dependencies = [
     { name = "pydantic" },
     { name = "ray", extra = ["client"] },
     { name = "synapse" },
-    { name = "tomli" },
-    { name = "tomli-w" },
     { name = "torch", version = "2.7.1", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'linux'" },
     { name = "torch", version = "2.7.1+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "sys_platform == 'linux'" },
     { name = "torchaudio", version = "2.7.1", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "platform_machine == 'aarch64' and sys_platform == 'linux'" },
@@ -2538,7 +2536,6 @@ dependencies = [
     { name = "torchvision", version = "0.22.1", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'linux'" },
     { name = "torchvision", version = "0.22.1+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "platform_machine != 'aarch64' and sys_platform == 'linux'" },
     { name = "tqdm" },
-    { name = "transformers" },
     { name = "triton" },
     { name = "typer" },
     { name = "wandb" },
@@ -2570,6 +2567,11 @@ head = [
 k8s = [
     { name = "kubernetes" },
 ]
+ssh-required = [
+    { name = "tomli" },
+    { name = "tomli-w" },
+    { name = "transformers" },
+]
 
 [package.metadata]
 requires-dist = [
@@ -2581,8 +2583,6 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.11.5" },
     { name = "ray", extras = ["client"], specifier = ">=2.47.1" },
     { name = "synapse", editable = "repos/synapse" },
-    { name = "tomli", git = "ssh://git@github.com/induction-labs/tomli-none.git" },
-    { name = "tomli-w", git = "ssh://git@github.com/induction-labs/tomli-w-none.git" },
     { name = "torch", marker = "sys_platform != 'linux'", specifier = "==2.7.1" },
     { name = "torch", marker = "sys_platform == 'linux'", specifier = "==2.7.1", index = "https://download.pytorch.org/whl/cu128" },
     { name = "torchaudio", marker = "sys_platform != 'linux'", specifier = ">=2.7.1" },
@@ -2590,7 +2590,6 @@ requires-dist = [
     { name = "torchvision", marker = "sys_platform != 'linux'", specifier = ">=0.22.1" },
     { name = "torchvision", marker = "sys_platform == 'linux'", specifier = ">=0.22.1", index = "https://download.pytorch.org/whl/cu128" },
     { name = "tqdm", specifier = ">=4.67.1" },
-    { name = "transformers", git = "ssh://git@github.com/induction-labs/transformers.git?branch=fix-qwen2vl-positionid-mask" },
     { name = "triton", specifier = ">=3.3.1", index = "https://download.pytorch.org/whl" },
     { name = "typer", specifier = ">=0.16.0" },
     { name = "wandb", specifier = ">=0.19.11" },
@@ -2616,6 +2615,11 @@ dev = [
 flash-attn = [{ name = "flash-attn", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'", url = "https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.3.9/flash_attn-2.6.3+cu128torch2.7-cp312-cp312-linux_x86_64.whl" }]
 head = [{ name = "ray", extras = ["default", "client"] }]
 k8s = [{ name = "kubernetes", specifier = ">=32.0.0,<33.0.0" }]
+ssh-required = [
+    { name = "tomli", git = "ssh://git@github.com/induction-labs/tomli-none.git" },
+    { name = "tomli-w", git = "ssh://git@github.com/induction-labs/tomli-w-none.git" },
+    { name = "transformers", git = "ssh://git@github.com/induction-labs/transformers.git?branch=fix-qwen2vl-positionid-mask" },
+]
 
 [[package]]
 name = "more-itertools"
