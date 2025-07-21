@@ -27,6 +27,7 @@ fix = true
 extend-exclude = [
     "repos/osworld",
     "repos/pynput",
+    "repos/cue",
     "*.ipynb",
     "repos/modeling/tests",
 ]
