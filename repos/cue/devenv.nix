@@ -6,7 +6,9 @@
   ...
 }: {
   # https://devenv.sh/packages/
-  packages = [];
+  packages = with pkgs; [
+    netcat
+  ];
 
   # https://devenv.sh/languages/
   languages.javascript = {
