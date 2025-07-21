@@ -63,6 +63,23 @@ class CloudPath(BaseModel):
             return self.path.as_posix()
         return f"{self.cloud}://{self.path.as_posix()}"
 
+    @property
+    def bucket_and_path(self) -> tuple[str, Path]:
+        """
+        Extract the bucket name and path from the CloudPath.
+        Returns a tuple of (bucket_name, path_in_bucket).
+        """
+        if self.cloud == CloudPath.Cloud.S3:
+            # S3 URIs are of the form s3://bucket/path
+            parts = self.path.parts
+            return parts[0], Path(*parts[1:])
+        elif self.cloud == CloudPath.Cloud.GS:
+            # GCS URIs are of the form gs://bucket/path
+            parts = self.path.parts
+            return parts[0], Path(*parts[1:])
+        else:
+            raise ValueError(f"Unsupported cloud type: {self.cloud}")
+
     def __truediv__(self, other: str | Path) -> CloudPath:
         """
         Support the / operator for path joining.

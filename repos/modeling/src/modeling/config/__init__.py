@@ -69,37 +69,10 @@ class GCSCheckpointConfig(BaseModel):
         False, description="Whether to save the first step checkpoint."
     )
 
-    loaded_at: datetime | None = Field(
-        default=None,
-        description="Timestamp when the checkpoint was loaded. Used to determine if the checkpoint is fresh.",
-    )
     checkpoint_prefix: CloudPath = Field(
         ...,
         description="Path to the GCS bucket where checkpoints will be stored. Should be gs://induction-labs/...",
     )
-
-    @computed_field
-    @property
-    def checkpoint_path(self) -> CloudPath:
-        if self.loaded_at is None:
-            # If loaded_at is not set, return the prefix only
-            return self.checkpoint_prefix / "{date}"
-        return self.checkpoint_prefix / f"{self.loaded_at:%Y-%m-%dT%H-%M-%S}"
-
-    @property
-    def bucket_and_path(self) -> tuple[str, Path]:
-        """
-        Extract the bucket name and path from the checkpoint_path.
-        Returns a tuple of (bucket_name, path_in_bucket).
-        """
-
-        bucket_name, *prefix_parts = self.checkpoint_path.path.parts
-
-        return bucket_name, Path(*prefix_parts)
-
-    @property
-    def ckpt_config_path(self) -> CloudPath:
-        return self.checkpoint_path / "config.toml"
 
     @model_validator(mode="after")
     def validate_checkpoint_path(self) -> Self:
@@ -107,8 +80,8 @@ class GCSCheckpointConfig(BaseModel):
         Validate the checkpoint_path format.
         Ensures it starts with 'gs://' and contains a valid bucket name.
         """
-        assert self.checkpoint_path.cloud == CloudPath.Cloud.GS, (
-            f"Only GCS checkpoints are supported. {self.checkpoint_path.cloud=}"
+        assert self.checkpoint_prefix.cloud == CloudPath.Cloud.GS, (
+            f"Only GCS checkpoints are supported. {self.checkpoint_prefix.cloud=}"
         )
         return self
 
@@ -160,20 +133,6 @@ class ExperimentMetadata(BaseModel):
         )
 
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
-    loaded_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
-
-    def reset_loaded_at(self) -> None:
-        """
-        Reset the loaded_at timestamp to the current time.
-        This is called when the config is loaded from toml.
-        """
-        logger.debug("Resetting loaded_at timestamp to current time.")
-        self.loaded_at = datetime.now(UTC)
-        if self.checkpoint is not None:
-            assert self.checkpoint.loaded_at is None, (
-                "Checkpoint loaded_at should be None when resetting the loaded_at timestamp."
-            )
-            self.checkpoint.loaded_at = self.loaded_at
 
     commit: str = Field(default_factory=get_git_commit_sha)
     commit_short: str = Field(default_factory=get_git_commit_sha_short)
@@ -608,6 +567,17 @@ class ExperimentConfig(BaseModel):
 
 class UnifiedExperimentConfig(ExperimentConfig):
     runtime_config: RuntimeConfig
+
+    @computed_field
+    @property
+    def checkpoint_path(self) -> CloudPath | None:
+        if self.metadata.checkpoint is None:
+            return None
+
+        return (
+            self.metadata.checkpoint.checkpoint_prefix
+            / f"{self.runtime_config.start_time:%Y-%m-%dT%H-%M-%S}.{self.runtime_config.id}"
+        )
 
 
 class SerializedExperimentConfig(ExperimentConfig):

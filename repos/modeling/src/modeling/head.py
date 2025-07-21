@@ -154,7 +154,7 @@ class ExperimentManager:
         """
         Save a checkpoint of the experiment.
         """
-        assert self.exp_config.metadata.checkpoint is not None, (
+        assert self.exp_config.checkpoint_path is not None, (
             "Checkpointing is not enabled in the experiment configuration."
         )
         local_dir = self.state.tmp_dir / "checkpoints" / suffix
@@ -164,10 +164,11 @@ class ExperimentManager:
             for actor in self.state.actors.all_actors
         ]
         await asyncio.gather(*promises)
+
         upload_to_gcs(
             local_dir=local_dir,
-            gcs_bucket=self.exp_config.metadata.checkpoint.bucket_and_path[0],
-            gcs_prefix=self.exp_config.metadata.checkpoint.bucket_and_path[1] / suffix,
+            gcs_bucket=self.exp_config.checkpoint_path.bucket_and_path[0],
+            gcs_prefix=self.exp_config.checkpoint_path.bucket_and_path[1] / suffix,
         )
 
     # # TODO: Make this async
@@ -264,7 +265,9 @@ class ExperimentManager:
             # TODO: Make this a callback
             if (c := self.exp_config.metadata.checkpoint) and c.should_checkpoint(step):
                 # Save the checkpoint to GCS
-                logger.info(f"Saving checkpoint at step {step} to {c.bucket_and_path}")
+                logger.info(
+                    f"Saving checkpoint at step {step} to {self.exp_config.checkpoint_path}"
+                )
                 await self.save_checkpoint(suffix=f"step_{step}")
             pbar.set_postfix(loss=f"{loss:.4f}")
 
