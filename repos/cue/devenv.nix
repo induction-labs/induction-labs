@@ -19,5 +19,9 @@
   };
 
   # https://devenv.sh/git-hooks/
-  # git-hooks.hooks.shellcheck.enable = true;
+  git-hooks.hooks = {
+    prettier.enable = true;
+    eslint.enable = true;
+    shellcheck.enable = true;
+  };
 }

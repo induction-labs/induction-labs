@@ -78,4 +78,21 @@ export const kueueRouter = createTRPCRouter({
       await new Promise(resolve => setTimeout(resolve, 300));
       return mockJobs.filter(job => job.namespace === input.namespace);
     }),
+
+  getJob: publicProcedure
+    .input(z.object({ 
+      namespace: z.string(), 
+      name: z.string() 
+    }))
+    .query(async ({ input }) => {
+      // Simulate API delay
+      await new Promise(resolve => setTimeout(resolve, 300));
+      const job = mockJobs.find(
+        j => j.namespace === input.namespace && j.name === input.name
+      );
+      if (!job) {
+        throw new Error(`Job ${input.namespace}/${input.name} not found`);
+      }
+      return job;
+    }),
 });
