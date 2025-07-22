@@ -11,10 +11,13 @@ from modeling.config import (
     LinearLRSchedule,
     RunConfig,
     WandbConfig,
-    # ProfileConfig
 )
 from modeling.config.sweep import Sweep
-from modeling.data.video_action import RangeActionDatapackConfig
+from modeling.data.video_action import (
+    RangeActionDatapackConfig,
+    calc_min_num_tokens_for_n_actions,
+    make_raw_prompt,
+)
 from modeling.modules.action_instruct.qwen_25o import Qwen25OActionLITConfig
 from modeling.modules.base_module import OptimizerType
 from modeling.types import Accelerator, DType
@@ -22,11 +25,15 @@ from modeling.utils.cloud_path import CloudPath
 
 # from modeling.modules.base_module import CompileConfig
 
-run_name = "sweeps_optimizer"
-num_devices = 2
+raw_prompt = make_raw_prompt(
+    prefix="",
+    suffix="",
+)
+run_name = "predict_one_action"
+num_devices = 1
 Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
     metadata=ExperimentMetadata(
-        wandb=WandbConfig(project="qwen25o_7B_real_data", name=run_name),
+        wandb=WandbConfig(project="qwen25o_7B_tests", name=run_name),
         # wandb=None,
         output_dir=Path("./output") / run_name,
         # checkpoint=None,
@@ -36,26 +43,28 @@ Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
             ),
             checkpoint_frequency=0,  # Save every 1000 steps
             checkpoint_first_step=False,  # Save the first step
-            checkpoint_last_step=True,  # Save the last step
+            checkpoint_last_step=False,  # Save the last step
         ),
     ),
     module=Qwen25OActionLITConfig(
-        # checkpoint_path=CloudPath.from_str(
-        #     "gs://induction-labs/checkpoints/qwen25o_7B_uninitialized/2025-07-17T23-05-38/step_100"
-        # ),
+        checkpoint_path=CloudPath.from_str(
+            "gs://induction-labs/checkpoints/qwen25o_7B_uninitialized/2025-07-17T23-05-38/step_100"
+        ),
         model_name="Qwen/Qwen2.5-Omni-7B",
         tokenizer_name="Qwen/Qwen2.5-Omni-7B",
         freeze_vision=False,
         freeze_network=False,
         freeze_action_embedding=False,
         freeze_action_head=False,
-        loss_type=Qwen25OActionLITConfig.CursorPredictionLoss.L2_DISTANCE,
+        loss_type=Qwen25OActionLITConfig.CursorPredictionLoss.COEFFICIENTS_DISTANCE,
+        optimizer=OptimizerType.ADAMW,
         # compile=None,
         # compile=CompileConfig(),
     ),
     datapack=RangeActionDatapackConfig(
         # prefix="gs://induction-labs/jonathan/synth/garbage_cursor_follow_v1/sample_",
         prefix="gs://induction-labs/jonathan/synth/cursor_follow_v3/sample_",
+        raw_prompt=raw_prompt,
         # prefix="gs://induction-labs/jonathan/synth/noise_cursor_follow_v1/sample_",
         end_index=60_000,  # 60k samples
     ),
@@ -66,9 +75,9 @@ Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
             warmup_steps=0,
             end_step=100,  # 10k steps
         ),
-        sequence_length=4096,
+        sequence_length=calc_min_num_tokens_for_n_actions(840 * 476, 1, raw_prompt),
         batch_size=num_devices,
-        num_steps=100,
+        num_steps=400,
         validation_every_n_steps=20,
         distributed=DistributedConfig(
             devices_per_node=num_devices,
@@ -90,15 +99,16 @@ Qwen25OActionGPU_Test = Qwen25OActionExperimentConfig_GPU.testing_config(
 Qwen25OActionExperimentConfig_CPU = Qwen25OActionExperimentConfig_GPU.model_copy(
     update={"run": Qwen25OActionExperimentConfig_GPU.run.cpu_config()}
 )
-
-
 Qwen25oActionSweep = (
     Sweep(Qwen25OActionExperimentConfig_GPU)
     .sweep(
         [
             None,
+            # CloudPath.from_str(
+            #     "gs://induction-labs/checkpoints/qwen25o_7B_uninitialized/2025-07-17T23-05-38/step_100"
+            # ),
             CloudPath.from_str(
-                "gs://induction-labs/checkpoints/qwen25o_7B_uninitialized/2025-07-17T23-05-38/step_100"
+                "gs://induction-labs/checkpoints/sweeps_optimizer/2025-07-22T17-28-51.iGEDRrvU/step_-1"
             ),
         ],
         lambda checkpoint, exp: (
