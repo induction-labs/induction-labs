@@ -424,7 +424,6 @@ class BaseLITModule(ABC, Generic[MODEL_TYPE, DATA_TYPE, CONFIG_TYPE]):
                 optimizer = torch.optim.Adagrad(
                     self.model.parameters(),
                     lr=self.run_config.lr.peak_lr,
-                    fused=True,
                 )
             case OptimizerType.SGD:
                 optimizer = torch.optim.SGD(
