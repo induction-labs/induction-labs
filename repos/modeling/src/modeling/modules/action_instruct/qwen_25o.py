@@ -264,10 +264,10 @@ class Qwen25OActionLIT(
             {k: v for k, v in m.items() if not k.startswith("val/image")}
             for m in all_metrics
         ]
-        first_val_image = metrics[0].get("val/image", {})
+        first_val_image = all_metrics[0]["val/image"]
 
-        cursor_path = first_val_image.get("val/cursor_path", [])
-        action_outputs = first_val_image.get("val/action_outputs", [])
+        cursor_path = first_val_image["val/cursor_path"]
+        action_outputs = first_val_image["val/action_outputs"]
 
         np_predicted_xs, np_predicted_ys = cls.visualize_action(action_outputs)
         np_actual_xs, np_actual_ys = cls.visualize_action(cursor_path)
@@ -292,7 +292,7 @@ class Qwen25OActionLIT(
 
         # Get mean over all metrics
         mean_metrics = {
-            k: np.mean([m[k] for m in metrics if k in m])
+            k: torch.tensor([m[k] for m in metrics]).mean().item()
             for k in metrics[0]
             if k != "val/image"
         }
