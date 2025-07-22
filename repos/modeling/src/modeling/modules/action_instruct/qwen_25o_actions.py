@@ -79,6 +79,8 @@ class Qwen2_5OmniThinkerForActionModelling(
         )
         # `bias=True` here creates NaN gradients when fsdp is enabled + torch.use_deterministic_algorithms(True)
         self.action_head = nn.Sequential(
+            nn.Linear(hidden_size, hidden_size, bias=False),
+            nn.GELU(),
             nn.Linear(hidden_size, 6, bias=False),
         )
 
@@ -151,57 +153,6 @@ class Qwen2_5OmniThinkerForActionModelling(
         pixel_values = pixel_values.type(self.visual.dtype)
         image_embeds = self.visual(pixel_values, grid_thw=image_grid_thw)
         return image_embeds
-
-    def get_audio_features(
-        self,
-        input_features: torch.FloatTensor,
-        feature_attention_mask: torch.LongTensor | None = None,
-        audio_feature_lengths: torch.LongTensor | None = None,
-    ):
-        """
-        Encodes audios into continuous embeddings that can be forwarded to the language model.
-
-        Args:
-            input_features (`torch.FloatTensor`):
-                The tensors corresponding to the input audios.
-            feature_attention_mask (`torch.LongTensor`, *optional*):
-                Mask to avoid performing attention on padding feature indices. Mask values selected in `[0, 1]`:
-            audio_feature_lengths (`torch.LongTensor` of shape `(num_audios)`, *optional*):
-                The length of feature shape of each audio in LLM.
-        """
-        if feature_attention_mask is not None:
-            audio_feature_lengths = torch.sum(feature_attention_mask, dim=1)
-            input_features = input_features.permute(0, 2, 1)[
-                feature_attention_mask.bool()
-            ].permute(1, 0)
-        else:
-            audio_feature_lengths = None
-
-        audio_feat_lengths, audio_output_lengths = (
-            self.audio_tower._get_feat_extract_output_lengths(
-                audio_feature_lengths
-                if audio_feature_lengths is not None
-                else feature_attention_mask.sum(-1)
-            )
-        )
-        feature_lens = (
-            audio_feature_lengths
-            if audio_feature_lengths is not None
-            else feature_attention_mask.sum(-1)
-        )
-        audio_outputs = self.audio_tower(
-            input_features,
-            feature_lens=feature_lens,
-            aftercnn_lens=audio_feat_lengths,
-        )
-        audio_features = audio_outputs.last_hidden_state
-
-        if audio_features.shape[0] != sum(audio_output_lengths.tolist()):
-            raise ValueError(
-                "length of audio_features should match audio_output_lengths"
-            )
-
-        return audio_features
 
     def forward(
         self,
