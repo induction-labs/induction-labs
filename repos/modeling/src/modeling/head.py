@@ -182,10 +182,10 @@ class ExperimentManager:
         # TODO: Don't use torch dataloader class rewrite manually
 
         train_dataset, validation_dataset = await asyncio.gather(
-            self.exp_config.datapack._init_train_dataset(
+            self.exp_config.train_datapack._init_dataset(
                 full_config=self.exp_config,
             ),
-            self.exp_config.datapack._init_val_dataset(
+            self.exp_config.validation_datapack._init_dataset(
                 full_config=self.exp_config,
             ),
         )
@@ -434,7 +434,8 @@ class ExperimentManager:
         runtime_config = ExperimentManager.create_runtime_config(tmp_dir)
         unified_config = UnifiedExperimentConfig(
             runtime_config=runtime_config,
-            datapack=exp_config.datapack,
+            train_datapack=exp_config.train_datapack,
+            validation_datapack=exp_config.validation_datapack,
             module=exp_config.module,
             run=exp_config.run,
             metadata=exp_config.metadata,

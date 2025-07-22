@@ -208,6 +208,7 @@ class Qwen25OActionLIT(
             cubics_to_points_torch(coeffs=output_actions[:, 0, :]),
             cubics_to_points_torch(coeffs=output_actions[:, 1, :]),
         )
+        num_actions = inputs.action_tokens.sum().item()
 
         # if inputs.cursor_path is not None:
         analytical_loss = (
@@ -219,15 +220,15 @@ class Qwen25OActionLIT(
                 a=output_actions[:, 1, :],
                 b=cursor_path[:, 1, :],
             )
-        ).sum()
+        ).sum() / min(num_actions, 1)
 
         l2_points_loss = (
             l2_loss(predicted_xs, actual_xs) + l2_loss(predicted_ys, actual_ys)
-        ).sum()
+        ).sum() / min(num_actions, 1)
         coefficients_loss = (
             l2_loss(output_actions[:, 0, :], cursor_path[:, 0, :])
             + l2_loss(output_actions[:, 1, :], cursor_path[:, 1, :])
-        ).sum()
+        ).sum() / min(num_actions, 1)
 
         loss = None
         match self.module_config.loss_type:

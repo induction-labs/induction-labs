@@ -29,7 +29,7 @@ raw_prompt = make_raw_prompt(
     prefix="",
     suffix="",
 )
-run_name = "predict_one_action"
+run_name = "predict_one_action_l2_points"
 num_devices = 1
 Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
     metadata=ExperimentMetadata(
@@ -47,25 +47,33 @@ Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
         ),
     ),
     module=Qwen25OActionLITConfig(
-        checkpoint_path=CloudPath.from_str(
-            "gs://induction-labs/checkpoints/qwen25o_7B_uninitialized/2025-07-17T23-05-38/step_100"
-        ),
+        # checkpoint_path=CloudPath.from_str(
+        #     "gs://induction-labs/checkpoints/qwen25o_7B_uninitialized/2025-07-17T23-05-38/step_100"
+        # ),
         model_name="Qwen/Qwen2.5-Omni-7B",
         tokenizer_name="Qwen/Qwen2.5-Omni-7B",
-        freeze_vision=False,
+        freeze_vision=True,
         freeze_network=False,
         freeze_action_embedding=False,
         freeze_action_head=False,
-        loss_type=Qwen25OActionLITConfig.CursorPredictionLoss.COEFFICIENTS_DISTANCE,
+        loss_type=Qwen25OActionLITConfig.CursorPredictionLoss.L2_DISTANCE,
         optimizer=OptimizerType.ADAMW,
         # compile=None,
         # compile=CompileConfig(),
     ),
-    datapack=RangeActionDatapackConfig(
+    train_datapack=RangeActionDatapackConfig(
         # prefix="gs://induction-labs/jonathan/synth/garbage_cursor_follow_v1/sample_",
         prefix="gs://induction-labs/jonathan/synth/cursor_follow_v3/sample_",
         raw_prompt=raw_prompt,
         # prefix="gs://induction-labs/jonathan/synth/noise_cursor_follow_v1/sample_",
+        end_index=55_000,  # 60k samples
+    ),
+    validation_datapack=RangeActionDatapackConfig(
+        # prefix="gs://induction-labs/jonathan/synth/garbage_cursor_follow_v1/sample_",
+        prefix="gs://induction-labs/jonathan/synth/cursor_follow_v3/sample_",
+        raw_prompt=raw_prompt,
+        # prefix="gs://induction-labs/jonathan/synth/noise_cursor_follow_v1/sample_",
+        start_index=55_000,  # 60k samples
         end_index=60_000,  # 60k samples
     ),
     run=RunConfig(
@@ -77,8 +85,8 @@ Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
         ),
         sequence_length=calc_min_num_tokens_for_n_actions(840 * 476, 1, raw_prompt),
         batch_size=num_devices,
-        num_steps=400,
-        validation_every_n_steps=20,
+        num_steps=2000,
+        validation_every_n_steps=100,
         distributed=DistributedConfig(
             devices_per_node=num_devices,
         ),
@@ -101,46 +109,47 @@ Qwen25OActionExperimentConfig_CPU = Qwen25OActionExperimentConfig_GPU.model_copy
 )
 Qwen25oActionSweep = (
     Sweep(Qwen25OActionExperimentConfig_GPU)
-    .sweep(
-        [
-            None,
-            # CloudPath.from_str(
-            #     "gs://induction-labs/checkpoints/qwen25o_7B_uninitialized/2025-07-17T23-05-38/step_100"
-            # ),
-            CloudPath.from_str(
-                "gs://induction-labs/checkpoints/sweeps_optimizer/2025-07-22T17-28-51.iGEDRrvU/step_-1"
-            ),
-        ],
-        lambda checkpoint, exp: (
-            exp.module.__setattr__("checkpoint_path", checkpoint),
-            exp,
-        )[-1],
-    )
-    .sweep(
-        [
-            # Qwen25OActionLITConfig.CursorPredictionLoss.L2_DISTANCE,
-            (Qwen25OActionLITConfig.CursorPredictionLoss.ANALYTICAL_DISTANCE, 50),
-            (Qwen25OActionLITConfig.CursorPredictionLoss.COEFFICIENTS_DISTANCE, 300),
-            (Qwen25OActionLITConfig.CursorPredictionLoss.ANALYTICAL_DISTANCE, None),
-            (Qwen25OActionLITConfig.CursorPredictionLoss.COEFFICIENTS_DISTANCE, None),
-        ],
-        lambda loss, exp: (
-            exp.module.__setattr__("loss_type", loss[0]),
-            exp.run.__setattr__("grad_clip", loss[1]),
-            exp,
-        )[-1],
-    )
-    .sweep(
-        [
-            # OptimizerType.ADAMW,
-            OptimizerType.ADAGRAD,
-            OptimizerType.SGD,
-        ],
-        lambda optimizer, exp: (
-            exp.module.__setattr__("optimizer", optimizer),
-            exp,
-        )[-1],
-    )
+    # .sweep(
+    #     [
+    #         None,
+    #         CloudPath.from_str(
+    #             "gs://induction-labs/checkpoints/qwen25o_7B_uninitialized/2025-07-17T23-05-38/step_100"
+    #         ),
+    #         CloudPath.from_str(
+    #             "gs://induction-labs/checkpoints/sweeps_optimizer/2025-07-22T17-28-51.iGEDRrvU/step_-1"
+    #         ),
+    #     ],
+    #     lambda checkpoint, exp: (
+    #         exp.module.__setattr__("checkpoint_path", checkpoint),
+    #         exp,
+    #     )[-1],
+    # )
+    .sweep(range(1, 4), Sweep.S.seed)
+    # .sweep(
+    #     [
+    #         # Qwen25OActionLITConfig.CursorPredictionLoss.L2_DISTANCE,
+    #         (Qwen25OActionLITConfig.CursorPredictionLoss.ANALYTICAL_DISTANCE, 50),
+    #         (Qwen25OActionLITConfig.CursorPredictionLoss.COEFFICIENTS_DISTANCE, 300),
+    #         (Qwen25OActionLITConfig.CursorPredictionLoss.ANALYTICAL_DISTANCE, None),
+    #         (Qwen25OActionLITConfig.CursorPredictionLoss.COEFFICIENTS_DISTANCE, None),
+    #     ],
+    #     lambda loss, exp: (
+    #         exp.module.__setattr__("loss_type", loss[0]),
+    #         exp.run.__setattr__("grad_clip", loss[1]),
+    #         exp,
+    #     )[-1],
+    # )
+    # .sweep(
+    #     [
+    #         # OptimizerType.ADAMW,
+    #         OptimizerType.ADAGRAD,
+    #         OptimizerType.SGD,
+    #     ],
+    #     lambda optimizer, exp: (
+    #         exp.module.__setattr__("optimizer", optimizer),
+    #         exp,
+    #     )[-1],
+    # )
     # .sweep(
     #     [
     #         LinearLRSchedule(

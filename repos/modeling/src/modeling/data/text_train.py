@@ -168,7 +168,7 @@ class TextPretrainDatapackConfig(DatapackConfig[TextPretrainDataSample]):
         )
         return module_config
 
-    async def _init_train_dataset(self, full_config: ExperimentConfig) -> TextDataset:
+    async def _init_dataset(self, full_config: ExperimentConfig) -> TextDataset:
         module_config = self.validate_module_compatibility(full_config.module)
         return await TextDataset.constructor(
             TextDatasetArgs(
@@ -178,9 +178,6 @@ class TextPretrainDatapackConfig(DatapackConfig[TextPretrainDataSample]):
                 tokenizer_name=module_config.get_tokenizer.name_or_path,
             )
         )
-
-    async def _init_val_dataset(self, full_config: ExperimentConfig) -> TextDataset:
-        return await self._init_train_dataset(full_config)
 
 
 __all__ = ["TextPretrainDatapackConfig"]

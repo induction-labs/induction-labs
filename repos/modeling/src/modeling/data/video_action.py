@@ -575,17 +575,7 @@ class ActionDatapackConfig(DatapackConfig[ActionDataSample]):
         """
         return module_config
 
-    async def _init_train_dataset(self, full_config: ExperimentConfig) -> ActionDataset:
-        return await ActionDataset.constructor(
-            ActionDatasetArgs(
-                data_paths=self.data_paths,
-                max_seq_length=full_config.run.sequence_length,
-                frames_per_action=self.frames_per_action,
-                raw_prompt=self.raw_prompt,
-            )
-        )
-
-    async def _init_val_dataset(self, full_config: ExperimentConfig) -> ActionDataset:
+    async def _init_dataset(self, full_config: ExperimentConfig) -> ActionDataset:
         return await ActionDataset.constructor(
             ActionDatasetArgs(
                 data_paths=self.data_paths,

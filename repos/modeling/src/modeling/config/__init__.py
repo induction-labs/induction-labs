@@ -8,7 +8,6 @@ from typing import (
     TYPE_CHECKING,
     Annotated,
     Any,
-    Generic,
     Never,
     Self,
     TypeVar,
@@ -225,7 +224,7 @@ class SerializedModuleConfig(ModuleConfig):
         )
 
 
-class DatapackConfig(ABC, BaseModel, Generic[DataSample]):
+class DatapackConfig[DataSample: "BaseDataSample"](ABC, BaseModel):
     config_path: str
 
     @model_validator(mode="after")
@@ -254,7 +253,7 @@ class DatapackConfig(ABC, BaseModel, Generic[DataSample]):
         raise NotImplementedError("Subclasses must implement this method.")
 
     @abstractmethod
-    async def _init_train_dataset(
+    async def _init_dataset(
         self, full_config: ExperimentConfig[DataSample]
     ) -> BaseDataset[DataSample, Any]:
         """
@@ -262,30 +261,6 @@ class DatapackConfig(ABC, BaseModel, Generic[DataSample]):
         This method should be implemented by subclasses to return an instance of the Lightning data module.
         """
         raise NotImplementedError("Subclasses must implement this method.")
-
-    @abstractmethod
-    async def _init_val_dataset(
-        self, full_config: ExperimentConfig[DataSample]
-    ) -> BaseDataset[DataSample, Any]:
-        """
-        Create a Lightning data module instance.
-        This method should be implemented by subclasses to return an instance of the Lightning data module.
-        """
-        raise NotImplementedError("Subclasses must implement this method.")
-
-    # @final
-    # async def train_dataloader(
-    #     self, full_config: ExperimentConfig[DataSample], generator: torch.Generator
-    # ) -> DataLoader[list[DataSample]]:
-    #     dataset = await self._init_train_dataset(full_config)
-    #     return self._make_dataloader(dataset, full_config, generator)
-
-    # @final
-    # async def val_dataloader(
-    #     self, full_config: ExperimentConfig[DataSample], generator: torch.Generator
-    # ) -> DataLoader[list[DataSample]]:
-    #     dataset = await self._init_val_dataset(full_config)
-    #     return self._make_dataloader(dataset, full_config, generator)
 
 
 class SerializedDatapackConfig(DatapackConfig[DataSample]):
@@ -324,22 +299,11 @@ class SerializedDatapackConfig(DatapackConfig[DataSample]):
             "SerializedDatapackConfig should never be used to start an experiment directly."
         )
 
-    def _init_train_dataset(  # type: ignore[override]
+    def _init_dataset(  # type: ignore[override]
         self, full_config: ExperimentConfig[DataSample]
     ) -> BaseDataset[DataSample, Never]:
         """
         Create a Lightning data module instance for the training dataset.
-        This method should be implemented by subclasses to return an instance of the Lightning data module.
-        """
-        raise NotImplementedError(
-            "SerializedDatapackConfig should never be used directly."
-        )
-
-    def _init_val_dataset(  # type: ignore[override]
-        self, full_config: ExperimentConfig[DataSample]
-    ) -> BaseDataset[DataSample, Never]:
-        """
-        Create a Lightning data module instance for the validation dataset.
         This method should be implemented by subclasses to return an instance of the Lightning data module.
         """
         raise NotImplementedError(
@@ -499,7 +463,8 @@ class ExperimentConfig(BaseModel):
     # For now, include distributed config here.
 
     module: ModuleConfig
-    datapack: DatapackConfig
+    train_datapack: DatapackConfig
+    validation_datapack: DatapackConfig
 
     # These maybe should be moved to module_config, but seem standard enough to keep here
     run: RunConfig
@@ -510,8 +475,10 @@ class ExperimentConfig(BaseModel):
         Validate that the module and datapack configurations are compatible.
         This method is called after the model is initialized to ensure compatibility.
         """
-        self.module.validate_datapack_compatibility(self.datapack)
-        self.datapack.validate_module_compatibility(self.module)
+        self.module.validate_datapack_compatibility(self.train_datapack)
+        self.train_datapack.validate_module_compatibility(self.module)
+        self.module.validate_datapack_compatibility(self.validation_datapack)
+        self.validation_datapack.validate_module_compatibility(self.module)
         return self
 
     def serialize_to_toml(self) -> str:
