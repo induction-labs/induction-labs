@@ -29,11 +29,11 @@ raw_prompt = make_raw_prompt(
     prefix="",
     suffix="",
 )
-run_name = "predict_one_action_l2_points"
+run_name = "og_lr_sweep"
 num_devices = 1
 Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
     metadata=ExperimentMetadata(
-        wandb=WandbConfig(project="qwen25o_7B_tests", name=run_name),
+        wandb=WandbConfig(project="qwen25o_7B_lr_sweep", name=run_name),
         # wandb=None,
         output_dir=Path("./output") / run_name,
         # checkpoint=None,
@@ -78,10 +78,10 @@ Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
     ),
     run=RunConfig(
         lr=LinearLRSchedule(
-            peak_lr=1e-4,
+            peak_lr=1e-3,
             end_lr=1e-5,
-            warmup_steps=0,
-            end_step=100,  # 10k steps
+            warmup_steps=200,
+            end_step=3000,  # 10k steps
         ),
         sequence_length=calc_min_num_tokens_for_n_actions(840 * 476, 8, raw_prompt),
         batch_size=num_devices,
@@ -124,7 +124,7 @@ Qwen25oActionSweep = (
     #         exp,
     #     )[-1],
     # )
-    .sweep(range(1, 4), Sweep.S.seed)
+    .sweep(range(1, 3), Sweep.S.seed)
     # .sweep(
     #     [
     #         # Qwen25OActionLITConfig.CursorPredictionLoss.L2_DISTANCE,
@@ -150,28 +150,28 @@ Qwen25oActionSweep = (
     #         exp,
     #     )[-1],
     # )
-    # .sweep(
-    #     [
-    #         LinearLRSchedule(
-    #             peak_lr=1e-5,
-    #             end_lr=1e-5,
-    #             warmup_steps=0,
-    #             end_step=3_000,
-    #         ),
-    #         *(
-    #             LinearLRSchedule(
-    #                 peak_lr=peak_lr,
-    #                 end_lr=1e-5,
-    #                 warmup_steps=warmup_steps,
-    #                 end_step=3_000,
-    #             )
-    #             for peak_lr, warmup_steps in Sweep.S.product(
-    #                 [1e-3, 5e-4, 5e-5], [0, 20, 50, 100]
-    #             )
-    #         ),
-    #     ],
-    #     Sweep.S.lr,
-    # )
+    .sweep(
+        [
+            LinearLRSchedule(
+                peak_lr=1e-5,
+                end_lr=1e-5,
+                warmup_steps=0,
+                end_step=3_000,
+            ),
+            *(
+                LinearLRSchedule(
+                    peak_lr=peak_lr,
+                    end_lr=1e-5,
+                    warmup_steps=warmup_steps,
+                    end_step=3_000,
+                )
+                for peak_lr, warmup_steps in Sweep.S.product(
+                    [1e-3, 5e-4, 5e-5], [0, 200]
+                )
+            ),
+        ],
+        Sweep.S.lr,
+    )
 )
 # 0.0005
 
