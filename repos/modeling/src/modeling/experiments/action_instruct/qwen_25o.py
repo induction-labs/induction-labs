@@ -21,8 +21,8 @@ from modeling.utils.cloud_path import CloudPath
 
 # from modeling.modules.base_module import CompileConfig
 
-run_name = "qwen25o_7B_loss_sweeps"
-num_devices = 4
+run_name = "sweeps_gradclip"
+num_devices = 2
 Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
     metadata=ExperimentMetadata(
         wandb=WandbConfig(project="qwen25o_7B_real_data", name=run_name),
@@ -94,16 +94,28 @@ Qwen25OActionExperimentConfig_CPU = Qwen25OActionExperimentConfig_GPU.model_copy
 Qwen25oActionSweep = (
     Sweep(Qwen25OActionExperimentConfig_GPU)
     .sweep(
-        [42, 52],
-        Sweep.S.seed,
+        [
+            None,
+            CloudPath.from_str(
+                "gs://induction-labs/checkpoints/qwen25o_7B_uninitialized/2025-07-17T23-05-38/step_100"
+            ),
+        ],
+        lambda checkpoint, exp: (
+            exp.module.__setattr__("checkpoint_path", checkpoint),
+            exp,
+        )[1],
     )
     .sweep(
         [
-            Qwen25OActionLITConfig.CursorPredictionLoss.L2_DISTANCE,
-            Qwen25OActionLITConfig.CursorPredictionLoss.ANALYTICAL_DISTANCE,
-            Qwen25OActionLITConfig.CursorPredictionLoss.COEFFICIENTS_DISTANCE,
+            # Qwen25OActionLITConfig.CursorPredictionLoss.L2_DISTANCE,
+            (Qwen25OActionLITConfig.CursorPredictionLoss.ANALYTICAL_DISTANCE, 50),
+            (Qwen25OActionLITConfig.CursorPredictionLoss.COEFFICIENTS_DISTANCE, 300),
         ],
-        lambda loss, exp: (exp.module.__setattr__("loss_type", loss), exp)[1],
+        lambda loss, exp: (
+            exp.module.__setattr__("loss_type", loss[0]),
+            exp.run.__setattr__("grad_clip", loss[1]),
+            exp,
+        )[-1],
     )
     # .sweep(
     #     [

@@ -404,6 +404,7 @@ class RunConfig(BaseModel):
     seed: int = 42  # Random seed for reproducibility
     sequence_length: int  # Default sequence length
     batch_size: int  # Default batch size
+    grad_clip: float | None = None
 
     validation_every_n_steps: int = -1
     validation_steps: int = 1
