@@ -83,7 +83,7 @@ Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
             warmup_steps=0,
             end_step=100,  # 10k steps
         ),
-        sequence_length=calc_min_num_tokens_for_n_actions(840 * 476, 1, raw_prompt),
+        sequence_length=calc_min_num_tokens_for_n_actions(840 * 476, 8, raw_prompt),
         batch_size=num_devices,
         num_steps=2000,
         validation_every_n_steps=100,

@@ -299,7 +299,7 @@ class SerializedDatapackConfig(DatapackConfig[DataSample]):
             "SerializedDatapackConfig should never be used to start an experiment directly."
         )
 
-    def _init_dataset(  # type: ignore[override]
+    async def _init_dataset(  # type: ignore[override]
         self, full_config: ExperimentConfig[DataSample]
     ) -> BaseDataset[DataSample, Never]:
         """
@@ -550,4 +550,5 @@ class UnifiedExperimentConfig(ExperimentConfig):
 
 class SerializedExperimentConfig(ExperimentConfig):
     module: SerializedModuleConfig  # type: ignore[override]
-    datapack: SerializedDatapackConfig  # type: ignore[override]
+    train_datapack: SerializedDatapackConfig  # type: ignore[override]
+    validation_datapack: SerializedDatapackConfig  # type: ignore[override]
