@@ -250,11 +250,11 @@ class ExperimentActor(BaseActor[ActorArgs]):
 
         # Backward pass
         # with torch.profiler.record_function("backward"):
+        loss.backward()
         clip_norm = torch.nn.utils.clip_grad_norm_(
             self.state.module.model.parameters(),
             float("inf"),  # No clipping
         )
-        loss.backward()
 
         # Update weights
         # with torch.profiler.record_function("optimizer_step"):
