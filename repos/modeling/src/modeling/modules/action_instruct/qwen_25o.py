@@ -64,6 +64,7 @@ def analytical_distance(
         ],
         dim=1,
     )  # shape: [seq, 3]
+
     c2 = torch.stack(
         [
             m2 + n2 - 2 * a2,

@@ -250,6 +250,10 @@ class ExperimentActor(BaseActor[ActorArgs]):
 
         # Backward pass
         # with torch.profiler.record_function("backward"):
+        clip_norm = torch.nn.utils.clip_grad_norm_(
+            self.state.module.model.parameters(),
+            float("inf"),  # No clipping
+        )
         loss.backward()
 
         # Update weights
@@ -261,6 +265,7 @@ class ExperimentActor(BaseActor[ActorArgs]):
         # Add learning rate to metrics
         metrics["train/learning_rate"] = self.state.optimizer.param_groups[0]["lr"]
         metrics["train/loss"] = loss.item()
+        metrics["train/clip_norm"] = clip_norm.item()
         # logger.debug(f"Training step completed with loss: {loss.item()}")
         return metrics
 

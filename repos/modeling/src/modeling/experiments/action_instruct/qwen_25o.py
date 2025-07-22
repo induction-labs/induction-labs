@@ -21,8 +21,8 @@ from modeling.utils.cloud_path import CloudPath
 
 # from modeling.modules.base_module import CompileConfig
 
-run_name = "qwen25o_7B_k8s_testing"
-num_devices = 1
+run_name = "qwen25o_7B_loss_sweeps"
+num_devices = 4
 Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
     metadata=ExperimentMetadata(
         wandb=WandbConfig(project="qwen25o_7B_real_data", name=run_name),
@@ -44,8 +44,8 @@ Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
         # ),
         model_name="Qwen/Qwen2.5-Omni-7B",
         tokenizer_name="Qwen/Qwen2.5-Omni-7B",
-        freeze_vision=True,
-        freeze_network=True,
+        freeze_vision=False,
+        freeze_network=False,
         freeze_action_embedding=False,
         freeze_action_head=False,
         loss_type=Qwen25OActionLITConfig.CursorPredictionLoss.L2_DISTANCE,
@@ -68,7 +68,7 @@ Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
         sequence_length=4096,
         batch_size=num_devices,
         num_steps=100,
-        validation_every_n_steps=5,
+        validation_every_n_steps=20,
         distributed=DistributedConfig(
             devices_per_node=num_devices,
         ),
@@ -91,27 +91,42 @@ Qwen25OActionExperimentConfig_CPU = Qwen25OActionExperimentConfig_GPU.model_copy
 )
 
 
-Qwen25oActionSweep = Sweep(Qwen25OActionExperimentConfig_GPU).sweep(
-    [
-        LinearLRSchedule(
-            peak_lr=1e-5,
-            end_lr=1e-5,
-            warmup_steps=0,
-            end_step=3_000,
-        ),
-        *(
-            LinearLRSchedule(
-                peak_lr=peak_lr,
-                end_lr=1e-5,
-                warmup_steps=warmup_steps,
-                end_step=3_000,
-            )
-            for peak_lr, warmup_steps in Sweep.S.product(
-                [1e-3, 5e-4, 5e-5], [0, 20, 50, 100]
-            )
-        ),
-    ],
-    Sweep.S.lr,
+Qwen25oActionSweep = (
+    Sweep(Qwen25OActionExperimentConfig_GPU)
+    .sweep(
+        [42, 52],
+        Sweep.S.seed,
+    )
+    .sweep(
+        [
+            Qwen25OActionLITConfig.CursorPredictionLoss.L2_DISTANCE,
+            Qwen25OActionLITConfig.CursorPredictionLoss.ANALYTICAL_DISTANCE,
+            Qwen25OActionLITConfig.CursorPredictionLoss.COEFFICIENTS_DISTANCE,
+        ],
+        lambda loss, exp: (exp.module.__setattr__("loss_type", loss), exp)[1],
+    )
+    # .sweep(
+    #     [
+    #         LinearLRSchedule(
+    #             peak_lr=1e-5,
+    #             end_lr=1e-5,
+    #             warmup_steps=0,
+    #             end_step=3_000,
+    #         ),
+    #         *(
+    #             LinearLRSchedule(
+    #                 peak_lr=peak_lr,
+    #                 end_lr=1e-5,
+    #                 warmup_steps=warmup_steps,
+    #                 end_step=3_000,
+    #             )
+    #             for peak_lr, warmup_steps in Sweep.S.product(
+    #                 [1e-3, 5e-4, 5e-5], [0, 20, 50, 100]
+    #             )
+    #         ),
+    #     ],
+    #     Sweep.S.lr,
+    # )
 )
 # 0.0005
 
