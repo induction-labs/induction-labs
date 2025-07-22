@@ -477,6 +477,8 @@ class ActionDataset(Dataset[ActionDataSample]):
 
         self.datas = list(zip(self.data_paths, stream_metadatas, strict=True))
 
+        # self.first_sample = None
+
     def __getitem__(self, index) -> ActionDataSample:
         # TODO: Make everything async native
         return asyncio.run(self.get_item(index))
@@ -499,6 +501,11 @@ class ActionDataset(Dataset[ActionDataSample]):
         """
 
         # TODO: Handle case where index is out of bounds by returning a 0 sample and emitting a warning
+        # if self.first_sample is not None:
+        #     return self.first_sample
+        
+        # index = 0
+
         path, stream_metadata = self.datas[index]
 
         # Placeholder implementation, replace with actual data loading logic
@@ -514,6 +521,7 @@ class ActionDataset(Dataset[ActionDataSample]):
             ),
             seq_length=self.config.max_seq_length,
         )
+        # self.first_sample = sample
         return sample
 
     def __len__(self) -> int:

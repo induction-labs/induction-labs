@@ -15,13 +15,15 @@ from pathlib import Path
 from modeling.types import Accelerator, DType
 from modeling.data.video_action import RangeActionDatapackConfig
 from modeling.modules.action_instruct.action_head_only import Qwen25oActionTestingConfig
+from modeling.modules.action_instruct.qwen_25o import Qwen25OActionLITConfig
 from modeling.utils.cloud_path import CloudPath
+import os
 # from modeling.modules.base_module import CompileConfig
 
 run_name = "qwen25o_7B_overfit"
 Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
     metadata=ExperimentMetadata(
-        wandb=WandbConfig(project="mouse_following", name=run_name),
+        wandb=WandbConfig(project="normal-debug-lr-unfrozen", name=run_name),
         output_dir=Path("./output") / run_name,
         # checkpoint=None,
         checkpoint=GCSCheckpointConfig(
@@ -33,19 +35,29 @@ Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
             checkpoint_last_step=True,  # Save the last step
         ),
     ),
-    module=Qwen25oActionTestingConfig(
-        # checkpoint_path=CloudPath.from_str(
-        #     "gs://induction-labs/checkpoints/qwen25o_mouse_follow/test_noise_2/2025-07-04T04-05-09/step_-1"
-        # )
-        model_name="Qwen/Qwen2.5-Omni-3B",
-        tokenizer_name="Qwen/Qwen2.5-Omni-3B",
+    module=Qwen25OActionLITConfig(
+        model_name="Qwen/Qwen2.5-Omni-7B",
+        tokenizer_name="Qwen/Qwen2.5-Omni-7B",
         freeze_vision=True,
-        freeze_network=True,
-        freeze_action_embedding=True,
-        freeze_action_head=True,
-        # compile=None,
-        # compile=CompileConfig(),
+        freeze_network=False,
+        freeze_action_embedding=False,
+        freeze_action_head=False,
+        # activation_checkpointing=None,
     ),
+    # module=Qwen25oActionTestingConfig(
+    #     # checkpoint_path=CloudPath.from_str(
+    #     #     "gs://induction-labs/checkpoints/qwen25o_mouse_follow/test_noise_2/2025-07-04T04-05-09/step_-1"
+    #     # )
+    #     model_name="Qwen/Qwen2.5-Omni-3B",
+    #     tokenizer_name="Qwen/Qwen2.5-Omni-3B",
+    #     freeze_vision=True,
+    #     freeze_network=True,
+    #     freeze_action_embedding=True,
+    #     freeze_action_head=True,
+    #     activation_checkpointing=None,
+    #     # compile=None,
+    #     # compile=CompileConfig(),
+    # ),
     datapack=RangeActionDatapackConfig(
         # prefix="gs://induction-labs/jonathan/synth/garbage_cursor_follow_v1/sample_",
         prefix="gs://induction-labs/jonathan/synth/cursor_follow_v3/sample_",
@@ -55,14 +67,14 @@ Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
     ),
     run=RunConfig(
         lr=LinearLRSchedule(
-            peak_lr=1e-3,
-            end_lr=1e-5,
-            warmup_steps=200,
+            peak_lr=float(os.environ["PEAK_LR"]),
+            end_lr=float(os.environ["END_LR"]),
+            warmup_steps=int(os.environ["WARMUP_STEPS"]),
             end_step=3_000,  # 10k steps
         ),
         sequence_length=4096,
         batch_size=1,
-        steps_per_epoch=5000,
+        steps_per_epoch=500,
         validation_every_n_steps=20,
         distributed=DistributedConfig(
             devices_per_node=1,
@@ -70,8 +82,7 @@ Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
         attn_impl=AttentionImplementation.SDPA,
         accelerator=Accelerator.CUDA,
         precision=DType.bf16,
-        seed=52,
-        # profile=ProfileConfig(),
+        seed=int(os.environ["SEED"]),
     ),
 )
 
