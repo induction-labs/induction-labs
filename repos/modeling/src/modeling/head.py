@@ -218,6 +218,26 @@ class ExperimentManager:
         logger.info(f"Starting training: {num_steps} steps, ")
         pbar = tqdm.tqdm(range(num_steps), desc="Training", total=num_steps)
         for step in pbar:
+            if (
+                val_steps := self.exp_config.run.validation_every_n_steps
+            ) >= 1 and step % val_steps == 0:
+                logger.debug(f"Running validation step at {step=}")
+                validation_batch = cast(
+                    list[BaseDataSample], next(validation_dataloader)
+                )
+                all_validation_metrics = await asyncio.gather(
+                    *[
+                        actor.validation_step.remote(data)
+                        for actor, data in zip(
+                            self.state.actors.all_actors, validation_batch, strict=True
+                        )
+                    ]
+                )
+                # Reduce metrics to get mean
+                validation_metrics = module_cls.validation_wandb_metrics(
+                    all_validation_metrics, global_step=step
+                )
+                self.wandb_log(validation_metrics, step=step)
             with elapsed_timer("training_step"):
                 batch = cast(list[BaseDataSample], next(train_iter))
                 assert isinstance(batch, list), f"{batch=}"
@@ -240,27 +260,6 @@ class ExperimentManager:
                 self.wandb_log(train_metrics, step=step)
                 loss = train_metrics.get("train/loss")
 
-            if (
-                val_steps := self.exp_config.run.validation_every_n_steps
-            ) >= 1 and step % val_steps == 0:
-                logger.debug(f"Running validation step at {step=}")
-                validation_batch = cast(
-                    list[BaseDataSample], next(validation_dataloader)
-                )
-                all_validation_metrics = await asyncio.gather(
-                    *[
-                        actor.validation_step.remote(data, global_step=step)
-                        for actor, data in zip(
-                            self.state.actors.all_actors, validation_batch, strict=True
-                        )
-                    ]
-                )
-                # Reduce metrics to get mean
-                validation_metrics = module_cls.validation_wandb_metrics(
-                    all_validation_metrics, global_step=step
-                )
-                self.wandb_log(validation_metrics, step=step)
-
             self.wandb_log({}, step=step, commit=True)
             # TODO: Make this a callback
             if (c := self.exp_config.metadata.checkpoint) and c.should_checkpoint(step):
@@ -271,6 +270,25 @@ class ExperimentManager:
                 await self.save_checkpoint(suffix=f"step_{step}")
             pbar.set_postfix(loss=f"{loss:.4f}")
 
+        step = num_steps
+        if (
+            val_steps := self.exp_config.run.validation_every_n_steps
+        ) >= 1 and step % val_steps == 0:
+            logger.debug(f"Running validation step at {step=}")
+            validation_batch = cast(list[BaseDataSample], next(validation_dataloader))
+            all_validation_metrics = await asyncio.gather(
+                *[
+                    actor.validation_step.remote(data)
+                    for actor, data in zip(
+                        self.state.actors.all_actors, validation_batch, strict=True
+                    )
+                ]
+            )
+            # Reduce metrics to get mean
+            validation_metrics = module_cls.validation_wandb_metrics(
+                all_validation_metrics, global_step=step
+            )
+            self.wandb_log(validation_metrics, step=step)
         # Post training stuff
         # TODO: Write a finished training cleanup hook
         logger.info("🚀🚀🚀🚀🚀🚀🚀 Run completed 🚀🚀🚀🚀🚀🚀🚀")

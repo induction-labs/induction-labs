@@ -274,9 +274,7 @@ class ExperimentActor(BaseActor[ActorArgs]):
         return metrics
 
     @remote_method
-    def validation_step(
-        self, sample: "BaseDataSample", global_step: int
-    ) -> dict[str, float]:
+    def validation_step(self, sample: "BaseDataSample") -> dict[str, float]:
         """
         Perform a validation step for the actor.
         This method should be called to validate the model.
