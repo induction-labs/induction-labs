@@ -16,12 +16,13 @@ from modeling.config import (
 from modeling.config.sweep import Sweep
 from modeling.data.video_action import RangeActionDatapackConfig
 from modeling.modules.action_instruct.qwen_25o import Qwen25OActionLITConfig
+from modeling.modules.base_module import OptimizerType
 from modeling.types import Accelerator, DType
 from modeling.utils.cloud_path import CloudPath
 
 # from modeling.modules.base_module import CompileConfig
 
-run_name = "sweeps_gradclip"
+run_name = "sweeps_optimizer"
 num_devices = 2
 Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
     metadata=ExperimentMetadata(
@@ -103,17 +104,30 @@ Qwen25oActionSweep = (
         lambda checkpoint, exp: (
             exp.module.__setattr__("checkpoint_path", checkpoint),
             exp,
-        )[1],
+        )[-1],
     )
     .sweep(
         [
             # Qwen25OActionLITConfig.CursorPredictionLoss.L2_DISTANCE,
             (Qwen25OActionLITConfig.CursorPredictionLoss.ANALYTICAL_DISTANCE, 50),
             (Qwen25OActionLITConfig.CursorPredictionLoss.COEFFICIENTS_DISTANCE, 300),
+            (Qwen25OActionLITConfig.CursorPredictionLoss.ANALYTICAL_DISTANCE, None),
+            (Qwen25OActionLITConfig.CursorPredictionLoss.COEFFICIENTS_DISTANCE, None),
         ],
         lambda loss, exp: (
             exp.module.__setattr__("loss_type", loss[0]),
             exp.run.__setattr__("grad_clip", loss[1]),
+            exp,
+        )[-1],
+    )
+    .sweep(
+        [
+            # OptimizerType.ADAMW,
+            OptimizerType.ADAGRAD,
+            OptimizerType.SGD,
+        ],
+        lambda optimizer, exp: (
+            exp.module.__setattr__("optimizer", optimizer),
             exp,
         )[-1],
     )

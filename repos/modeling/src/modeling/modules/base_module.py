@@ -70,6 +70,12 @@ class ActivationCheckpointConfig(BaseModel):
     layers: Literal["all"] = "all"
 
 
+class OptimizerType(str, Enum):
+    ADAMW = "adamw"
+    ADAGRAD = "adagrad"
+    SGD = "sgd"
+
+
 class BaseModuleConfig(ModuleConfig):
     """
     Base configuration class for modules.
@@ -82,6 +88,7 @@ class BaseModuleConfig(ModuleConfig):
     activation_checkpointing: ActivationCheckpointConfig | None = (
         ActivationCheckpointConfig()
     )
+    optimizer: OptimizerType = OptimizerType.ADAMW
 
     @abstractmethod
     def create_module(
@@ -405,11 +412,26 @@ class BaseLITModule(ABC, Generic[MODEL_TYPE, DATA_TYPE, CONFIG_TYPE]):
         return metrics
 
     def configure_optimizers(self) -> tuple[Optimizer, LRScheduler]:
-        optimizer = torch.optim.AdamW(
-            self.model.parameters(),
-            lr=self.run_config.lr.peak_lr,
-            fused=True,
-        )
+        optimizer: Optimizer
+        match self.module_config.optimizer:
+            case OptimizerType.ADAMW:
+                optimizer = torch.optim.AdamW(
+                    self.model.parameters(),
+                    lr=self.run_config.lr.peak_lr,
+                    fused=True,
+                )
+            case OptimizerType.ADAGRAD:
+                optimizer = torch.optim.Adagrad(
+                    self.model.parameters(),
+                    lr=self.run_config.lr.peak_lr,
+                    fused=True,
+                )
+            case OptimizerType.SGD:
+                optimizer = torch.optim.SGD(
+                    self.model.parameters(),
+                    lr=self.run_config.lr.peak_lr,
+                    momentum=0.0,
+                )
 
         lr_scheduler = torch.optim.lr_scheduler.LambdaLR(
             optimizer,
