@@ -168,6 +168,7 @@ class Qwen25OActionLIT(
             actual_ys,
             output_actions,
             cursor_path,
+            num_actions,
             (analytical_loss, l2_points_loss, coefficients_loss),
         ) = self.compute_loss(outputs, inputs)
 
@@ -175,6 +176,7 @@ class Qwen25OActionLIT(
             "train/analytical_loss": analytical_loss,
             "train/l2_points_loss": l2_points_loss,
             "train/coefficients_loss": coefficients_loss,
+            "train/num_actions": num_actions,
         }
 
     def compute_loss(
@@ -208,7 +210,7 @@ class Qwen25OActionLIT(
             cubics_to_points_torch(coeffs=output_actions[:, 0, :]),
             cubics_to_points_torch(coeffs=output_actions[:, 1, :]),
         )
-        num_actions = inputs.action_tokens.sum().item()
+        num_actions = inputs.action_tokens.sum().clamp(min=1.0)
 
         # if inputs.cursor_path is not None:
         analytical_loss = (
@@ -220,15 +222,15 @@ class Qwen25OActionLIT(
                 a=output_actions[:, 1, :],
                 b=cursor_path[:, 1, :],
             )
-        ).sum() / min(num_actions, 1)
+        ).sum() / num_actions
 
         l2_points_loss = (
             l2_loss(predicted_xs, actual_xs) + l2_loss(predicted_ys, actual_ys)
-        ).sum() / min(num_actions, 1)
+        ).sum() / num_actions
         coefficients_loss = (
             l2_loss(output_actions[:, 0, :], cursor_path[:, 0, :])
             + l2_loss(output_actions[:, 1, :], cursor_path[:, 1, :])
-        ).sum() / min(num_actions, 1)
+        ).sum() / num_actions
 
         loss = None
         match self.module_config.loss_type:
@@ -253,6 +255,7 @@ class Qwen25OActionLIT(
             actual_ys,
             output_actions,
             cursor_path,
+            num_actions,
             (analytical_loss, l2_points_loss, coefficients_loss),
         )
 
@@ -323,6 +326,7 @@ class Qwen25OActionLIT(
             actual_ys,
             output_actions,
             cursor_path,
+            num_actions,
             (analytical_loss, l2_points_loss, coefficients_loss),
         ) = self.compute_loss(outputs, inputs)
         action_outputs = outputs.action_outputs[inputs.action_tokens]
@@ -342,6 +346,7 @@ class Qwen25OActionLIT(
             "val/analytical_loss": analytical_loss,
             "val/l2_points_loss": l2_points_loss,
             "val/coefficients_loss": coefficients_loss,
+            "val/num_actions": num_actions,
         }
 
     @classmethod
