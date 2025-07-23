@@ -96,7 +96,7 @@ UITarsActionExperimentConfig_GPU = ExperimentConfig(
         distributed=DistributedConfig(
             devices_per_node=num_devices,
         ),
-        attn_impl=AttentionImplementation.SDPA,
+        attn_impl=AttentionImplementation.FLASH_ATTENTION_2,
         accelerator=Accelerator.CUDA,
         precision=DType.bf16,
         seed=1,

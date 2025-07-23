@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Unpack
+from typing import Unpack, cast
 
 import torch
 from synapse.utils.logging import configure_logging, logging
@@ -19,6 +19,8 @@ from transformers.models.qwen2_5_vl.modeling_qwen2_5_vl import (
 from transformers.utils.generic import TransformersKwargs
 from transformers.utils.import_utils import is_torchdynamo_compiling
 
+from modeling.types import AttentionImplementation
+
 # from modeling.utils.check_nans import check_nans
 
 logger = configure_logging(__name__, level=logging.INFO)
@@ -31,12 +33,14 @@ class Qwen2_5_VLActionConfig(Qwen2_5_VLConfig):
         freeze_vision=False,
         freeze_action_head=False,
         freeze_action_embedding=False,
+        use_fun_mask=False,
         **kwargs,
     ):
         self.freeze_network = freeze_network
         self.freeze_vision = freeze_vision
         self.freeze_action_head = freeze_action_head
         self.freeze_action_embedding = freeze_action_embedding
+        self.use_fun_mask = use_fun_mask
 
         super().__init__(**kwargs)
 
@@ -52,6 +56,7 @@ class Qwen2_5_VLActionModel(Qwen2_5_VLModel, GenerationMixin):
 
     def __init__(self, config: Qwen2_5_VLActionConfig):
         super().__init__(config)
+        self.config = cast(Qwen2_5_VLActionConfig, config)
 
         self.action_token_embedding = nn.Embedding(1, config.text_config.hidden_size)
 
@@ -253,51 +258,63 @@ class Qwen2_5_VLActionModel(Qwen2_5_VLModel, GenerationMixin):
                 position_ids = position_ids.add(delta)
                 position_ids = position_ids.unsqueeze(0).expand(3, -1, -1)
 
-        # If we are in decode, we only multiply out on the first k tokens
-        if action_tokens is not None:
-            attention_mask[:, : action_tokens.shape[1]] = (
-                attention_mask[:, : action_tokens.shape[1]] * ~action_tokens
+        # # If we are in decode, we only multiply out on the first k tokens
+        if self.config.use_fun_mask:
+            assert (
+                self.config._attn_implementation
+                != AttentionImplementation.FLASH_ATTENTION_2
+            ), (
+                "Fun mask is not supported with Flash Attention 2, please use SDPA or Eager"
             )
-        if cache_position is None:
-            past_seen_tokens = (
-                past_key_values.get_seq_length() if past_key_values is not None else 0
-            )
-            cache_position = torch.arange(
-                past_seen_tokens,
-                past_seen_tokens + inputs_embeds.shape[1],
-                device=inputs_embeds.device,
-            )
+            if action_tokens is not None:
+                attention_mask[:, : action_tokens.shape[1]] = (
+                    attention_mask[:, : action_tokens.shape[1]] * ~action_tokens
+                )
+            if cache_position is None:
+                past_seen_tokens = (
+                    past_key_values.get_seq_length()
+                    if past_key_values is not None
+                    else 0
+                )
+                cache_position = torch.arange(
+                    past_seen_tokens,
+                    past_seen_tokens + inputs_embeds.shape[1],
+                    device=inputs_embeds.device,
+                )
 
-        mask_kwargs = {
-            "config": self.config,
-            "input_embeds": inputs_embeds,
-            "attention_mask": attention_mask,
-            "cache_position": cache_position,
-            "past_key_values": past_key_values,
-            "position_ids": position_ids,
-        }
-        full_attention_mask = create_causal_mask(**mask_kwargs)
-        # Allow action tokens to attend to themselves but not be attended to.
-        if full_attention_mask.shape[2] == action_tokens.shape[1]:
-            unmasked_value = True if full_attention_mask.dtype == torch.bool else 0.0
-            # This is because fucking mask dtype is different depending on attention impl
-            # SPDA is bool, eager is float
-            diag = full_attention_mask[:, 0, :, :].diagonal(dim1=-2, dim2=-1)
-            assert diag[action_tokens].ne(unmasked_value).all(), (
-                "Action tokens should not be masked %s",
-                diag[action_tokens],
-            )
-            diag[action_tokens] = unmasked_value
-        # Create the masks
-        causal_mask_mapping = {
-            "full_attention": full_attention_mask,
-        }
+            mask_kwargs = {
+                "config": self.config,
+                "input_embeds": inputs_embeds,
+                "attention_mask": attention_mask,
+                "cache_position": cache_position,
+                "past_key_values": past_key_values,
+                "position_ids": position_ids,
+            }
+            full_attention_mask = create_causal_mask(**mask_kwargs)
+            # Allow action tokens to attend to themselves but not be attended to.
+            if full_attention_mask.shape[2] == action_tokens.shape[1]:
+                unmasked_value = (
+                    True if full_attention_mask.dtype == torch.bool else 0.0
+                )
+                # This is because fucking mask dtype is different depending on attention impl
+                # SPDA is bool, eager is float
+                diag = full_attention_mask[:, 0, :, :].diagonal(dim1=-2, dim2=-1)
+                assert diag[action_tokens].ne(unmasked_value).all(), (
+                    "Action tokens should not be masked %s",
+                    diag[action_tokens],
+                )
+                diag[action_tokens] = unmasked_value
+            # Create the masks
+            causal_mask_mapping = {
+                "full_attention": full_attention_mask,
+            }
+            attention_mask = causal_mask_mapping
 
         outputs = self.language_model(
             input_ids=None,
             position_ids=position_ids,
-            # attention_mask=attention_mask,
-            attention_mask=causal_mask_mapping,
+            attention_mask=attention_mask,
+            # attention_mask=causal_mask_mapping,
             past_key_values=past_key_values,
             inputs_embeds=inputs_embeds,
             use_cache=use_cache,

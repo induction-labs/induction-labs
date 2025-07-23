@@ -31,7 +31,7 @@ raw_prompt = make_raw_prompt(
     prefix="",
     suffix="",
 )
-run_name = "og_lr_sweep"
+run_name = "flash_attention_tests"
 num_devices = 1
 Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
     metadata=ExperimentMetadata(
@@ -45,7 +45,7 @@ Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
             ),
             checkpoint_frequency=0,  # Save every 1000 steps
             checkpoint_first_step=False,  # Save the first step
-            checkpoint_last_step=True,  # Save the last step
+            checkpoint_last_step=False,  # Save the last step
         ),
     ),
     module=Qwen25OActionLITConfig(
@@ -54,7 +54,7 @@ Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
         # ),
         model_name="Qwen/Qwen2.5-Omni-7B",
         # tokenizer_name="Qwen/Qwen2.5-Omni-7B",
-        freeze_vision=True,
+        freeze_vision=False,
         freeze_network=False,
         freeze_action_embedding=False,
         freeze_action_head=False,
@@ -88,7 +88,7 @@ Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
             end_step=3000,  # 10k steps
         ),
         sequence_length=calc_min_num_tokens_for_n_actions(
-            840 * 476, 8, raw_prompt, VideoProcessorConfig.Qwen25O()
+            840 * 476, 4, raw_prompt, VideoProcessorConfig.Qwen25O()
         ),
         batch_size=num_devices,
         num_steps=4000,
@@ -105,7 +105,7 @@ Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
 
 Qwen25OActionGPU_Test = Qwen25OActionExperimentConfig_GPU.testing_config(
     num_steps=5,
-    enable_wandb=False,
+    enable_wandb=True,
     with_val=False,
     profile=False,
 )

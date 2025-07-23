@@ -74,6 +74,7 @@ class Qwen25OActionLIT(BaseActiionLIT[MODEL_TYPE, "Qwen25OActionLITConfig"]):
             freeze_vision=module_config.freeze_vision,
             freeze_action_head=module_config.freeze_action_head,
             freeze_action_embedding=module_config.freeze_action_embedding,
+            use_fun_mask=module_config.use_fun_mask,
         )
 
         model = MODEL_TYPE(config)

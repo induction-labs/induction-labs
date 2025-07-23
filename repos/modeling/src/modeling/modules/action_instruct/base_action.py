@@ -367,6 +367,7 @@ class BaseActionLITConfig(BaseModuleConfig):
     freeze_action_head: bool = False
     freeze_action_embedding: bool = False
     loss_type: CursorPredictionLoss = CursorPredictionLoss.ANALYTICAL_DISTANCE
+    use_fun_mask: bool = False
 
     def validate_datapack_compatibility(
         self, datapack_config: DatapackConfig[Any]
