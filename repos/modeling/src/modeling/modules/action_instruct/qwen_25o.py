@@ -189,12 +189,12 @@ class Qwen25OActionLIT(
         output_actions = (
             not_none(outputs.action_outputs)[inputs.action_tokens]
             .reshape(-1, 2, 3)
-            .to(device=self.device, dtype=self.dtype)
+            .to(device=self.device, dtype=torch.float64)
         )
         cursor_path = (
             inputs.cursor_path[inputs.action_tokens]
             .reshape(-1, 2, 3)
-            .to(device=self.device, dtype=self.dtype)
+            .to(device=self.device, dtype=torch.float64)
         )
 
         assert output_actions.shape == cursor_path.shape, (
