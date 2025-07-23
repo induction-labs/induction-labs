@@ -31,7 +31,7 @@ raw_prompt = make_raw_prompt(
     processor_config,
     suffix="",
 )
-run_name = "og_lr_sweep"
+run_name = "uitars_lr_sweep"
 num_devices = 1
 UITarsActionExperimentConfig_GPU = ExperimentConfig(
     metadata=ExperimentMetadata(
@@ -82,13 +82,13 @@ UITarsActionExperimentConfig_GPU = ExperimentConfig(
     ),
     run=RunConfig(
         lr=LinearLRSchedule(
-            peak_lr=5e-5,
+            peak_lr=1e-3,
             end_lr=1e-5,
-            warmup_steps=0,
+            warmup_steps=200,
             end_step=3000,  # 10k steps
         ),
         sequence_length=calc_min_num_tokens_for_n_actions(
-            840 * 476, 1, raw_prompt, processor_config
+            840 * 476, 8, raw_prompt, processor_config
         ),
         batch_size=num_devices,
         num_steps=4000,
@@ -137,7 +137,7 @@ UITarsActionSweep = (
     #         exp,
     #     )[-1],
     # )
-    .sweep(range(1, 5), Sweep.S.seed)
+    .sweep(range(20, 24), Sweep.S.seed)
     # .sweep(
     #     [
     #         # UITarsActionLITConfig.CursorPredictionLoss.L2_DISTANCE,
@@ -163,26 +163,26 @@ UITarsActionSweep = (
     #         exp,
     #     )[-1],
     # )
-    .sweep(
-        [
-            LinearLRSchedule(
-                peak_lr=1e-5,
-                end_lr=1e-5,
-                warmup_steps=0,
-                end_step=3_000,
-            ),
-            *(
-                LinearLRSchedule(
-                    peak_lr=peak_lr,
-                    end_lr=1e-5,
-                    warmup_steps=warmup_steps,
-                    end_step=3_000,
-                )
-                for peak_lr, warmup_steps in Sweep.S.product([5e-5], [0])
-            ),
-        ],
-        Sweep.S.lr,
-    )
+    # .sweep(
+    #     [
+    #         # LinearLRSchedule(
+    #         #     peak_lr=1e-5,
+    #         #     end_lr=1e-5,
+    #         #     warmup_steps=0,
+    #         #     end_step=3_000,
+    #         # ),
+    #         *(
+    #             LinearLRSchedule(
+    #                 peak_lr=peak_lr,
+    #                 end_lr=1e-5,
+    #                 warmup_steps=warmup_steps,
+    #                 end_step=3_000,
+    #             )
+    #             for peak_lr, warmup_steps in Sweep.S.product([5e-5], [0])
+    #         ),
+    #     ],
+    #     Sweep.S.lr,
+    # )
 )
 # 0.0005
 
