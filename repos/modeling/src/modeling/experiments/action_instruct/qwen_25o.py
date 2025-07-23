@@ -43,7 +43,7 @@ Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
             ),
             checkpoint_frequency=0,  # Save every 1000 steps
             checkpoint_first_step=False,  # Save the first step
-            checkpoint_last_step=False,  # Save the last step
+            checkpoint_last_step=True,  # Save the last step
         ),
     ),
     module=Qwen25OActionLITConfig(
@@ -78,14 +78,14 @@ Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
     ),
     run=RunConfig(
         lr=LinearLRSchedule(
-            peak_lr=1e-3,
+            peak_lr=5e-5,
             end_lr=1e-5,
-            warmup_steps=200,
+            warmup_steps=0,
             end_step=3000,  # 10k steps
         ),
         sequence_length=calc_min_num_tokens_for_n_actions(840 * 476, 8, raw_prompt),
         batch_size=num_devices,
-        num_steps=2000,
+        num_steps=4000,
         validation_every_n_steps=100,
         distributed=DistributedConfig(
             devices_per_node=num_devices,
@@ -93,7 +93,7 @@ Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
         attn_impl=AttentionImplementation.SDPA,
         accelerator=Accelerator.CUDA,
         precision=DType.bf16,
-        seed=52,
+        seed=1,
     ),
 )
 
@@ -110,6 +110,13 @@ Qwen25OActionExperimentConfig_CPU = Qwen25OActionExperimentConfig_GPU.model_copy
 Qwen25oActionSweep = (
     Sweep(Qwen25OActionExperimentConfig_GPU)
     # .sweep(
+    #     [True, False],
+    #     lambda freeze_vision, exp: (
+    #         exp.module.__setattr__("freeze_vision", freeze_vision),
+    #         exp,
+    #     )[-1],
+    # )
+    # .sweep(
     #     [
     #         None,
     #         CloudPath.from_str(
@@ -124,7 +131,7 @@ Qwen25oActionSweep = (
     #         exp,
     #     )[-1],
     # )
-    .sweep(range(1, 3), Sweep.S.seed)
+    .sweep(range(1, 5), Sweep.S.seed)
     # .sweep(
     #     [
     #         # Qwen25OActionLITConfig.CursorPredictionLoss.L2_DISTANCE,
@@ -165,9 +172,7 @@ Qwen25oActionSweep = (
                     warmup_steps=warmup_steps,
                     end_step=3_000,
                 )
-                for peak_lr, warmup_steps in Sweep.S.product(
-                    [1e-3, 5e-4, 5e-5], [0, 200]
-                )
+                for peak_lr, warmup_steps in Sweep.S.product([5e-5], [0])
             ),
         ],
         Sweep.S.lr,
