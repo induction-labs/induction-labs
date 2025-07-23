@@ -15,6 +15,7 @@ from modeling.config import (
 from modeling.config.sweep import Sweep
 from modeling.data.video_action import (
     RangeActionDatapackConfig,
+    VideoProcessorConfig,
     calc_min_num_tokens_for_n_actions,
     make_raw_prompt,
 )
@@ -65,6 +66,7 @@ Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
         # prefix="gs://induction-labs/jonathan/synth/garbage_cursor_follow_v1/sample_",
         prefix="gs://induction-labs/jonathan/synth/cursor_follow_v3/sample_",
         raw_prompt=raw_prompt,
+        processor_config=VideoProcessorConfig.Qwen25O(),
         # prefix="gs://induction-labs/jonathan/synth/noise_cursor_follow_v1/sample_",
         end_index=55_000,  # 60k samples
     ),
@@ -72,6 +74,7 @@ Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
         # prefix="gs://induction-labs/jonathan/synth/garbage_cursor_follow_v1/sample_",
         prefix="gs://induction-labs/jonathan/synth/cursor_follow_v3/sample_",
         raw_prompt=raw_prompt,
+        processor_config=VideoProcessorConfig.Qwen25O(),
         # prefix="gs://induction-labs/jonathan/synth/noise_cursor_follow_v1/sample_",
         start_index=55_000,  # 60k samples
         end_index=60_000,  # 60k samples
@@ -83,7 +86,9 @@ Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
             warmup_steps=0,
             end_step=3000,  # 10k steps
         ),
-        sequence_length=calc_min_num_tokens_for_n_actions(840 * 476, 8, raw_prompt),
+        sequence_length=calc_min_num_tokens_for_n_actions(
+            840 * 476, 8, raw_prompt, VideoProcessorConfig.Qwen25O()
+        ),
         batch_size=num_devices,
         num_steps=4000,
         validation_every_n_steps=100,
@@ -98,9 +103,9 @@ Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
 )
 
 Qwen25OActionGPU_Test = Qwen25OActionExperimentConfig_GPU.testing_config(
-    num_steps=25,
-    enable_wandb=True,
-    with_val=True,
+    num_steps=5,
+    enable_wandb=False,
+    with_val=False,
     profile=False,
 )
 

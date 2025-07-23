@@ -15,7 +15,6 @@ from transformers.models.qwen2_5_omni.configuration_qwen2_5_omni import (
 from transformers.models.qwen2_5_omni.modeling_qwen2_5_omni import (
     Qwen2_5OmniPreTrainedModelForConditionalGeneration,
     Qwen2_5OmniThinkerCausalLMOutputWithPast,
-    Qwen2_5OmniThinkerForConditionalGeneration,  # Same as Qwen2_5OmniMLP
     Qwen2_5OmniThinkerTextModel,
     Qwen2_5OmniVisionEncoder,
 )
@@ -264,16 +263,6 @@ class Qwen2_5OmniThinkerForActionModelling(
             # check_nans(self.get_input_embeddings().weight, "input_embeddings_weight")
             inputs_embeds = self.get_input_embeddings()(input_ids)  # [B, S, D]
             # If we are in decode
-            if action_tokens.shape[1] == inputs_embeds.shape[1]:
-                # Otherwise this breaks torch.compile graph
-                mask = action_tokens.unsqueeze(-1)  # [B, L, 1]
-                action_vec = self.action_token_embedding.weight[0]  # [hidden_size]
-                action_vec = action_vec.view(1, 1, -1).expand_as(
-                    inputs_embeds
-                )  # [B, S, D]
-                inputs_embeds = torch.where(mask, action_vec, inputs_embeds)
-
-                # inputs_embeds[action_tokens] = self.action_token_embedding.weight[0]
 
         # 2. Merge text , audios , image and video
         if (
@@ -283,6 +272,12 @@ class Qwen2_5OmniThinkerForActionModelling(
         ):  # Prefill stage
             video_embeds = self.get_video_features(pixel_values_videos, video_grid_thw)
             # check_nans(video_embeds, "video_embeds")
+            n_video_tokens = (input_ids == self.config.video_token_id).sum()
+            n_video_features = video_embeds.shape[0]
+            assert n_video_tokens == n_video_features, (
+                f"Video features and video tokens do not match: tokens: {n_video_tokens}, features {n_video_features}"
+            )
+
             video_mask = (
                 (input_ids == self.config.video_token_id)
                 .unsqueeze(-1)
@@ -291,6 +286,15 @@ class Qwen2_5OmniThinkerForActionModelling(
             )
             video_embeds = video_embeds.to(inputs_embeds.device, inputs_embeds.dtype)
             inputs_embeds = inputs_embeds.masked_scatter(video_mask, video_embeds)
+
+        if (action_tokens is not None) and action_tokens.shape[
+            1
+        ] == inputs_embeds.shape[1]:
+            # Otherwise this breaks torch.compile graph
+            mask = action_tokens.unsqueeze(-1)  # [B, L, 1]
+            action_vec = self.action_token_embedding.weight[0]  # [hidden_size]
+            action_vec = action_vec.view(1, 1, -1).expand_as(inputs_embeds)  # [B, S, D]
+            inputs_embeds = torch.where(mask, action_vec, inputs_embeds)
 
         # check_nans(inputs_embeds, "input_embeds")
         audio_feature_lengths = None
@@ -301,7 +305,7 @@ class Qwen2_5OmniThinkerForActionModelling(
                 or (cache_position is not None and cache_position[0] == 0)
                 or self.rope_deltas is None
             ):
-                delta0 = (1 - attention_mask).sum(dim=-1).unsqueeze(1)
+                delta0 = (1 - (attention_mask)).sum(dim=-1).unsqueeze(1)
                 position_ids, rope_deltas = self.get_rope_index(
                     input_ids,
                     image_grid_thw,
@@ -325,10 +329,12 @@ class Qwen2_5OmniThinkerForActionModelling(
                 position_ids = position_ids.add(delta)
                 position_ids = position_ids.unsqueeze(0).expand(3, -1, -1)
 
-        # If we are in decode, we only multiply out on the first k tokens
-        attention_mask[:, : action_tokens.shape[1]] = (
-            attention_mask[:, : action_tokens.shape[1]] * ~action_tokens
-        )
+        if action_tokens is not None:
+            # If we are in decode, we only multiply out on the first k tokens
+            attention_mask[:, : action_tokens.shape[1]] = (
+                attention_mask[:, : action_tokens.shape[1]] * ~action_tokens
+            )
+
         if cache_position is None:
             past_seen_tokens = (
                 past_key_values.get_seq_length() if past_key_values is not None else 0
@@ -372,6 +378,7 @@ class Qwen2_5OmniThinkerForActionModelling(
 
         outputs = self.model(
             attention_mask=causal_mask_mapping,
+            # attention_mask=attention_mask,
             position_ids=position_ids,
             past_key_values=past_key_values,
             inputs_embeds=inputs_embeds,
@@ -467,40 +474,59 @@ class Qwen2_5OmniActionModel(Qwen2_5OmniPreTrainedModel, GenerationMixin):
 
 async def main():
     from transformers import AutoTokenizer
+    from transformers.generation.configuration_utils import GenerationConfig
 
-    from modeling.data.video_action import ActionDataSample, fetch_data
+    from modeling.data.video_action import (
+        ActionDataSample,
+        VideoProcessorConfig,
+        calc_min_num_tokens_for_n_actions,
+        fetch_data,
+        make_raw_prompt,
+    )
 
     # default: Load the model on the available device(s)
-    t = AutoTokenizer.from_pretrained("Qwen/Qwen2.5-Omni-3B")
-    config = Qwen2_5OmniThinkerConfig.from_pretrained("Qwen/Qwen2.5-Omni-3B")
-    model = Qwen2_5OmniThinkerForConditionalGeneration.from_pretrained(
-        "Qwen/Qwen2.5-Omni-3B",
+    t = AutoTokenizer.from_pretrained("Qwen/Qwen2.5-Omni-7B")
+    config = Qwen2_5OmniThinkerActionConfig.from_pretrained("Qwen/Qwen2.5-Omni-7B")
+    model = Qwen2_5OmniThinkerForActionModelling.from_pretrained(
+        "Qwen/Qwen2.5-Omni-7B",
         config=config,
         torch_dtype=torch.bfloat16,
         device_map="auto",
     )
+    model = model.to(torch.cuda.current_device())
+    processor_config = VideoProcessorConfig.Qwen25O()
 
-    data = await fetch_data(
-        num_actions=3,
-        path="gs://induction-labs/jonathan/synth/cursor_follow_v1/sample_3.zarr",
-        seq_length=2048,
+    # VideoProcessorConfig
+    raw_prompt = make_raw_prompt(
+        processor_config,
     )
+    num_tokens = calc_min_num_tokens_for_n_actions(
+        840 * 476, 1, raw_prompt, processor_config
+    )
+
+    data, _ = await fetch_data(
+        num_actions=1,
+        path="gs://induction-labs/jonathan/synth/cursor_follow_v3/sample_25.zarr",
+        seq_length=num_tokens,
+        config=processor_config,
+        raw_prompt=raw_prompt,
+        start=6,
+    )
+
     data = ActionDataSample.combine_batch([data])
+    data = data.to_device("cuda")
     inputs = data.qwen_inputs.model_dump()
+    # inputs["second_per_grid_ts"] = inputs.pop("video_second_per_grid")
 
-    for k, v in inputs.items():
-        if isinstance(v, torch.Tensor):
-            inputs[k] = v.to("cuda")
-    print(data)
     with torch.no_grad():
-        result = model.forward(
-            # cursor_path=data.cursor_path,
-            # action_tokens=data.action_tokens,
+        # result = model.forward(**inputs, action_tokens=data.action_tokens)
+        result2 = model.generate(
             **inputs,
+            generation_config=GenerationConfig(max_new_tokens=400),
+            action_tokens=data.action_tokens,
         )
-        result2 = model.generate(**inputs)
 
-    print(result, result2)
+    # print(result, result2)
     print(t.decode(result2[0], skip_special_tokens=False))
 
 

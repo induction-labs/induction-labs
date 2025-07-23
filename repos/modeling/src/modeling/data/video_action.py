@@ -9,24 +9,18 @@ from typing import Any, Generic, Literal, Self, TypeVar, cast
 
 import numpy as np
 import torch
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 from synapse.combined.combined_loader import CombinedLoaderArgs, combined_loader
 from synapse.utils.logging import configure_logging
 from synapse.video_loader.read_frames import fetch_metadata_from_zarr
 from synapse.video_loader.typess import StreamMetadata
-from transformers.models.qwen2_5_omni import (
-    Qwen2_5OmniProcessor,
-)
+from transformers import AutoProcessor
+from transformers.processing_utils import ProcessorMixin
 
 from modeling.config import DatapackConfig, ExperimentConfig, ModuleConfig
 from modeling.config.data import BaseDataSample, BaseDataset
 
 logger = configure_logging(__name__, level=logging.INFO)
-
-VIDEO_TOKEN_ID = 151656
-PATCH_SIZE = 14
-MERGE_SIZE = 2
-ACTION_TOKEN_ID = 151643
 
 
 R = TypeVar("R")
@@ -60,17 +54,17 @@ class RemoveKwargProxy(Generic[R]):
 
 
 # TODO: Make this depend on the model loll
-@functools.lru_cache(maxsize=1)
-def qwen_processor() -> Qwen2_5OmniProcessor:
+@functools.lru_cache
+def qwen_processor(processor_name: str) -> ProcessorMixin:
     """
     Returns a cached instance of the Qwen2_5OmniProcessor.
     This is used to avoid reloading the processor multiple times.
     """
-    processor = Qwen2_5OmniProcessor.from_pretrained(
-        "Qwen/Qwen2.5-Omni-7B", use_fast=True
-    )
-    assert isinstance(processor, Qwen2_5OmniProcessor)
-    processor.video_processor = RemoveKwargProxy(processor.video_processor, "images")  # type: ignore[assignment]
+    processor = AutoProcessor.from_pretrained(processor_name, use_fast=True)
+    if hasattr(processor, "video_processor"):
+        processor.video_processor = RemoveKwargProxy(
+            processor.video_processor, "images"
+        )  # type: ignore[assignment]
     # Otherwise everytime we call it it prints "Unused or unrecognized kwargs: images." kms
 
     return processor
@@ -94,7 +88,9 @@ class ActionDataSample(BaseDataSample):
         attention_mask: torch.Tensor  # [batch, seq_length, ]
         pixel_values_videos: torch.Tensor  # [num_video_patches, 1176]
         video_grid_thw: torch.Tensor  # [num_videos, 3]
-        video_second_per_grid: torch.Tensor  # [nun_videos,]
+        video_second_per_grid: torch.Tensor = Field(
+            validation_alias=AliasChoices("video_second_per_grid", "second_per_grid_ts")
+        )
 
         def to_device(
             self, device: torch.device | str, non_blocking: bool = False
@@ -196,8 +192,34 @@ class ActionDataSample(BaseDataSample):
         )
 
 
+class VideoProcessorConfig(BaseModel):
+    model_config = {"frozen": True}
+    processor_name: str = "Qwen/Qwen2.5-Omni-7B"
+    video_pad_token: str = "<|VIDEO|>"
+    video_token_id: int = 151656
+    action_token: str = "<|endoftext|>"
+    vision_pad_token: str = "<|vision_pad|>"
+    vision_pad_id: int = 151654
+    action_token_id: int = 151643
+    patch_size: int = 14
+    merge_size: int = 2
+    frames_per_action: int = 2
+
+    @staticmethod
+    def Qwen25O():
+        return VideoProcessorConfig()
+
+    @staticmethod
+    def Qwen25VL(name: str = "Qwen/Qwen2.5-VL-7B") -> VideoProcessorConfig:
+        return VideoProcessorConfig(
+            processor_name=name,
+            video_pad_token="<|video_pad|>",
+            video_token_id=151656,
+        )
+
+
 # <|im_start|>system\nYou are a helpful voice chat bot, and please respond to me in a casual conversation manner using random voice.<|im_end|>\n<|im_start|>user\n<|vision_bos|><|IMAGE|><|vision_eos|><|vision_bos|><|VIDEO|><|vision_eos|><|vision_bos|><|VIDEO|><|vision_eos|><|im_end|>\n<|im_start|>assistant\n
-def calc_tokens_per_action(image_pixels: int) -> int:
+def calc_tokens_per_action(image_pixels: int, config: VideoProcessorConfig) -> int:
     """
     Compute the number of tokens per frame based on the image pixels and patch size.
     This is a placeholder function and should be replaced with actual logic.
@@ -206,9 +228,9 @@ def calc_tokens_per_action(image_pixels: int) -> int:
     """
     # For now, we assume each frame corresponds to a fixed number of tokens.
     # This can be adjusted based on the actual dataset and requirements.
-    tokens_per_frame = image_pixels / ((PATCH_SIZE * MERGE_SIZE) ** 2)
+    tokens_per_frame = image_pixels / ((config.patch_size * config.merge_size) ** 2)
     assert tokens_per_frame.is_integer(), (
-        f"Expected tokens_per_frame to be an integer, got {tokens_per_frame}. {image_pixels=}, {PATCH_SIZE=}"
+        f"Expected tokens_per_frame to be an integer, got {tokens_per_frame}. {image_pixels=}, {config.patch_size=}"
     )
     return int(tokens_per_frame)
 
@@ -216,8 +238,8 @@ def calc_tokens_per_action(image_pixels: int) -> int:
 def calc_num_actions_per_sequence(
     stream_metadata: StreamMetadata,
     max_seq: int,
-    frames_per_action: int,
     raw_prompt: str,
+    config: VideoProcessorConfig,
 ) -> int:
     """
     Calculate the number of actions per sequence based on the image pixels, max sequence length, and frames per action.
@@ -229,15 +251,15 @@ def calc_num_actions_per_sequence(
         Compute the number of frames per sequence based on the frames_per_action.
         This is a placeholder function and should be replaced with actual logic.
         """
-        max_video_tokens = max_seq - prompt_token_len(raw_prompt)
-        return max_video_tokens // (calc_tokens_per_action(image_pixels) + 1)
+        max_video_tokens = max_seq - prompt_token_len(raw_prompt, config)
+        return max_video_tokens // (calc_tokens_per_action(image_pixels, config) + 1)
 
     max_fittable_frames = max_actions_per_sequence(
         stream_metadata.output_video.resolution.pixels, max_seq
     )
 
     total_actions_in_stream = (
-        stream_metadata.output_video.total_frames // frames_per_action
+        stream_metadata.output_video.total_frames // config.frames_per_action
     )
     num_actions = min(max_fittable_frames, total_actions_in_stream)
 
@@ -248,51 +270,68 @@ def calc_min_num_tokens_for_n_actions(
     resolution_pixels: int,
     num_actions: int,
     raw_prompt: str,
+    config: VideoProcessorConfig,
 ) -> int:
     """
     Calculate the minimum number of tokens required for a given number of actions.
     This is a placeholder function and should be replaced with actual logic.
     """
     tokens_per_action = (
-        calc_tokens_per_action(resolution_pixels) + 1
+        calc_tokens_per_action(resolution_pixels, config) + 1
     )  # # +1 for the action token
-    return prompt_token_len(raw_prompt) + num_actions * (tokens_per_action)
+    return prompt_token_len(raw_prompt, config) + num_actions * (tokens_per_action)
 
 
-RAW_PREAMBLE_SUFFIX = "<|video_eos|><|im_end|>\n<|im_start|>assistant\n"
-DEFAULT_PREAMBLE = "You are Qwen, a helpful video processing assistant. Find where the cursor is at the end of the video."
+DEFAULT_PREAMBLE = "You are a GUI agent. "
 RAW_DEFAULT_PREAMBLE = f"<|im_start|>system\n{DEFAULT_PREAMBLE}<|im_end|>\n"
-# RAW_DEFAULT_PREAMBLE = ""
+RAW_PREAMBLE_SUFFIX = "<|vision_end|>\n Find the cursor at the end of video.<|im_end|>\n<|im_start|>assistant\n"
+# RAW_DEFAULT_PREAMBLE = ""<|vision_start|><|video_pad|><|vision_end|>
 
 
-def make_raw_prompt(prefix=RAW_DEFAULT_PREAMBLE, suffix=RAW_PREAMBLE_SUFFIX) -> str:
+def make_raw_prompt(
+    config: VideoProcessorConfig,
+    prefix=RAW_DEFAULT_PREAMBLE,
+    suffix=RAW_PREAMBLE_SUFFIX,
+) -> str:
     """
     Create a raw prompt for the Qwen model.
     This is used to ensure that the preamble is correctly formatted and included in the input sequence.
     """
-    return f"{prefix}<|im_start|>user\n<|vision_bos|><|VIDEO|>{suffix}"
+    return f"{prefix}<|im_start|>user\n<|vision_start|>{config.video_pad_token}{suffix}"
 
 
-@functools.lru_cache(maxsize=1)
-def prompt_token_len(raw_prompt: str) -> int:
+@functools.lru_cache
+def prompt_token_len(raw_prompt: str, config: VideoProcessorConfig) -> int:
     """
     Returns the length of the default preamble in tokens.
     This is used to ensure that the preamble is correctly tokenized and included in the input sequence.
     """
-    processor = qwen_processor()
-    preamble_without_video = raw_prompt.replace("<|VIDEO|>", "")
+    processor = qwen_processor(config.processor_name)
+    assert config.video_pad_token in raw_prompt, (
+        f"Expected raw_prompt to contain video_pad_token {config.video_pad_token}, "
+        f"but got {raw_prompt}."
+    )
+    # NOTE: Qwen you can't get rid of VIDEO_PAD entirely because otherwise `\n<|vision_bos|>` will be tokenized differently
+    # But we can't use VIDEO_PAD directly otherwise qwen processor tries to calculate how many video tokens it needs
+    # but we don't want to pass in video_thw
+    # So instead we use vision_bos as a placeholder.
+    preamble_without_video = raw_prompt.replace(
+        config.video_pad_token, config.vision_pad_token
+    )
     inputs = processor(
         text=[preamble_without_video],
         return_tensors="pt",
         padding=False,
     )
     # Assert no video tokens are present in the input_ids
-    assert inputs.input_ids.ne(VIDEO_TOKEN_ID).all(), (
+    assert inputs.input_ids[0].eq(config.vision_pad_id).sum() == 1, (
+        f"Expected input_ids to contain exactly one video_token_id {config.video_token_id}, "
+        f"but got {inputs.input_ids[0]}."
+    )
+    assert inputs.input_ids.ne(config.video_token_id).all(), (
         f"Expected input_ids to not contain VIDEO_TOKEN_ID, but got {inputs.input_ids}."
     )
-    # assert inputs.input_ids.shape[1] == 34
-
-    return inputs.input_ids.shape[1]
+    return inputs.input_ids.shape[1] - 1
 
 
 def insert_every_n(t: torch.Tensor, n: int, fill_value=0) -> torch.Tensor:
@@ -326,7 +365,7 @@ async def fetch_data(
     num_actions: int,
     seq_length: int,
     raw_prompt: str,
-    frames_per_action: int = 2,
+    config: VideoProcessorConfig,
     start: int = 0,
 ) -> tuple[ActionDataSample, FramesArray]:
     """
@@ -336,9 +375,10 @@ async def fetch_data(
     combined_loader_args = CombinedLoaderArgs(
         frames_zarr_path=path,
         actions_range=(start, start + num_actions),
-        frames_per_action=frames_per_action,
+        frames_per_action=config.frames_per_action,
     )
     (frames, cursor_path), stream_metadata = await combined_loader(combined_loader_args)
+    # frames[:, 0, :] = frames[:, 1, :]
     assert len(frames) == len(cursor_path) == num_actions, (
         f"Frames and mouse movements length mismatch: {len(frames)} != {len(cursor_path)}"
     )
@@ -352,7 +392,7 @@ async def fetch_data(
     )
     # frames[:, :, 0::96] = 0  # Set every 48th pixel to 0
 
-    processor = qwen_processor()
+    processor = qwen_processor(config.processor_name)
     # processor takes videos as inpuit as a list of videos as [frames, channels, height, width]
     # where frames = actions_per_sequence * frames_per_action
     inputs = processor(
@@ -374,12 +414,12 @@ async def fetch_data(
 
     # Insert 0 on every action prediction event in input_ids and attention_mask
     tokens_per_action = calc_tokens_per_action(
-        stream_metadata.output_video.resolution.pixels
+        stream_metadata.output_video.resolution.pixels, config
     )
     num_video_tokens = tokens_per_action * num_actions
     assert (
         qwen_inputs.pixel_values_videos.shape[0]
-        == num_video_tokens * MERGE_SIZE * MERGE_SIZE
+        == num_video_tokens * config.merge_size * config.merge_size
     ), (
         f"Expected pixel_values_videos to have {num_video_tokens} frames, "
         f"but got {qwen_inputs.pixel_values_videos.shape[0]}."
@@ -393,7 +433,7 @@ async def fetch_data(
     assert qwen_inputs.attention_mask.eq(1).all(), (
         f"Expected attention_mask to be all ones, but got {qwen_inputs.attention_mask}."
     )
-    is_video_token = qwen_inputs.input_ids[0].eq(VIDEO_TOKEN_ID)
+    is_video_token = qwen_inputs.input_ids[0].eq(config.video_token_id)
     first_video_token_index = torch.where(is_video_token)[0][0].item()
 
     non_video_input_ids, video_input_ids, post_video_input_ids = (
@@ -404,22 +444,22 @@ async def fetch_data(
         qwen_inputs.input_ids[0][first_video_token_index + num_video_tokens :],
     )
 
-    assert video_input_ids.eq(VIDEO_TOKEN_ID).all(), (
-        f"Expected input_ids to have {num_video_tokens} VIDEO_TOKEN_IDs at the end, "
+    assert video_input_ids.eq(config.video_token_id).all(), (
+        f"Expected input_ids to have {num_video_tokens} config.video_token_ids at the end, "
         f"but got {video_input_ids}."
     )
-    assert non_video_input_ids.ne(VIDEO_TOKEN_ID).all(), (
-        f"Expected input_ids to have {num_video_tokens} VIDEO_TOKEN_IDs at the end, "
+    assert non_video_input_ids.ne(config.video_token_id).all(), (
+        f"Expected input_ids to have {num_video_tokens} config.video_token_ids at the end, "
         f"but got {non_video_input_ids}."
     )
-    assert post_video_input_ids.ne(VIDEO_TOKEN_ID).all()
+    assert post_video_input_ids.ne(config.video_token_id).all()
     logger.debug(
         f"{len(non_video_input_ids)=}, {len(video_input_ids)=}, {num_video_tokens=}"
         f"{seq_length=} {num_actions=} {tokens_per_action=}"
     )
 
     expanded_video_input_ids = insert_every_n(
-        video_input_ids, tokens_per_action, ACTION_TOKEN_ID
+        video_input_ids, tokens_per_action, config.action_token_id
     )
     assert len(expanded_video_input_ids) - len(video_input_ids) == num_actions, (
         f"Expected expanded_video_input_ids length to be {len(video_input_ids) + num_actions}, "
@@ -429,18 +469,20 @@ async def fetch_data(
     real_input_ids = torch.cat(
         (non_video_input_ids, expanded_video_input_ids, post_video_input_ids), dim=0
     )
+
     real_attention_mask = torch.ones_like(
         real_input_ids
-    )  # .ne(ACTION_TOKEN_ID).to(qwen_inputs.attention_mask.dtype)
-    action_tokens = real_input_ids.eq(ACTION_TOKEN_ID)
+    )  # .ne(config.action_token_id).to(qwen_inputs.attention_mask.dtype)
+    action_tokens = real_input_ids.eq(config.action_token_id)
     input_cursor_path = torch.zeros(
         (len(real_input_ids), 2, 3), dtype=torch.float32
     )  # [seq_length, (x,y), (m,n,a)]
     input_cursor_path[action_tokens] = torch.tensor(cursor_path)
+    # real_attention_mask = real_attention_mask & ~action_tokens
 
     assert len(real_input_ids) <= seq_length, (
         f"Expected input_ids length {len(real_input_ids)} to be less than or equal to seq_length {seq_length}, "
-        f"but got {real_input_ids}."
+        f"but got {len(non_video_input_ids)=}, {len(expanded_video_input_ids)=},  {len(post_video_input_ids)=}, "
     )
     if len(real_input_ids) < seq_length:
         padding_len = seq_length - len(real_input_ids)
@@ -479,8 +521,8 @@ async def fetch_data(
 class ActionDatasetArgs(BaseModel):
     data_paths: list[str]
     max_seq_length: int
-    frames_per_action: int
     raw_prompt: str
+    processor_config: VideoProcessorConfig
 
 
 class ActionDataset(BaseDataset[ActionDataSample, ActionDatasetArgs]):
@@ -520,10 +562,11 @@ class ActionDataset(BaseDataset[ActionDataSample, ActionDatasetArgs]):
             num_actions=calc_num_actions_per_sequence(
                 stream_metadata,
                 self.args.max_seq_length,
-                self.args.frames_per_action,
                 raw_prompt=self.args.raw_prompt,
+                config=self.args.processor_config,
             ),
             seq_length=self.args.max_seq_length,
+            config=self.args.processor_config,
         )
         return sample
 
@@ -549,10 +592,7 @@ class ActionDatapackConfig(DatapackConfig[ActionDataSample]):
     """
 
     config_path: str = "modeling.data.video_action.ActionDatapackConfig"
-    raw_prompt: str = make_raw_prompt(
-        prefix="",
-        suffix="",
-    )
+    raw_prompt: str
 
     @property
     @abstractmethod
@@ -564,7 +604,7 @@ class ActionDatapackConfig(DatapackConfig[ActionDataSample]):
         raise NotImplementedError("Subclasses must implement data_paths.")
 
     frames_per_action: int = 2
-    patch_size: int = PATCH_SIZE
+    processor_config: VideoProcessorConfig
 
     def validate_module_compatibility(
         self, module_config: ModuleConfig[Any]
@@ -580,7 +620,7 @@ class ActionDatapackConfig(DatapackConfig[ActionDataSample]):
             ActionDatasetArgs(
                 data_paths=self.data_paths,
                 max_seq_length=full_config.run.sequence_length,
-                frames_per_action=self.frames_per_action,
+                processor_config=self.processor_config,
                 raw_prompt=self.raw_prompt,
             )
         )
