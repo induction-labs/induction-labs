@@ -11,6 +11,7 @@ metadata:
 spec:
   suspend: true # Important: Start suspended, Kueue will unsuspend
   backoffLimit: 0 # No retries
+  ttlSecondsAfterFinished: 3600 # 1 hour
   template:
     spec:
       restartPolicy: Never # TODO: Set to never - use jobs

@@ -244,6 +244,21 @@ def calc_num_actions_per_sequence(
     return num_actions
 
 
+def calc_min_num_tokens_for_n_actions(
+    resolution_pixels: int,
+    num_actions: int,
+    raw_prompt: str,
+) -> int:
+    """
+    Calculate the minimum number of tokens required for a given number of actions.
+    This is a placeholder function and should be replaced with actual logic.
+    """
+    tokens_per_action = (
+        calc_tokens_per_action(resolution_pixels) + 1
+    )  # # +1 for the action token
+    return prompt_token_len(raw_prompt) + num_actions * (tokens_per_action)
+
+
 RAW_PREAMBLE_SUFFIX = "<|video_eos|><|im_end|>\n<|im_start|>assistant\n"
 DEFAULT_PREAMBLE = "You are Qwen, a helpful video processing assistant. Find where the cursor is at the end of the video."
 RAW_DEFAULT_PREAMBLE = f"<|im_start|>system\n{DEFAULT_PREAMBLE}<|im_end|>\n"
@@ -560,17 +575,7 @@ class ActionDatapackConfig(DatapackConfig[ActionDataSample]):
         """
         return module_config
 
-    async def _init_train_dataset(self, full_config: ExperimentConfig) -> ActionDataset:
-        return await ActionDataset.constructor(
-            ActionDatasetArgs(
-                data_paths=self.data_paths,
-                max_seq_length=full_config.run.sequence_length,
-                frames_per_action=self.frames_per_action,
-                raw_prompt=self.raw_prompt,
-            )
-        )
-
-    async def _init_val_dataset(self, full_config: ExperimentConfig) -> ActionDataset:
+    async def _init_dataset(self, full_config: ExperimentConfig) -> ActionDataset:
         return await ActionDataset.constructor(
             ActionDatasetArgs(
                 data_paths=self.data_paths,

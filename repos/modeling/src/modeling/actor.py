@@ -251,6 +251,13 @@ class ExperimentActor(BaseActor[ActorArgs]):
         # Backward pass
         # with torch.profiler.record_function("backward"):
         loss.backward()
+        clip_norm_og = torch.nn.utils.clip_grad_norm_(
+            self.state.module.model.parameters(),
+            self.experiment_config.run.grad_clip or float("inf"),
+        )
+        clip_norm_clipped = min(
+            clip_norm_og.item(), self.experiment_config.run.grad_clip or float("inf")
+        )
 
         # Update weights
         # with torch.profiler.record_function("optimizer_step"):
@@ -261,13 +268,13 @@ class ExperimentActor(BaseActor[ActorArgs]):
         # Add learning rate to metrics
         metrics["train/learning_rate"] = self.state.optimizer.param_groups[0]["lr"]
         metrics["train/loss"] = loss.item()
+        metrics["train/clip_norm_og"] = clip_norm_og.item()
+        metrics["train/clip_norm_clipped"] = clip_norm_clipped
         # logger.debug(f"Training step completed with loss: {loss.item()}")
         return metrics
 
     @remote_method
-    def validation_step(
-        self, sample: "BaseDataSample", global_step: int
-    ) -> dict[str, float]:
+    def validation_step(self, sample: "BaseDataSample") -> dict[str, float]:
         """
         Perform a validation step for the actor.
         This method should be called to validate the model.

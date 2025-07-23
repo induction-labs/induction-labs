@@ -64,6 +64,7 @@ def analytical_distance(
         ],
         dim=1,
     )  # shape: [seq, 3]
+
     c2 = torch.stack(
         [
             m2 + n2 - 2 * a2,
@@ -167,6 +168,7 @@ class Qwen25OActionLIT(
             actual_ys,
             output_actions,
             cursor_path,
+            num_actions,
             (analytical_loss, l2_points_loss, coefficients_loss),
         ) = self.compute_loss(outputs, inputs)
 
@@ -174,6 +176,7 @@ class Qwen25OActionLIT(
             "train/analytical_loss": analytical_loss,
             "train/l2_points_loss": l2_points_loss,
             "train/coefficients_loss": coefficients_loss,
+            "train/num_actions": num_actions,
         }
 
     def compute_loss(
@@ -186,12 +189,12 @@ class Qwen25OActionLIT(
         output_actions = (
             not_none(outputs.action_outputs)[inputs.action_tokens]
             .reshape(-1, 2, 3)
-            .to(device=self.device, dtype=self.dtype)
+            .to(device=self.device, dtype=torch.float64)
         )
         cursor_path = (
             inputs.cursor_path[inputs.action_tokens]
             .reshape(-1, 2, 3)
-            .to(device=self.device, dtype=self.dtype)
+            .to(device=self.device, dtype=torch.float64)
         )
 
         assert output_actions.shape == cursor_path.shape, (
@@ -207,6 +210,7 @@ class Qwen25OActionLIT(
             cubics_to_points_torch(coeffs=output_actions[:, 0, :]),
             cubics_to_points_torch(coeffs=output_actions[:, 1, :]),
         )
+        num_actions = inputs.action_tokens.sum().clamp(min=1.0)
 
         # if inputs.cursor_path is not None:
         analytical_loss = (
@@ -218,15 +222,15 @@ class Qwen25OActionLIT(
                 a=output_actions[:, 1, :],
                 b=cursor_path[:, 1, :],
             )
-        ).sum()
+        ).sum() / num_actions
 
         l2_points_loss = (
             l2_loss(predicted_xs, actual_xs) + l2_loss(predicted_ys, actual_ys)
-        ).sum()
+        ).sum() / num_actions
         coefficients_loss = (
             l2_loss(output_actions[:, 0, :], cursor_path[:, 0, :])
             + l2_loss(output_actions[:, 1, :], cursor_path[:, 1, :])
-        ).sum()
+        ).sum() / num_actions
 
         loss = None
         match self.module_config.loss_type:
@@ -251,6 +255,7 @@ class Qwen25OActionLIT(
             actual_ys,
             output_actions,
             cursor_path,
+            num_actions,
             (analytical_loss, l2_points_loss, coefficients_loss),
         )
 
@@ -264,10 +269,10 @@ class Qwen25OActionLIT(
             {k: v for k, v in m.items() if not k.startswith("val/image")}
             for m in all_metrics
         ]
-        first_val_image = metrics[0].get("val/image", {})
+        first_val_image = all_metrics[0]["val/image"]
 
-        cursor_path = first_val_image.get("val/cursor_path", [])
-        action_outputs = first_val_image.get("val/action_outputs", [])
+        cursor_path = first_val_image["val/cursor_path"]
+        action_outputs = first_val_image["val/action_outputs"]
 
         np_predicted_xs, np_predicted_ys = cls.visualize_action(action_outputs)
         np_actual_xs, np_actual_ys = cls.visualize_action(cursor_path)
@@ -292,7 +297,7 @@ class Qwen25OActionLIT(
 
         # Get mean over all metrics
         mean_metrics = {
-            k: np.mean([m[k] for m in metrics if k in m])
+            k: torch.tensor([m[k] for m in metrics]).mean().item()
             for k in metrics[0]
             if k != "val/image"
         }
@@ -321,6 +326,7 @@ class Qwen25OActionLIT(
             actual_ys,
             output_actions,
             cursor_path,
+            num_actions,
             (analytical_loss, l2_points_loss, coefficients_loss),
         ) = self.compute_loss(outputs, inputs)
         action_outputs = outputs.action_outputs[inputs.action_tokens]
@@ -340,6 +346,7 @@ class Qwen25OActionLIT(
             "val/analytical_loss": analytical_loss,
             "val/l2_points_loss": l2_points_loss,
             "val/coefficients_loss": coefficients_loss,
+            "val/num_actions": num_actions,
         }
 
     @classmethod

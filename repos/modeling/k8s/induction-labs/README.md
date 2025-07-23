@@ -85,6 +85,21 @@ kubectl create -f mdl.yaml
 
 # Logs
 kubectl get jobs
+# Successful jobs
+# Server side
+kubectl get jobs --field-selector=status.successful=1 -o name
+kubectl get jobs -o jsonpath='{range .items[?(@.status.failed>0)].metadata}{.name}{"\n"}{end}'
+
+# Running jobs
+kubectl get jobs -o jsonpath='{range .items[?(@.status.active>0)].metadata}{.name}{"\n"}{end}'
+# Queued jobs
+kubectl get jobs -o jsonpath='{range .items[?(@.spec.suspend==true)].metadata}{.name}{"\n"}{end}'
+
+
+# Delete failed jobs
+kubectl get jobs -o jsonpath='{range .items[?(@.status.failed>0)].metadata}{.name}{"\n"}{end}' |
+        xargs -r kubectl delete job
+
 kubectl logs -f job/modeling-48trw
 kubectl get job modeling-48trw -o yaml
 
