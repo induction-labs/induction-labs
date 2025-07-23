@@ -22,7 +22,8 @@ class VideoDurationAnalyzer:
     VIDEO_DURATION_SECONDS = 30.0
 
     def __init__(
-        self, bucket_path: str = "gs://induction-labs-data-ext/action_capture/"
+        self,
+        bucket_path: str = "gs://induction-labs-data-ext-passive-mangodesk/action_capture/",
     ):
         self.bucket_path = bucket_path
         self.fs = gcsfs.GCSFileSystem()
@@ -40,7 +41,7 @@ class VideoDurationAnalyzer:
             print(f"Error listing users: {e}")
             return []
 
-    def count_user_videos(self, user: str) -> dict[str, any]:
+    def count_user_videos(self, user: str) -> dict[str, str | int | float | list[dict]]:
         """Count MP4 files for a specific user"""
         user_path = f"{self.bucket_path}{user}/"
         video_count = 0
