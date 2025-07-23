@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, TypeVar
+from typing import TypeVar
 
 import numpy as np
 import torch
@@ -10,24 +10,25 @@ from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.fsdp import MixedPrecisionPolicy, fully_shard
 
 from modeling.config import (
-    DatapackConfig,
     InstanceConfig,
     RunConfig,
 )
 from modeling.config.distributed import MeshAxis
-from modeling.data.video_action import ActionDatapackConfig, ActionDataSample
+from modeling.data.video_action import ActionDataSample
 from modeling.utils.class_property import class_property
 
 from .base_action import BaseActiionLIT, BaseActionLITConfig
 from .qwen_25o_actions import (
     Qwen2_5OmniActionCausalLMOutputWithPast,
-    Qwen2_5OmniActionModel,
-    Qwen2_5OmniThinkerActionConfig,
+)
+from .qwen_25vl_actions import (
+    Qwen2_5_VLActionConfig,
+    Qwen2_5_VLForActionModel,
 )
 
 logger = configure_logging(__name__, level=logging.DEBUG)
 
-MODEL_TYPE = Qwen2_5OmniActionModel
+MODEL_TYPE = Qwen2_5_VLForActionModel
 l2_loss = nn.MSELoss(reduce=False)
 
 T = TypeVar("T")
@@ -40,7 +41,7 @@ def to_numpy_clean(tensor: torch.Tensor, dtype=torch.float32) -> np.ndarray:
     return tensor.to(dtype=dtype, device="cpu").detach().numpy()
 
 
-class Qwen25OActionLIT(BaseActiionLIT[MODEL_TYPE, "Qwen25OActionLITConfig"]):
+class Qwen25VLActionLIT(BaseActiionLIT[MODEL_TYPE, "Qwen25VLActionLITConfig"]):
     """
     Qwen-2.5O Lightning Module for text pretraining.
     Inherits from TextPretrainLIT and uses the Qwen-2.5O model.
@@ -68,7 +69,7 @@ class Qwen25OActionLIT(BaseActiionLIT[MODEL_TYPE, "Qwen25OActionLITConfig"]):
         self,
     ):
         module_config = self.module_config
-        config = Qwen2_5OmniThinkerActionConfig.from_pretrained(
+        config = Qwen2_5_VLActionConfig.from_pretrained(
             module_config.model_name,
             freeze_network=module_config.freeze_network,
             freeze_vision=module_config.freeze_vision,
@@ -98,21 +99,23 @@ class Qwen25OActionLIT(BaseActiionLIT[MODEL_TYPE, "Qwen25OActionLITConfig"]):
             "mesh": device_mesh[MeshAxis.FSDP],
             "mp_policy": mp_policy,
         }
-        fully_shard(self.model.thinker.visual, **fsdp_config)
+        fully_shard(self.model.model.visual, **fsdp_config)
 
-        for layer_id, transformer_block in enumerate(self.model.thinker.model.layers):
+        for layer_id, transformer_block in enumerate(
+            self.model.model.language_model.layers
+        ):
             # Activation checkpointing kinda broken
             # For now this is broken with HF models https://github.com/huggingface/transformers/issues/34928
 
             reshard_after_forward = (
-                int(layer_id) < len(self.model.thinker.model.layers) - 1
+                int(layer_id) < len(self.model.model.language_model.layers) - 1
             )
             fully_shard(
                 transformer_block,
                 **fsdp_config,
                 reshard_after_forward=reshard_after_forward,
             )
-            self.model.thinker.model.layers[layer_id] = transformer_block
+            self.model.model.language_model.layers[layer_id] = transformer_block
 
         return fully_shard(
             self.model,
@@ -120,33 +123,25 @@ class Qwen25OActionLIT(BaseActiionLIT[MODEL_TYPE, "Qwen25OActionLITConfig"]):
         )
 
 
-class Qwen25OActionLITConfig(BaseActionLITConfig):
+class Qwen25VLActionLITConfig(BaseActionLITConfig):
     """
     Configuration class for Qwen-2.5O Lightning Module.
     Inherits from TextPretrainLITConfig and sets the model name.
     """
 
     config_path: str = (
-        "modeling.modules.action_instruct.qwen_25o.Qwen25OActionLITConfig"
+        "modeling.modules.action_instruct.qwen_25vl.Qwen25VLActionLITConfig"
     )
-    model_name: str = "Qwen/Qwen2.5-Omni-3B"
+    model_name: str = "ByteDance-Seed/UI-TARS-1.5-7B"
     # tokenizer_name: str = "Qwen/Qwen2.5-Omni-3B"
-
-    def validate_datapack_compatibility(
-        self, datapack_config: DatapackConfig[Any]
-    ) -> ActionDatapackConfig:
-        assert isinstance(datapack_config, ActionDatapackConfig), (
-            f"Expected {datapack_config=} to be of type ActionDatapackConfig"
-        )
-        return datapack_config
 
     def create_module(
         self,
         run_config: RunConfig,
         instance_config: InstanceConfig,
-    ) -> Qwen25OActionLIT:
-        return Qwen25OActionLIT(self, run_config, instance_config)
+    ) -> Qwen25VLActionLIT:
+        return Qwen25VLActionLIT(self, run_config, instance_config)
 
     @classmethod
-    def module_cls(cls) -> type[Qwen25OActionLIT]:
-        return Qwen25OActionLIT
+    def module_cls(cls) -> type[Qwen25VLActionLIT]:
+        return Qwen25VLActionLIT

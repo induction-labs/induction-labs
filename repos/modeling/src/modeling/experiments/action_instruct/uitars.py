@@ -19,23 +19,23 @@ from modeling.data.video_action import (
     calc_min_num_tokens_for_n_actions,
     make_raw_prompt,
 )
-from modeling.modules.action_instruct.qwen_25o import Qwen25OActionLITConfig
+from modeling.modules.action_instruct.qwen_25vl import Qwen25VLActionLITConfig
 from modeling.modules.base_module import OptimizerType
 from modeling.types import Accelerator, DType
 from modeling.utils.cloud_path import CloudPath
 
 # from modeling.modules.base_module import CompileConfig
 
+processor_config = VideoProcessorConfig.Qwen25VL("ByteDance-Seed/UI-TARS-1.5-7B")
 raw_prompt = make_raw_prompt(
-    VideoProcessorConfig.Qwen25O(),
-    prefix="",
+    processor_config,
     suffix="",
 )
 run_name = "og_lr_sweep"
 num_devices = 1
-Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
+UITarsActionExperimentConfig_GPU = ExperimentConfig(
     metadata=ExperimentMetadata(
-        wandb=WandbConfig(project="qwen25o_7B_lr_sweep", name=run_name),
+        wandb=WandbConfig(project="UITars_7B_lr_sweep", name=run_name),
         # wandb=None,
         output_dir=Path("./output") / run_name,
         # checkpoint=None,
@@ -48,17 +48,17 @@ Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
             checkpoint_last_step=True,  # Save the last step
         ),
     ),
-    module=Qwen25OActionLITConfig(
+    module=Qwen25VLActionLITConfig(
         # checkpoint_path=CloudPath.from_str(
-        #     "gs://induction-labs/checkpoints/qwen25o_7B_uninitialized/2025-07-17T23-05-38/step_100"
+        #     "gs://induction-labs/checkpoints/UITars_7B_uninitialized/2025-07-17T23-05-38/step_100"
         # ),
-        model_name="Qwen/Qwen2.5-Omni-7B",
+        model_name="ByteDance-Seed/UI-TARS-1.5-7B",
         # tokenizer_name="Qwen/Qwen2.5-Omni-7B",
         freeze_vision=True,
         freeze_network=False,
         freeze_action_embedding=False,
         freeze_action_head=False,
-        loss_type=Qwen25OActionLITConfig.CursorPredictionLoss.L2_DISTANCE,
+        loss_type=Qwen25VLActionLITConfig.CursorPredictionLoss.L2_DISTANCE,
         optimizer=OptimizerType.ADAMW,
         # compile=None,
         # compile=CompileConfig(),
@@ -67,7 +67,7 @@ Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
         # prefix="gs://induction-labs/jonathan/synth/garbage_cursor_follow_v1/sample_",
         prefix="gs://induction-labs/jonathan/synth/cursor_follow_v3/sample_",
         raw_prompt=raw_prompt,
-        processor_config=VideoProcessorConfig.Qwen25O(),
+        processor_config=processor_config,
         # prefix="gs://induction-labs/jonathan/synth/noise_cursor_follow_v1/sample_",
         end_index=55_000,  # 60k samples
     ),
@@ -75,7 +75,7 @@ Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
         # prefix="gs://induction-labs/jonathan/synth/garbage_cursor_follow_v1/sample_",
         prefix="gs://induction-labs/jonathan/synth/cursor_follow_v3/sample_",
         raw_prompt=raw_prompt,
-        processor_config=VideoProcessorConfig.Qwen25O(),
+        processor_config=processor_config,
         # prefix="gs://induction-labs/jonathan/synth/noise_cursor_follow_v1/sample_",
         start_index=55_000,  # 60k samples
         end_index=60_000,  # 60k samples
@@ -88,7 +88,7 @@ Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
             end_step=3000,  # 10k steps
         ),
         sequence_length=calc_min_num_tokens_for_n_actions(
-            840 * 476, 8, raw_prompt, VideoProcessorConfig.Qwen25O()
+            840 * 476, 1, raw_prompt, processor_config
         ),
         batch_size=num_devices,
         num_steps=4000,
@@ -103,18 +103,18 @@ Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
     ),
 )
 
-Qwen25OActionGPU_Test = Qwen25OActionExperimentConfig_GPU.testing_config(
+UITarsActionGPU_Test = UITarsActionExperimentConfig_GPU.testing_config(
     num_steps=5,
     enable_wandb=False,
     with_val=False,
     profile=False,
 )
 
-Qwen25OActionExperimentConfig_CPU = Qwen25OActionExperimentConfig_GPU.model_copy(
-    update={"run": Qwen25OActionExperimentConfig_GPU.run.cpu_config()}
+UITarsActionExperimentConfig_CPU = UITarsActionExperimentConfig_GPU.model_copy(
+    update={"run": UITarsActionExperimentConfig_GPU.run.cpu_config()}
 )
-Qwen25oActionSweep = (
-    Sweep(Qwen25OActionExperimentConfig_GPU)
+UITarsActionSweep = (
+    Sweep(UITarsActionExperimentConfig_GPU)
     # .sweep(
     #     [True, False],
     #     lambda freeze_vision, exp: (
@@ -126,7 +126,7 @@ Qwen25oActionSweep = (
     #     [
     #         None,
     #         CloudPath.from_str(
-    #             "gs://induction-labs/checkpoints/qwen25o_7B_uninitialized/2025-07-17T23-05-38/step_100"
+    #             "gs://induction-labs/checkpoints/UITars_7B_uninitialized/2025-07-17T23-05-38/step_100"
     #         ),
     #         CloudPath.from_str(
     #             "gs://induction-labs/checkpoints/sweeps_optimizer/2025-07-22T17-28-51.iGEDRrvU/step_-1"
@@ -140,11 +140,11 @@ Qwen25oActionSweep = (
     .sweep(range(1, 5), Sweep.S.seed)
     # .sweep(
     #     [
-    #         # Qwen25OActionLITConfig.CursorPredictionLoss.L2_DISTANCE,
-    #         (Qwen25OActionLITConfig.CursorPredictionLoss.ANALYTICAL_DISTANCE, 50),
-    #         (Qwen25OActionLITConfig.CursorPredictionLoss.COEFFICIENTS_DISTANCE, 300),
-    #         (Qwen25OActionLITConfig.CursorPredictionLoss.ANALYTICAL_DISTANCE, None),
-    #         (Qwen25OActionLITConfig.CursorPredictionLoss.COEFFICIENTS_DISTANCE, None),
+    #         # UITarsActionLITConfig.CursorPredictionLoss.L2_DISTANCE,
+    #         (UITarsActionLITConfig.CursorPredictionLoss.ANALYTICAL_DISTANCE, 50),
+    #         (UITarsActionLITConfig.CursorPredictionLoss.COEFFICIENTS_DISTANCE, 300),
+    #         (UITarsActionLITConfig.CursorPredictionLoss.ANALYTICAL_DISTANCE, None),
+    #         (UITarsActionLITConfig.CursorPredictionLoss.COEFFICIENTS_DISTANCE, None),
     #     ],
     #     lambda loss, exp: (
     #         exp.module.__setattr__("loss_type", loss[0]),
@@ -187,7 +187,7 @@ Qwen25oActionSweep = (
 # 0.0005
 
 
-# mdl export modeling.experiments.action_instruct.qwen_25o.Qwen25OActionExperimentConfig_CPU
-# mdl export modeling.experiments.action_instruct.qwen_25o.Qwen25OActionExperimentConfig_GPU
-# mdl export modeling.experiments.action_instruct.qwen_25o.Qwen25OActionGPU_Test
-# mdl sweep modeling.experiments.action_instruct.qwen_25o.Qwen25oActionSweep
+# mdl export modeling.experiments.action_instruct.uitars.UITarsActionExperimentConfig_CPU
+# mdl export modeling.experiments.action_instruct.uitars.UITarsActionExperimentConfig_GPU
+# mdl export modeling.experiments.action_instruct.uitars.UITarsActionGPU_Test
+# mdl sweep modeling.experiments.action_instruct.uitars.UITarsActionSweep

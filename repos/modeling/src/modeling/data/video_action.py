@@ -282,9 +282,9 @@ def calc_min_num_tokens_for_n_actions(
     return prompt_token_len(raw_prompt, config) + num_actions * (tokens_per_action)
 
 
-DEFAULT_PREAMBLE = "You are a GUI agent. "
+DEFAULT_PREAMBLE = "You are a GUI agent. Find the cursor at the end of video."
 RAW_DEFAULT_PREAMBLE = f"<|im_start|>system\n{DEFAULT_PREAMBLE}<|im_end|>\n"
-RAW_PREAMBLE_SUFFIX = "<|vision_end|>\n Find the cursor at the end of video.<|im_end|>\n<|im_start|>assistant\n"
+RAW_PREAMBLE_SUFFIX = "<|vision_end|><|im_end|>\n<|im_start|>assistant\n"
 # RAW_DEFAULT_PREAMBLE = ""<|vision_start|><|video_pad|><|vision_end|>
 
 
