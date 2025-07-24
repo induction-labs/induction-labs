@@ -24,6 +24,7 @@ dependencies = [
   "typer>=0.16.0",
   "einops>=0.8.1",
   "synapse",
+  "nvidia-cutlass-dsl>=4.1.0",
 ]
 [project.scripts]
 mdl = "modeling.main:app"
@@ -56,7 +57,8 @@ ssh-required = [
 ]
 # TODO: Validate that this is always correct version of torch + other deps
 flash-attn = [
-  "flash-attn @ https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.3.9/flash_attn-2.6.3+cu128torch2.7-cp312-cp312-linux_x86_64.whl ; sys_platform == 'linux' and platform_machine == 'x86_64'",
+  # "flash-attn @ https://github.com/Dao-AILab/flash-attention/releases/download/v2.8.2/flash_attn-2.8.2+cu12torch2.7cxx11abiTRUE-cp312-cp312-linux_x86_64.whl ; sys_platform == 'linux' and platform_machine == 'x86_64'",
+  "flash-attn-local ; sys_platform == 'linux' and platform_machine == 'x86_64'",
 ]
 head = ["ray[default,client]"]
 [tool.uv]
@@ -79,6 +81,9 @@ synapse = { workspace = true }
 tomli-w = { git = "https://github.com/induction-labs/tomli-w-none.git" }
 tomli = { git = "https://github.com/induction-labs/tomli-none.git" }
 transformers = { git = "https://github.com/induction-labs/transformers.git", branch = "fix-qwen2vl-positionid-mask" }
+# This is so troll - we need to use local path package instead of workspace because we need to rewrite 
+# `flash_attn` -> `flash_attn_local` https://github.com/pfmoore/editables/issues/20
+flash-attn-local = { path = "../flash-attention-local", editable = false }
 
 [[tool.uv.index]]
 name = "torch_general"
