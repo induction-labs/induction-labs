@@ -52,7 +52,7 @@ Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
         # checkpoint_path=CloudPath.from_str(
         #     "gs://induction-labs/checkpoints/qwen25o_7B_uninitialized/2025-07-17T23-05-38/step_100"
         # ),
-        model_name="Qwen/Qwen2.5-Omni-7B",
+        model_name="Qwen/Qwen2.5-Omni-3B",
         # tokenizer_name="Qwen/Qwen2.5-Omni-7B",
         freeze_vision=False,
         freeze_network=False,
@@ -88,7 +88,7 @@ Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
             end_step=3000,  # 10k steps
         ),
         sequence_length=calc_min_num_tokens_for_n_actions(
-            840 * 476, 4, raw_prompt, VideoProcessorConfig.Qwen25O()
+            840 * 476, 8, raw_prompt, VideoProcessorConfig.Qwen25O()
         ),
         batch_size=num_devices,
         num_steps=4000,
@@ -96,7 +96,7 @@ Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
         distributed=DistributedConfig(
             devices_per_node=num_devices,
         ),
-        attn_impl=AttentionImplementation.SDPA,
+        attn_impl=AttentionImplementation.FLASH_ATTENTION_2_CUTE,
         accelerator=Accelerator.CUDA,
         precision=DType.bf16,
         seed=1,

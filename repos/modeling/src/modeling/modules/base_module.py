@@ -293,7 +293,9 @@ class BaseLITModule(ABC, Generic[MODEL_TYPE, DATA_TYPE, CONFIG_TYPE]):
             device_map={
                 "": self.device  # Use the device index for the model
             },  # Ensure model is loaded on the correct device
-            attn_implementation=self.attn_impl,
+            # We don't use the attention actual name because we need to alias flash attention2 cute
+            # to flash_attention_2 because alot of HF things are hardcoded to use that
+            attn_implementation=self.attn_impl.hf_string,
             local_files_only=True,
         )
         return loaded_model

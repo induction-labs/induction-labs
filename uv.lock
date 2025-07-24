@@ -2635,7 +2635,7 @@ requires-dist = [
     { name = "torchvision", marker = "sys_platform != 'linux'", specifier = ">=0.22.1" },
     { name = "torchvision", marker = "sys_platform == 'linux'", specifier = ">=0.22.1", index = "https://download.pytorch.org/whl/cu128" },
     { name = "tqdm", specifier = ">=4.67.1" },
-    { name = "transformers", git = "https://github.com/induction-labs/transformers.git?branch=fix-qwen2vl-positionid-mask" },
+    { name = "transformers", git = "https://github.com/induction-labs/transformers.git?branch=main" },
     { name = "triton", specifier = ">=3.3.1", index = "https://download.pytorch.org/whl" },
     { name = "typer", specifier = ">=0.16.0" },
     { name = "wandb", specifier = ">=0.19.11" },
@@ -5526,7 +5526,7 @@ wheels = [
 [[package]]
 name = "transformers"
 version = "4.54.0.dev0"
-source = { git = "https://github.com/induction-labs/transformers.git?branch=fix-qwen2vl-positionid-mask#5cfecf46347df325d4df84aa114619b1ffb9e36a" }
+source = { git = "https://github.com/induction-labs/transformers.git?branch=main#64ba0e9a84ea59c44c7822247217b13b73027c4f" }
 dependencies = [
     { name = "filelock" },
     { name = "huggingface-hub" },
