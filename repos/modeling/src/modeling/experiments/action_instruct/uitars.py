@@ -31,11 +31,11 @@ raw_prompt = make_raw_prompt(
     processor_config,
     suffix="",
 )
-run_name = "uitars_lr_sweep"
-num_devices = 1
+run_name = "uitars_big_sweep_from_init"
+num_devices = 8
 UITarsActionExperimentConfig_GPU = ExperimentConfig(
     metadata=ExperimentMetadata(
-        wandb=WandbConfig(project="UITars_7B_lr_sweep", name=run_name),
+        wandb=WandbConfig(project="UITars_7B_gpu8_lr_sweep", name=run_name),
         # wandb=None,
         output_dir=Path("./output") / run_name,
         # checkpoint=None,
@@ -49,12 +49,12 @@ UITarsActionExperimentConfig_GPU = ExperimentConfig(
         ),
     ),
     module=Qwen25VLActionLITConfig(
-        # checkpoint_path=CloudPath.from_str(
-        #     "gs://induction-labs/checkpoints/UITars_7B_uninitialized/2025-07-17T23-05-38/step_100"
-        # ),
+        checkpoint_path=CloudPath.from_str(
+            "gs://induction-labs/checkpoints/uitars_lr_sweep_22_repro/2025-07-23T23-11-47.Zt48I8vF/step_1000"
+        ),
         model_name="ByteDance-Seed/UI-TARS-1.5-7B",
         # tokenizer_name="Qwen/Qwen2.5-Omni-7B",
-        freeze_vision=True,
+        freeze_vision=False,
         freeze_network=False,
         freeze_action_embedding=False,
         freeze_action_head=False,
@@ -87,24 +87,24 @@ UITarsActionExperimentConfig_GPU = ExperimentConfig(
     ),
     run=RunConfig(
         lr=LinearLRSchedule(
-            peak_lr=1e-3,
+            peak_lr=5e-4,
             end_lr=1e-5,
-            warmup_steps=200,
+            warmup_steps=20,
             end_step=3000,  # 10k steps
         ),
         sequence_length=calc_min_num_tokens_for_n_actions(
             840 * 476, 8, raw_prompt, processor_config
         ),
-        batch_size=num_devices,
-        num_steps=4000,
-        validation_every_n_steps=100,
+        batch_size=num_devices * 4,
+        num_steps=200,
+        validation_every_n_steps=20,
         distributed=DistributedConfig(
             devices_per_node=num_devices,
         ),
         attn_impl=AttentionImplementation.SDPA,
         accelerator=Accelerator.CUDA,
         precision=DType.bf16,
-        seed=1,
+        seed=22,
     ),
 )
 
@@ -119,14 +119,13 @@ UITarsActionExperimentConfig_CPU = UITarsActionExperimentConfig_GPU.model_copy(
     update={"run": UITarsActionExperimentConfig_GPU.run.cpu_config()}
 )
 UITarsActionSweep = (
-    Sweep(UITarsActionExperimentConfig_GPU)
-    # .sweep(
-    #     [True, False],
-    #     lambda freeze_vision, exp: (
-    #         exp.module.__setattr__("freeze_vision", freeze_vision),
-    #         exp,
-    #     )[-1],
-    # )
+    Sweep(UITarsActionExperimentConfig_GPU).sweep(
+        [True, False],
+        lambda freeze_vision, exp: (
+            exp.module.__setattr__("freeze_vision", freeze_vision),
+            exp,
+        )[-1],
+    )
     # .sweep(
     #     [
     #         None,
@@ -142,7 +141,7 @@ UITarsActionSweep = (
     #         exp,
     #     )[-1],
     # )
-    .sweep(range(20, 24), Sweep.S.seed)
+    # .sweep(range(20, 24), Sweep.S.seed)
     # .sweep(
     #     [
     #         # UITarsActionLITConfig.CursorPredictionLoss.L2_DISTANCE,
@@ -170,12 +169,12 @@ UITarsActionSweep = (
     # )
     # .sweep(
     #     [
-    #         # LinearLRSchedule(
-    #         #     peak_lr=1e-5,
-    #         #     end_lr=1e-5,
-    #         #     warmup_steps=0,
-    #         #     end_step=3_000,
-    #         # ),
+    #         LinearLRSchedule(
+    #             peak_lr=1e-5,
+    #             end_lr=1e-5,
+    #             warmup_steps=0,
+    #             end_step=3_000,
+    #         ),
     #         *(
     #             LinearLRSchedule(
     #                 peak_lr=peak_lr,
@@ -183,7 +182,9 @@ UITarsActionSweep = (
     #                 warmup_steps=warmup_steps,
     #                 end_step=3_000,
     #             )
-    #             for peak_lr, warmup_steps in Sweep.S.product([5e-5], [0])
+    #             for peak_lr, warmup_steps in Sweep.S.product(
+    #                 [5e-4, 1e-4, 5e-5], [0, 200]
+    #             )
     #         ),
     #     ],
     #     Sweep.S.lr,
