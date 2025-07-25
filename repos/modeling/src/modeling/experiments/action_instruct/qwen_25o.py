@@ -23,6 +23,7 @@ from modeling.modules.base_module import CompileConfig, OptimizerType
 from modeling.types import Accelerator, DType
 from modeling.utils.cloud_path import CloudPath
 
+CompileConfig()
 raw_prompt = make_raw_prompt(
     VideoProcessorConfig.Qwen25O(),
     prefix="",
@@ -61,7 +62,7 @@ Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
         loss_type=Qwen25OActionLITConfig.CursorPredictionLoss.L2_DISTANCE,
         optimizer=OptimizerType.ADAMW,
         # compile=None,
-        compile=CompileConfig(),
+        # compile=CompileConfig(),
     ),
     train_datapack=RangeActionDatapackConfig(
         # prefix="gs://induction-labs/jonathan/synth/garbage_cursor_follow_v1/sample_",
@@ -114,7 +115,7 @@ Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
 
 Qwen25OActionGPU_Test = Qwen25OActionExperimentConfig_GPU.testing_config(
     num_steps=5,
-    enable_wandb=False,
+    enable_wandb=True,
     with_val=False,
     profile=False,
 )
