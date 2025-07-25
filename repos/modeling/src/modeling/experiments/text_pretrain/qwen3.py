@@ -28,16 +28,17 @@ Qwen3PretrainExperimentConfig = ExperimentConfig(
         # activation_checkpointing=None,  # Optional activation checkpointing config
         # compile=CompileConfig(),  # Uncomment if you want to use compilation
     ),
-    datapack=TextPretrainDatapackConfig(),
+    train_datapack=TextPretrainDatapackConfig(),
+    validation_datapack=TextPretrainDatapackConfig(),
     run=RunConfig(
         lr=LinearLRSchedule.constant_lr(1e-5),
         sequence_length=4096,
-        batch_size=4,
+        batch_size=1,
         num_steps=5000,
         distributed=DistributedConfig(
-            devices_per_node=4,
+            devices_per_node=1,
         ),
-        attn_impl=AttentionImplementation.SDPA,
+        attn_impl=AttentionImplementation.FLASH_ATTENTION_2,
         accelerator=Accelerator.CUDA,
         # profile=ProfileConfig(),
     ),

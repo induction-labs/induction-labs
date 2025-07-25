@@ -24,6 +24,10 @@ class Qwen3LITConfig(TextPretrainLITConfig):
     model_name: str = "Qwen/Qwen3-0.6B"
     tokenizer_name: str = "Qwen/Qwen3-0.6B"
 
+    @classmethod
+    def module_cls(cls) -> type[Qwen3LIT]:
+        return Qwen3LIT
+
     def create_module(
         self,
         run_config: RunConfig,

@@ -141,6 +141,7 @@ class ModuleConfig(BaseModel, ABC):
     config_path: str
 
     @classmethod
+    @abstractmethod
     def module_cls(cls) -> type[BaseLITModule]:
         """
         Return the class of the Lightning module.
@@ -191,6 +192,16 @@ class SerializedModuleConfig(ModuleConfig):
     Configuration for a serialized Lightning module.
     This class is used to load a Lightning module from a specified path.
     """
+
+    @classmethod
+    def module_cls(cls) -> type[BaseLITModule]:
+        """
+        Return the class of the Lightning module.
+        This method should be implemented by subclasses to return the actual module class.
+        """
+        raise NotImplementedError(
+            "SerializedModuleConfig should never be used to start an experiment directly."
+        )
 
     # Explicity allow extra config to go through, because this will be used to initialize the module
     model_config = ConfigDict(extra="allow")
