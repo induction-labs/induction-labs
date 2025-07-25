@@ -85,6 +85,17 @@ class Tokenizer(BaseModel):
     @classmethod
     def load(cls, path: str) -> Tokenizer:
         return cls.model_validate_json(read_from_path(path))
+    
+    @property
+    def vocab_size(self) -> int:
+        """
+        Returns max token ID + 1, which is the size of the vocabulary.
+        """
+        max_token_id = max(
+            max(value.values()) if isinstance(value, dict) else value
+            for value in self.mappings.values()
+        )
+        return max_token_id + 1
 
     def debug_reverse_mapping(self, token_id: int) -> str:
         for key, value in self.mappings.items():

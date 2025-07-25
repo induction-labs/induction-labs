@@ -26,10 +26,10 @@ from modeling.utils.cloud_path import CloudPath
 # from modeling.modules.base_module import CompileConfig
 
 raw_prompt = make_raw_prompt(
-    prefix="",
-    suffix="",
+    prefix="<|im_start|>system\nYou are Qwen, a helpful video processing assistant. What is the text shown in the video?<|im_end|>\n",
+    # suffix="",
 )
-run_name = "predict_one_action_l2_points"
+run_name = "keyboard_typing"
 num_devices = 1
 Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
     metadata=ExperimentMetadata(
@@ -41,14 +41,14 @@ Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
             checkpoint_prefix=CloudPath.from_str(
                 f"gs://induction-labs/checkpoints/{run_name}",
             ),
-            checkpoint_frequency=0,  # Save every 1000 steps
+            checkpoint_frequency=1000,  # Save every 1000 steps
             checkpoint_first_step=False,  # Save the first step
             checkpoint_last_step=False,  # Save the last step
         ),
     ),
     module=Qwen25OActionLITConfig(
         # checkpoint_path=CloudPath.from_str(
-        #     "gs://induction-labs/checkpoints/qwen25o_7B_uninitialized/2025-07-17T23-05-38/step_100"
+        #     "gs://induction-labs/checkpoints/keyboard_typing/2025-07-25T06-21-34.e3nDlMeg/step_50"
         # ),
         model_name="Qwen/Qwen2.5-Omni-7B",
         tokenizer_name="Qwen/Qwen2.5-Omni-7B",
@@ -56,6 +56,8 @@ Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
         freeze_network=False,
         freeze_action_embedding=False,
         freeze_action_head=False,
+        freeze_keyboard_embedding=False,
+        freeze_keyboard_head=False,
         loss_type=Qwen25OActionLITConfig.CursorPredictionLoss.L2_DISTANCE,
         optimizer=OptimizerType.ADAMW,
         # compile=None,
@@ -63,30 +65,38 @@ Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
     ),
     train_datapack=RangeActionDatapackConfig(
         # prefix="gs://induction-labs/jonathan/synth/garbage_cursor_follow_v1/sample_",
-        prefix="gs://induction-labs/jonathan/synth/cursor_follow_v3/sample_",
-        raw_prompt=raw_prompt,
+        # prefix="gs://induction-labs/jonathan/synth/cursor_follow_v3/sample_",
+        # prefix="gs://induction-labs/jonathan/synth/typing_with_keyboard_v3/sample_",
+        prefix="gs://induction-labs/jonathan/synth/typing_with_mouse_paths_v0/sample_",
         # prefix="gs://induction-labs/jonathan/synth/noise_cursor_follow_v1/sample_",
-        end_index=55_000,  # 60k samples
+        raw_prompt=raw_prompt,
+        end_index=3000,  # 60k samples
+        load_keyboard_actions=True,
+        load_cursor_path=True,
     ),
     validation_datapack=RangeActionDatapackConfig(
         # prefix="gs://induction-labs/jonathan/synth/garbage_cursor_follow_v1/sample_",
-        prefix="gs://induction-labs/jonathan/synth/cursor_follow_v3/sample_",
-        raw_prompt=raw_prompt,
+        # prefix="gs://induction-labs/jonathan/synth/cursor_follow_v3/sample_",
+        # prefix="gs://induction-labs/jonathan/synth/typing_with_keyboard_v3/sample_",
+        prefix="gs://induction-labs/jonathan/synth/typing_with_mouse_paths_v0/sample_",
         # prefix="gs://induction-labs/jonathan/synth/noise_cursor_follow_v1/sample_",
-        start_index=55_000,  # 60k samples
-        end_index=60_000,  # 60k samples
+        raw_prompt=raw_prompt,
+        start_index=3000,  # 60k samples
+        end_index=3100,  # 60k samples
+        load_keyboard_actions=True,
+        load_cursor_path=True,
     ),
     run=RunConfig(
         lr=LinearLRSchedule(
-            peak_lr=1e-4,
+            peak_lr=5e-5,
             end_lr=1e-5,
-            warmup_steps=0,
-            end_step=100,  # 10k steps
+            warmup_steps=5,
+            end_step=2000,  # 10k steps
         ),
-        sequence_length=calc_min_num_tokens_for_n_actions(840 * 476, 8, raw_prompt),
+        sequence_length=8192, #calc_min_num_tokens_for_n_actions(840 * 476, 8, raw_prompt),
         batch_size=num_devices,
-        num_steps=2000,
-        validation_every_n_steps=100,
+        num_steps=3000,
+        validation_every_n_steps=5,
         distributed=DistributedConfig(
             devices_per_node=num_devices,
         ),

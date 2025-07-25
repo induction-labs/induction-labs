@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from enum import Enum
+from gc import freeze
 from typing import Any, TypeVar
+from dataclasses import dataclass
 
 import numpy as np
 import torch
@@ -11,6 +13,8 @@ from synapse.actions.mouse_movements import (
     cubics_to_points,
     generate_image_from_segments,
 )
+from transformers.loss.loss_utils import ForCausalLMLoss
+from synapse.actions.keyboard_tokenizer import Tokenizer
 from synapse.utils.logging import configure_logging, logging
 from torch import nn
 from torch.distributed.device_mesh import DeviceMesh
@@ -39,6 +43,8 @@ MODEL_TYPE = Qwen2_5OmniActionModel
 l2_loss = nn.MSELoss(reduce=False)
 
 T = TypeVar("T")
+
+TOKENIZER = Tokenizer.load("gs://induction-labs/common/keyboard_tokenizer_v0.0.1.json")
 
 
 def not_none(value: T | None) -> T:
@@ -118,6 +124,26 @@ def to_numpy_clean(tensor: torch.Tensor, dtype=torch.float32) -> np.ndarray:
     return tensor.to(dtype=dtype, device="cpu").detach().numpy()
 
 
+@dataclass
+class CursorLossOutput:
+    predicted_xs: torch.Tensor | None
+    predicted_ys: torch.Tensor | None
+    actual_xs: torch.Tensor | None
+    actual_ys: torch.Tensor | None
+    output_actions: torch.Tensor | None
+    cursor_path: torch.Tensor | None
+
+    analytical_loss: torch.Tensor | None
+    l2_points_loss: torch.Tensor | None
+    coefficients_loss: torch.Tensor | None
+
+
+@dataclass
+class LossOutput:
+    loss: torch.Tensor
+    cursor_aux: ActionLossOutput | None = None
+
+
 class Qwen25OActionLIT(
     BaseLITModule[MODEL_TYPE, ActionDataSample, "Qwen25OActionLITConfig"]
 ):
@@ -142,6 +168,8 @@ class Qwen25OActionLIT(
             freeze_vision=module_config.freeze_vision,
             freeze_action_head=module_config.freeze_action_head,
             freeze_action_embedding=module_config.freeze_action_embedding,
+            freeze_keyboard_embedding=module_config.freeze_keyboard_embedding,
+            freeze_keyboard_head=module_config.freeze_keyboard_head,
         )
 
         model = MODEL_TYPE(config)
@@ -154,107 +182,143 @@ class Qwen25OActionLIT(
     def run_training_step(self, inputs: ActionDataSample):
         # Forward pass through the model
         outputs = self.model(
-            # cursor_path=inputs.cursor_path,
+            cursor_path=inputs.cursor_path,
             action_tokens=inputs.action_tokens,
+            keyboard_token_mask=inputs.keyboard_tokens_mask,
             **inputs.qwen_inputs.model_dump(),
         )
-        check_nans(outputs.action_outputs, "outputs")
+        if inputs.action_tokens is not None:
+            check_nans(outputs.action_outputs, "outputs")
+        # check_nans(outputs.action_outputs, "outputs")
 
-        (
-            loss,
-            predicted_xs,
-            predicted_ys,
-            actual_xs,
-            actual_ys,
-            output_actions,
-            cursor_path,
-            (analytical_loss, l2_points_loss, coefficients_loss),
-        ) = self.compute_loss(outputs, inputs)
+        outputs = self.compute_loss(outputs, inputs)
 
-        return loss, {
-            "train/analytical_loss": analytical_loss,
-            "train/l2_points_loss": l2_points_loss,
-            "train/coefficients_loss": coefficients_loss,
+        aux_metrics = {}
+
+        if outputs.cursor_aux is not None:
+            cursor_aux = outputs.cursor_aux
+            aux_metrics.update(
+                {
+                    "train/analytical_loss": cursor_aux.analytical_loss,
+                    "train/l2_points_loss": cursor_aux.l2_points_loss,
+                    "train/coefficients_loss": cursor_aux.coefficients_loss,
+                }
+            )
+
+        return outputs.loss, {
+            "train/loss": outputs.loss,
+            **aux_metrics,
         }
 
     def compute_loss(
         self, outputs: Qwen2_5OmniActionCausalLMOutputWithPast, inputs: ActionDataSample
-    ):
+    ) -> LossOutput:
         """
         Compute the loss for the training step.
         This method is called by run_training_step after the forward pass.
         """
-        output_actions = (
-            not_none(outputs.action_outputs)[inputs.action_tokens]
-            .reshape(-1, 2, 3)
-            .to(device=self.device, dtype=self.dtype)
-        )
-        cursor_path = (
-            inputs.cursor_path[inputs.action_tokens]
-            .reshape(-1, 2, 3)
-            .to(device=self.device, dtype=self.dtype)
-        )
+        losses = []
 
-        assert output_actions.shape == cursor_path.shape, (
-            f"Expected output_actions shape {output_actions.shape} to match "
-            f"cursor_path shape {cursor_path.shape}"
-        )
-        actual_xs, actual_ys = (
-            cubics_to_points_torch(coeffs=cursor_path[:, 0, :]),
-            cubics_to_points_torch(coeffs=cursor_path[:, 1, :]),
-        )  # [k, num_points]
-
-        predicted_xs, predicted_ys = (
-            cubics_to_points_torch(coeffs=output_actions[:, 0, :]),
-            cubics_to_points_torch(coeffs=output_actions[:, 1, :]),
-        )
-        num_actions = inputs.action_tokens.sum().item()
-
-        # if inputs.cursor_path is not None:
-        analytical_loss = (
-            analytical_distance(
-                a=output_actions[:, 0, :],
-                b=cursor_path[:, 0, :],
+        cursor_aux = None
+        if inputs.cursor_path is not None and inputs.action_tokens is not None:
+            output_actions = (
+                not_none(outputs.action_outputs)[inputs.action_tokens]
+                .reshape(-1, 2, 3)
+                .to(device=self.device, dtype=self.dtype)
             )
-            + analytical_distance(
-                a=output_actions[:, 1, :],
-                b=cursor_path[:, 1, :],
+            cursor_path = (
+                inputs.cursor_path[inputs.action_tokens]
+                .reshape(-1, 2, 3)
+                .to(device=self.device, dtype=self.dtype)
             )
-        ).sum() / min(num_actions, 1)
 
-        l2_points_loss = (
-            l2_loss(predicted_xs, actual_xs) + l2_loss(predicted_ys, actual_ys)
-        ).sum() / min(num_actions, 1)
-        coefficients_loss = (
-            l2_loss(output_actions[:, 0, :], cursor_path[:, 0, :])
-            + l2_loss(output_actions[:, 1, :], cursor_path[:, 1, :])
-        ).sum() / min(num_actions, 1)
+            assert output_actions.shape == cursor_path.shape, (
+                f"Expected output_actions shape {output_actions.shape} to match "
+                f"cursor_path shape {cursor_path.shape}"
+            )
+            actual_xs, actual_ys = (
+                cubics_to_points_torch(coeffs=cursor_path[:, 0, :]),
+                cubics_to_points_torch(coeffs=cursor_path[:, 1, :]),
+            )  # [k, num_points]
 
-        loss = None
-        match self.module_config.loss_type:
-            case Qwen25OActionLITConfig.CursorPredictionLoss.ANALYTICAL_DISTANCE:
-                loss = analytical_loss.sum()
-            case Qwen25OActionLITConfig.CursorPredictionLoss.L2_DISTANCE:
-                loss = l2_points_loss
-            case Qwen25OActionLITConfig.CursorPredictionLoss.COEFFICIENTS_DISTANCE:
-                loss = coefficients_loss
-            case _:
-                raise ValueError(f"Unknown loss type: {self.module_config.loss_type}")
+            predicted_xs, predicted_ys = (
+                cubics_to_points_torch(coeffs=output_actions[:, 0, :]),
+                cubics_to_points_torch(coeffs=output_actions[:, 1, :]),
+            )
+            num_actions = inputs.action_tokens.sum().item()
 
-        assert isinstance(loss, torch.Tensor), (
-            f"Expected outputs.loss to be a Tensor, got {type(outputs.loss)}"
-        )
+            # if inputs.cursor_path is not None:
+            analytical_loss = (
+                analytical_distance(
+                    a=output_actions[:, 0, :],
+                    b=cursor_path[:, 0, :],
+                )
+                + analytical_distance(
+                    a=output_actions[:, 1, :],
+                    b=cursor_path[:, 1, :],
+                )
+            ).sum() / min(num_actions, 1)
 
-        return (
-            loss,
-            predicted_xs,
-            predicted_ys,
-            actual_xs,
-            actual_ys,
-            output_actions,
-            cursor_path,
-            (analytical_loss, l2_points_loss, coefficients_loss),
-        )
+            l2_points_loss = (
+                l2_loss(predicted_xs, actual_xs) + l2_loss(predicted_ys, actual_ys)
+            ).sum() / min(num_actions, 1)
+            coefficients_loss = (
+                l2_loss(output_actions[:, 0, :], cursor_path[:, 0, :])
+                + l2_loss(output_actions[:, 1, :], cursor_path[:, 1, :])
+            ).sum() / min(num_actions, 1)
+
+            loss = None
+            match self.module_config.loss_type:
+                case Qwen25OActionLITConfig.CursorPredictionLoss.ANALYTICAL_DISTANCE:
+                    loss = analytical_loss.sum()
+                case Qwen25OActionLITConfig.CursorPredictionLoss.L2_DISTANCE:
+                    loss = l2_points_loss
+                case Qwen25OActionLITConfig.CursorPredictionLoss.COEFFICIENTS_DISTANCE:
+                    loss = coefficients_loss
+                case _:
+                    raise ValueError(
+                        f"Unknown loss type: {self.module_config.loss_type}"
+                    )
+
+            assert isinstance(loss, torch.Tensor), (
+                f"Expected outputs.loss to be a Tensor, got {type(outputs.loss)}"
+            )
+
+            losses.append(loss)
+
+            cursor_aux = CursorLossOutput(
+                predicted_xs=predicted_xs,
+                predicted_ys=predicted_ys,
+                actual_xs=actual_xs,
+                actual_ys=actual_ys,
+                output_actions=output_actions,
+                cursor_path=cursor_path,
+                analytical_loss=analytical_loss,
+                l2_points_loss=l2_points_loss,
+                coefficients_loss=coefficients_loss,
+            )
+
+        if inputs.keyboard_tokens_mask is not None:
+            assert outputs.keyboard_outputs is not None, (
+                "Expected outputs.keyboard_outputs to be not None when keyboard_tokens_mask is provided"
+            )
+            input_ids_with_non_keyboard_neg_100 = (
+                inputs.qwen_inputs.input_ids.masked_fill(
+                    ~inputs.keyboard_tokens_mask.bool(), -100
+                )
+            )  # [B, S]
+            token_outputs = outputs.keyboard_outputs
+
+            loss = ForCausalLMLoss(
+                logits=token_outputs,
+                labels=input_ids_with_non_keyboard_neg_100,
+                vocab_size=token_outputs.shape[-1],
+            )
+            losses.append(loss)
+
+        final_loss = torch.stack(losses).sum()
+
+        return LossOutput(loss=final_loss, cursor_aux=cursor_aux)
 
     @classmethod
     def validation_wandb_metrics(
@@ -263,48 +327,103 @@ class Qwen25OActionLIT(
         # First split off "val/image"
 
         metrics = [
-            {k: v for k, v in m.items() if not k.startswith("val/image")}
+            {
+                k: v
+                for k, v in m.items()
+                if not k.startswith("val/image") and not k.startswith("val/tokens")
+            }
             for m in all_metrics
         ]
-        first_val_image = all_metrics[0]["val/image"]
 
-        cursor_path = first_val_image["val/cursor_path"]
-        action_outputs = first_val_image["val/action_outputs"]
+        aux_metrics = {}
+        if all_metrics and "val/image" in all_metrics[0]:
+            first_val_image = all_metrics[0]["val/image"]
 
-        np_predicted_xs, np_predicted_ys = cls.visualize_action(action_outputs)
-        np_actual_xs, np_actual_ys = cls.visualize_action(cursor_path)
+            cursor_path = first_val_image["val/cursor_path"]
+            action_outputs = first_val_image["val/action_outputs"]
 
-        real_image = generate_image_from_segments(
-            np_actual_xs, np_actual_ys, SCREEN_SIZE
-        )
-        predicted_image = generate_image_from_segments(
-            np_predicted_xs, np_predicted_ys, SCREEN_SIZE
-        )
-        table = wandb.Table(
-            columns=["actual", "predicted"],
-            data=[
-                [str(actual), str(predicted)]
-                for actual, predicted in zip(
-                    to_numpy_clean(cursor_path),
-                    to_numpy_clean(action_outputs),
-                    strict=False,
-                )
-            ],
-        )
+            np_predicted_xs, np_predicted_ys = cls.visualize_action(action_outputs)
+            np_actual_xs, np_actual_ys = cls.visualize_action(cursor_path)
+
+            real_image = generate_image_from_segments(
+                np_actual_xs, np_actual_ys, SCREEN_SIZE
+            )
+            predicted_image = generate_image_from_segments(
+                np_predicted_xs, np_predicted_ys, SCREEN_SIZE
+            )
+
+            table = wandb.Table(
+                columns=["actual", "predicted"],
+                data=[
+                    [str(actual), str(predicted)]
+                    for actual, predicted in zip(
+                        to_numpy_clean(cursor_path),
+                        to_numpy_clean(action_outputs),
+                        strict=False,
+                    )
+                ],
+            )
+
+            aux_metrics.update(
+                {
+                    f"val/images/{global_step}": table,
+                    "val/real_image": [wandb.Image(real_image)],
+                    "val/predicted_image": [wandb.Image(predicted_image)],
+                }
+            )
+
+        def output_tokens_as_string(tokens: list[int]) -> str:
+            """
+            Convert a list of token IDs to a string representation.
+            """
+            return "\n".join(
+                TOKENIZER.debug_reverse_mapping(token_id) for token_id in tokens
+            )
+
+        if all_metrics and "val/tokens" in all_metrics[0]:
+            tokens_table = wandb.Table(
+                columns=[
+                    "predicted_tokens",
+                    "predicted_tokens_k2",
+                    "real_tokens",
+                    "predicted_tokens_str",
+                    "predicted_tokens_k2_str",
+                    "real_tokens_str",
+                ],
+                data=[
+                    [
+                        str(m["val/tokens"]["val/predicted_tokens"]),
+                        str(m["val/tokens"]["val/predicted_tokens_k2"]),
+                        str(m["val/tokens"]["val/real_tokens"]),
+                        output_tokens_as_string(
+                            m["val/tokens"]["val/predicted_tokens"]
+                        ),
+                        output_tokens_as_string(
+                            m["val/tokens"]["val/predicted_tokens_k2"]
+                        ),
+                        output_tokens_as_string(m["val/tokens"]["val/real_tokens"]),
+                    ]
+                    for m in all_metrics
+                ],
+            )
+
+            aux_metrics.update(
+                {
+                    f"val/tokens/{global_step}": tokens_table,
+                }
+            )
 
         # Get mean over all metrics
         mean_metrics = {
             k: torch.tensor([m[k] for m in metrics]).mean().item()
             for k in metrics[0]
-            if k != "val/image"
+            if k not in {"val/image", "val/tokens"}
         }
 
         metrics = {
-            f"val/cubics/{global_step}": table,
-            "val/real_image": [wandb.Image(real_image)],
-            "val/predicted_image": [wandb.Image(predicted_image)],
             "val/first_loss": metrics[0].get("val/loss", 0.0),
             **mean_metrics,
+            **aux_metrics,
         }
         return metrics
 
@@ -313,35 +432,71 @@ class Qwen25OActionLIT(
         outputs = self.model(
             cursor_path=inputs.cursor_path,
             action_tokens=inputs.action_tokens,
+            keyboard_token_mask=inputs.keyboard_tokens_mask,
             **inputs.qwen_inputs.model_dump(),
         )
-        (
-            loss,
-            predicted_xs,
-            predicted_ys,
-            actual_xs,
-            actual_ys,
-            output_actions,
-            cursor_path,
-            (analytical_loss, l2_points_loss, coefficients_loss),
-        ) = self.compute_loss(outputs, inputs)
-        action_outputs = outputs.action_outputs[inputs.action_tokens]
-        cursor_path = cursor_path.reshape(-1, 6)
-        return loss, {
-            "val/loss": loss,
-            "val/image": {
-                "val/predicted_xs": predicted_xs,
-                "val/predicted_ys": predicted_ys,
-                "val/actual_xs": actual_xs,
-                "val/actual_ys": actual_ys,
-                "val/output_actions": output_actions,
-                "val/cursor_path": cursor_path,
-                "val/action_tokens": inputs.action_tokens,
-                "val/action_outputs": action_outputs,
-            },
-            "val/analytical_loss": analytical_loss,
-            "val/l2_points_loss": l2_points_loss,
-            "val/coefficients_loss": coefficients_loss,
+        tokens_metrics = {}
+        if inputs.keyboard_tokens_mask is not None:
+            keyboard_logits = outputs.keyboard_outputs[inputs.keyboard_tokens_mask]
+            top2_values, top2_indices = keyboard_logits.topk(2, dim=-1)
+
+            # highest‑value tokens (what you were already doing):
+            keyboard_tokens = top2_indices[:, 0]
+
+            # second‑highest‑value tokens:
+            second_most_likely_logits = top2_indices[:, 1]
+
+            gold_logits = inputs.qwen_inputs.input_ids[inputs.keyboard_tokens_mask]
+            # print(outputs.keyboard_outputs.shape, inputs.keyboard_tokens_mask.shape)
+
+            predicted = to_numpy_clean(keyboard_tokens)
+            real = to_numpy_clean(gold_logits)
+            second_most_likely = to_numpy_clean(second_most_likely_logits)
+            tokens_metrics = {
+                "val/tokens": {
+                    "val/predicted_tokens": predicted,
+                    "val/predicted_tokens_k2": second_most_likely,
+                    "val/real_tokens": real,
+                }
+            }
+
+        # outputs = self.model.generate(
+        #     # cursor_path=inputs.cursor_path,
+        #     # action_tokens=inputs.action_tokens,
+        #     keyboard_token_mask=inputs.keyboard_tokens_mask,
+        #     **inputs.qwen_inputs.model_dump(),
+        # )
+
+        loss_output = self.compute_loss(outputs, inputs)
+
+        cursor_metrics = {}
+        if inputs.action_tokens is not None:
+            action_outputs = outputs.action_outputs[inputs.action_tokens]
+            cursor_aux = loss_output.cursor_aux
+            assert cursor_aux is not None, (
+                "Expected cursor_aux to be not None when action_tokens are provided"
+            )
+            cursor_path = cursor_aux.cursor_path.reshape(-1, 6)
+            cursor_metrics = {
+                "val/image": {
+                    "val/predicted_xs": cursor_aux.predicted_xs,
+                    "val/predicted_ys": cursor_aux.predicted_ys,
+                    "val/actual_xs": cursor_aux.actual_xs,
+                    "val/actual_ys": cursor_aux.actual_ys,
+                    "val/output_actions": cursor_aux.output_actions,
+                    "val/cursor_path": cursor_path,
+                    "val/action_tokens": inputs.action_tokens,
+                    "val/action_outputs": action_outputs,
+                },
+                "val/analytical_loss": cursor_aux.analytical_loss,
+                "val/l2_points_loss": cursor_aux.l2_points_loss,
+                "val/coefficients_loss": cursor_aux.coefficients_loss,
+            }
+
+        return loss_output.loss, {
+            "val/loss": loss_output.loss,
+            **tokens_metrics,
+            **cursor_metrics,
         }
 
     @classmethod
@@ -426,6 +581,8 @@ class Qwen25OActionLITConfig(BaseModuleConfig):
     freeze_vision: bool = False
     freeze_action_head: bool = False
     freeze_action_embedding: bool = False
+    freeze_keyboard_embedding: bool = False
+    freeze_keyboard_head: bool = False
     loss_type: CursorPredictionLoss = CursorPredictionLoss.ANALYTICAL_DISTANCE
 
     def validate_datapack_compatibility(
