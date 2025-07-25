@@ -18,6 +18,9 @@ from modeling.distributed.distributed import TorchUrl, init_distributed
 from modeling.modules.base_module import BaseModuleConfig
 from modeling.utils.check_nans import check_nans
 from modeling.utils.fix_rng import fix_rng
+from modeling.utils.flash_attention import (
+    configure_flash_attention,
+)
 from modeling.utils.typed_remote import (
     BaseActor,
     remote_method,
@@ -138,6 +141,10 @@ class ExperimentActor(BaseActor[ActorArgs]):
         assert not hasattr(self, "state"), (
             "This method should not be called after the actor has been initialized."
         )
+        if self.args.experiment_config.run.attn_impl.is_flash_attention:
+            configure_flash_attention(
+                impl=self.args.experiment_config.run.attn_impl,
+            )
         generator = fix_rng(self.args.experiment_config.run.seed, device=self.device)
 
         self.distributed_context = init_distributed(

@@ -15,7 +15,7 @@ from synapse.utils.logging import configure_logging
 from modeling.config import DistributedConfig, InstanceConfig
 from modeling.config.distributed import MeshAxis
 
-logger = configure_logging(__name__, level=logging.DEBUG)
+logger = configure_logging(__name__, level=logging.INFO)
 
 
 class TorchUrl(AnyUrl):
