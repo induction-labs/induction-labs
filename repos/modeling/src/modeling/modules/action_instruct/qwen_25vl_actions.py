@@ -29,10 +29,11 @@ logger = configure_logging(__name__, level=logging.INFO)
 class Qwen2_5_VLActionConfig(Qwen2_5_VLConfig):
     def __init__(
         self,
-        freeze_network=False,
-        freeze_vision=False,
-        freeze_action_head=False,
-        freeze_action_embedding=False,
+        freeze_network=None,
+        freeze_vision=None,
+        freeze_action_head=None,
+        freeze_action_embedding=None,
+        freeze_mlps=None,
         use_fun_mask=False,
         **kwargs,
     ):
@@ -40,6 +41,7 @@ class Qwen2_5_VLActionConfig(Qwen2_5_VLConfig):
         self.freeze_vision = freeze_vision
         self.freeze_action_head = freeze_action_head
         self.freeze_action_embedding = freeze_action_embedding
+        self.freeze_mlps = freeze_mlps
         self.use_fun_mask = use_fun_mask
 
         super().__init__(**kwargs)
@@ -365,17 +367,26 @@ class Qwen2_5_VLForActionModel(Qwen2_5_VLForConditionalGeneration):
             nn.Linear(hidden_size, 6, bias=False),
         )
 
-        for param in self.parameters():
-            param.requires_grad = not self.config.freeze_network
+        if self.config.freeze_network is not None:
+            for param in self.parameters():
+                param.requires_grad = not self.config.freeze_network
 
-        for param in self.action_head.parameters():
-            param.requires_grad = not self.config.freeze_action_head
+        if self.config.freeze_action_head is not None:
+            for param in self.action_head.parameters():
+                param.requires_grad = not self.config.freeze_action_head
 
-        for param in self.model.action_token_embedding.parameters():
-            param.requires_grad = not self.config.freeze_action_embedding
+        if self.config.freeze_action_embedding is not None:
+            for param in self.model.action_token_embedding.parameters():
+                param.requires_grad = not self.config.freeze_action_embedding
 
-        for param in self.visual.parameters():
-            param.requires_grad = not self.config.freeze_vision
+        if self.config.freeze_vision is not None:
+            for param in self.visual.parameters():
+                param.requires_grad = not self.config.freeze_vision
+
+        if self.config.freeze_mlps is not None:
+            for name, param in self.named_parameters():
+                if "mlp" in name:
+                    param.requires_grad = not self.config.freeze_mlps
 
         self.post_init()
 

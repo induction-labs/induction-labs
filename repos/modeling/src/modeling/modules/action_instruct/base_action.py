@@ -503,12 +503,14 @@ class BaseActionLITConfig(BaseModuleConfig):
         "modeling.modules.action_instruct.base_action.BaseActionLITConfig"
     )
 
-    freeze_network: bool = False
-    freeze_vision: bool = False
-    freeze_action_head: bool = False
-    freeze_action_embedding: bool = False
-    freeze_keyboard_embedding: bool = False
-    freeze_keyboard_head: bool = False
+    freeze_network: bool | None = None
+    freeze_vision: bool | None = None
+    freeze_action_head: bool | None = None
+    freeze_action_embedding: bool | None = None
+    freeze_keyboard_embedding: bool | None = None
+    freeze_keyboard_head: bool | None = None
+    # None to use inherited freeze settings
+    freeze_mlps: bool | None = None
     loss_type: CursorPredictionLoss = CursorPredictionLoss.ANALYTICAL_DISTANCE
     use_fun_mask: bool = False
 

@@ -19,7 +19,7 @@ from modeling.distributed.distributed import TorchUrl, init_distributed
 from modeling.modules.base_module import BaseModuleConfig
 from modeling.utils.check_nans import check_nans
 from modeling.utils.fix_rng import fix_rng
-from modeling.utils.flash_attention import (
+from modeling.utils.flash_attention_utils import (
     configure_flash_attention,
 )
 from modeling.utils.typed_remote import (

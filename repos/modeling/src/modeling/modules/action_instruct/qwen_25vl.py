@@ -74,6 +74,7 @@ class Qwen25VLActionLIT(BaseActiionLIT[MODEL_TYPE, "Qwen25VLActionLITConfig"]):
             freeze_vision=module_config.freeze_vision,
             freeze_action_head=module_config.freeze_action_head,
             freeze_action_embedding=module_config.freeze_action_embedding,
+            freeze_mlps=module_config.freeze_mlps,
             use_fun_mask=module_config.use_fun_mask,
         )
 

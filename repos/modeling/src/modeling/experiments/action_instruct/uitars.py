@@ -31,7 +31,7 @@ raw_prompt = make_raw_prompt(
     processor_config,
     suffix="",
 )
-run_name = "uitars_big_sweep_from_init"
+run_name = "uitars_gpu8_freeze_mlps"
 num_devices = 8
 UITarsActionExperimentConfig_GPU = ExperimentConfig(
     metadata=ExperimentMetadata(
@@ -45,20 +45,20 @@ UITarsActionExperimentConfig_GPU = ExperimentConfig(
             ),
             checkpoint_frequency=0,  # Save every 1000 steps
             checkpoint_first_step=False,  # Save the first step
-            checkpoint_last_step=True,  # Save the last step
+            checkpoint_last_step=False,  # Save the last step
         ),
     ),
     module=Qwen25VLActionLITConfig(
-        checkpoint_path=CloudPath.from_str(
-            "gs://induction-labs/checkpoints/uitars_lr_sweep_22_repro/2025-07-23T23-11-47.Zt48I8vF/step_1000"
-        ),
+        # checkpoint_path=CloudPath.from_str(
+        #     "gs://induction-labs/checkpoints/uitars_lr_sweep_22_repro/2025-07-23T23-11-47.Zt48I8vF/step_1000"
+        # ),
         model_name="ByteDance-Seed/UI-TARS-1.5-7B",
         # tokenizer_name="Qwen/Qwen2.5-Omni-7B",
-        freeze_vision=False,
-        freeze_network=False,
+        freeze_vision=True,
+        freeze_network=True,
         freeze_action_embedding=False,
         freeze_action_head=False,
-        # use_fun_mask=False,
+        freeze_mlps=False,
         loss_type=Qwen25VLActionLITConfig.CursorPredictionLoss.L2_DISTANCE,
         optimizer=OptimizerType.ADAMW,
         # compile=None,
@@ -87,7 +87,7 @@ UITarsActionExperimentConfig_GPU = ExperimentConfig(
     ),
     run=RunConfig(
         lr=LinearLRSchedule(
-            peak_lr=5e-4,
+            peak_lr=1e-3,
             end_lr=1e-5,
             warmup_steps=20,
             end_step=3000,  # 10k steps
@@ -95,7 +95,7 @@ UITarsActionExperimentConfig_GPU = ExperimentConfig(
         sequence_length=calc_min_num_tokens_for_n_actions(
             840 * 476, 8, raw_prompt, processor_config
         ),
-        batch_size=num_devices * 4,
+        batch_size=num_devices * 8,
         num_steps=200,
         validation_every_n_steps=20,
         distributed=DistributedConfig(
@@ -119,13 +119,14 @@ UITarsActionExperimentConfig_CPU = UITarsActionExperimentConfig_GPU.model_copy(
     update={"run": UITarsActionExperimentConfig_GPU.run.cpu_config()}
 )
 UITarsActionSweep = (
-    Sweep(UITarsActionExperimentConfig_GPU).sweep(
-        [True, False],
-        lambda freeze_vision, exp: (
-            exp.module.__setattr__("freeze_vision", freeze_vision),
-            exp,
-        )[-1],
-    )
+    Sweep(UITarsActionExperimentConfig_GPU)
+    # .sweep(
+    #     [True, False],
+    #     lambda freeze_vision, exp: (
+    #         exp.module.__setattr__("freeze_vision", freeze_vision),
+    #         exp,
+    #     )[-1],
+    # )
     # .sweep(
     #     [
     #         None,
@@ -141,7 +142,7 @@ UITarsActionSweep = (
     #         exp,
     #     )[-1],
     # )
-    # .sweep(range(20, 24), Sweep.S.seed)
+    .sweep(range(20, 24), Sweep.S.seed)
     # .sweep(
     #     [
     #         # UITarsActionLITConfig.CursorPredictionLoss.L2_DISTANCE,
