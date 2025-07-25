@@ -251,6 +251,10 @@ class BaseLITModule(ABC, Generic[MODEL_TYPE, DATA_TYPE, CONFIG_TYPE]):
         # sharding in torch is all manual anyways and if we want to support replicate on some params only then
         # we would basically need to rewrite into `torch.distributed.fsdp._fully_shard._fsdp_param.FSDPParam` class
         # the logic of how to handle replicate params and sharded params.
+        # from torch._dynamo.config import ignore_logger_methods
+        # from transformers.utils.logging import logging
+
+        # ignore_logger_methods.add(logging.Logger.warning_once)
 
         # We can only compile *after* sharding and gradient checkpointing, otherwise it doesn't trace through.
         if self.module_config.compile is not None:
@@ -347,7 +351,7 @@ class BaseLITModule(ABC, Generic[MODEL_TYPE, DATA_TYPE, CONFIG_TYPE]):
         with elapsed_timer() as timer:
             loss, metrics = self.run_training_step(inputs)
             loss = self.check_loss(loss)
-            elapsed = timer()
+        elapsed = timer()
 
         # TODO: Add more metrics and logging (steptime, tok/s, etc.)
         memory_metrics = {}
@@ -361,7 +365,7 @@ class BaseLITModule(ABC, Generic[MODEL_TYPE, DATA_TYPE, CONFIG_TYPE]):
             **metrics,
             **memory_metrics,
             "train/loss": loss,
-            "train/step_time": elapsed,
+            "train/step_time/forward": elapsed,
         }
 
         return loss, metrics

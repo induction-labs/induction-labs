@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any, Optional
 
 import torch
 from pydantic import BaseModel
+from synapse.elapsed_timer import elapsed_timer
 from synapse.utils.logging import configure_logging, logging
 from torch.optim import Optimizer
 from transformers.modeling_utils import PreTrainedModel
@@ -141,6 +142,7 @@ class ExperimentActor(BaseActor[ActorArgs]):
         assert not hasattr(self, "state"), (
             "This method should not be called after the actor has been initialized."
         )
+        torch.set_float32_matmul_precision("high")
         if self.args.experiment_config.run.attn_impl.is_flash_attention:
             configure_flash_attention(
                 impl=self.args.experiment_config.run.attn_impl,
@@ -247,36 +249,39 @@ class ExperimentActor(BaseActor[ActorArgs]):
         assert hasattr(self, "state"), (
             "This method should not be called before the actor has been initialized."
         )
-        sample = sample.to_device(self.device)
-        self.module.model.train()
-        self.state.optimizer.zero_grad(set_to_none=True)
 
         # Forward pass
         # with torch.profiler.record_function("training_step"):
-        loss, metrics = self.module.training_step(sample)
+        with elapsed_timer(name="remote_train") as timer:
+            sample = sample.to_device(self.device)
+            self.module.model.train()
+            self.state.optimizer.zero_grad(set_to_none=True)
+            loss, metrics = self.module.training_step(sample)
 
-        # Backward pass
-        # with torch.profiler.record_function("backward"):
-        loss.backward()
-        clip_norm_og = torch.nn.utils.clip_grad_norm_(
-            self.state.module.model.parameters(),
-            self.experiment_config.run.grad_clip or float("inf"),
-        )
-        clip_norm_clipped = min(
-            clip_norm_og.item(), self.experiment_config.run.grad_clip or float("inf")
-        )
+            # Backward pass
+            # with torch.profiler.record_function("backward"):
+            loss.backward()
+            clip_norm_og = torch.nn.utils.clip_grad_norm_(
+                self.state.module.model.parameters(),
+                self.experiment_config.run.grad_clip or float("inf"),
+            )
+            clip_norm_clipped = min(
+                clip_norm_og.item(),
+                self.experiment_config.run.grad_clip or float("inf"),
+            )
 
-        # Update weights
-        # with torch.profiler.record_function("optimizer_step"):
-        self.state.optimizer.step()
-        self.state.lr_scheduler.step()
-        self.state.optimizer.zero_grad(set_to_none=True)
+            # Update weights
+            # with torch.profiler.record_function("optimizer_step"):
+            self.state.optimizer.step()
+            self.state.lr_scheduler.step()
+            self.state.optimizer.zero_grad(set_to_none=True)
 
         # Add learning rate to metrics
         metrics["train/learning_rate"] = self.state.optimizer.param_groups[0]["lr"]
         metrics["train/loss"] = loss.item()
         metrics["train/clip_norm_og"] = clip_norm_og.item()
         metrics["train/clip_norm_clipped"] = clip_norm_clipped
+        metrics["train/step_time"] = timer.elapsed
         # logger.debug(f"Training step completed with loss: {loss.item()}")
         return metrics
 

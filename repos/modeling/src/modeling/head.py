@@ -221,24 +221,28 @@ class ExperimentManager:
             if (
                 val_steps := self.exp_config.run.validation_every_n_steps
             ) >= 1 and step % val_steps == 0:
-                logger.debug(f"Running validation step at {step=}")
-                validation_batch = cast(
-                    list[BaseDataSample], next(validation_dataloader)
-                )
-                all_validation_metrics = await asyncio.gather(
-                    *[
-                        actor.validation_step.remote(data)
-                        for actor, data in zip(
-                            self.state.actors.all_actors, validation_batch, strict=True
-                        )
-                    ]
-                )
-                # Reduce metrics to get mean
-                validation_metrics = module_cls.validation_wandb_metrics(
-                    all_validation_metrics, global_step=step
-                )
+                with elapsed_timer("validation_step") as validation_timer:
+                    logger.debug(f"Running validation step at {step=}")
+                    validation_batch = cast(
+                        list[BaseDataSample], next(validation_dataloader)
+                    )
+                    all_validation_metrics = await asyncio.gather(
+                        *[
+                            actor.validation_step.remote(data)
+                            for actor, data in zip(
+                                self.state.actors.all_actors,
+                                validation_batch,
+                                strict=True,
+                            )
+                        ]
+                    )
+                    # Reduce metrics to get mean
+                    validation_metrics = module_cls.validation_wandb_metrics(
+                        all_validation_metrics, global_step=step
+                    )
+                validation_metrics["validation/head_time"] = validation_timer.elapsed
                 self.wandb_log(validation_metrics, step=step)
-            with elapsed_timer("training_step"):
+            with elapsed_timer("training_step") as training_timer:
                 batch = cast(list[BaseDataSample], next(train_iter))
                 assert isinstance(batch, list), f"{batch=}"
                 assert len(batch) == len(self.state.actors), (
@@ -256,18 +260,24 @@ class ExperimentManager:
                 # Reduce metrics to get mean
 
                 train_metrics = module_cls.training_wandb_metrics(all_train_metrics)
-
-                self.wandb_log(train_metrics, step=step)
-                loss = train_metrics.get("train/loss")
-
-            self.wandb_log({}, step=step, commit=True)
+            train_metrics["train/head_time"] = training_timer.elapsed
+            self.wandb_log(train_metrics, step=step)
+            # logger.info(train_metrics)
+            loss = train_metrics.get("train/loss")
             # TODO: Make this a callback
             if (c := self.exp_config.metadata.checkpoint) and c.should_checkpoint(step):
-                # Save the checkpoint to GCS
-                logger.info(
-                    f"Saving checkpoint at step {step} to {self.exp_config.checkpoint_path}"
+                with elapsed_timer("save_checkpoint") as save_timer:
+                    # Save the checkpoint to GCS
+                    logger.info(
+                        f"Saving checkpoint at step {step} to {self.exp_config.checkpoint_path}"
+                    )
+                    await self.save_checkpoint(suffix=f"step_{step}")
+                self.wandb_log(
+                    {
+                        "checkpoint/save_time": save_timer.elapsed,
+                    }
                 )
-                await self.save_checkpoint(suffix=f"step_{step}")
+            self.wandb_log({}, step=step, commit=True)
             pbar.set_postfix(loss=f"{loss:.4f}")
 
         step = num_steps

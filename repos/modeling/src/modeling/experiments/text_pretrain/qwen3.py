@@ -10,11 +10,12 @@ from modeling.config import (
     RunConfig,
     WandbConfig,
 )
-
-# from modeling.config.distributed import DistributedConfig, ShardingConfig
 from modeling.data.text_train import TextPretrainDatapackConfig
+from modeling.modules.base_module import CompileConfig
 from modeling.modules.text_pretrain.qwen3 import Qwen3LITConfig
 from modeling.types import Accelerator, AttentionImplementation
+
+# from modeling.config.distributed import DistributedConfig, ShardingConfig
 
 Qwen3PretrainExperimentConfig = ExperimentConfig(
     metadata=ExperimentMetadata(
@@ -26,7 +27,7 @@ Qwen3PretrainExperimentConfig = ExperimentConfig(
         model_name="Qwen/Qwen3-4B",
         tokenizer_name="Qwen/Qwen3-4B",
         # activation_checkpointing=None,  # Optional activation checkpointing config
-        # compile=CompileConfig(),  # Uncomment if you want to use compilation
+        compile=CompileConfig(),  # Uncomment if you want to use compilation
     ),
     train_datapack=TextPretrainDatapackConfig(),
     validation_datapack=TextPretrainDatapackConfig(),
