@@ -183,7 +183,8 @@ async def eval_task_with_semaphore(
         attempt_id = uuid.uuid4().hex
         dump_folder = recording_output_folder + "/" + attempt_id
         base_url = create_endpoint((await vms.next())["internal_ip"])
-        async with aiohttp.ClientSession() as session:
+        timeout = aiohttp.ClientTimeout(total=60 * 5)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
             reward, metadata = await evaluate_task(
                 agent,
                 task,
