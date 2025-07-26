@@ -40,9 +40,9 @@ def create_endpoint(internal_ip: str, port: int = 8000) -> str:
 
 
 MODEL_ENDPOINT = (
-    "http://localhost:8000/generate"
+    "http://localhost:8080/generate"
     if not USE_VLLM
-    else "http://localhost:8000/v1/chat/completions"
+    else "http://localhost:8080/v1/chat/completions"
 )
 
 
@@ -83,15 +83,23 @@ async def evaluate_task(
     await asyncio.sleep(1)  # wait for the environment to be ready
 
     logger.debug(f"setting up env {env_id}")
-    reset_res = await reset(session, env_id, task_config=task, base_url=base_url)
-    await start_action_record(
-        session,
-        env_id=env_id,
-        username="evals",
-        output_dir=log_dir,
-        output_bucket="induction-labs-data-ext-mumbai",
-        base_url=base_url,
-    )
+    try:
+        reset_res = await reset(session, env_id, task_config=task, base_url=base_url)
+        await start_action_record(
+            session,
+            env_id=env_id,
+            username="evals",
+            output_dir=log_dir,
+            output_bucket="induction-labs-data-ext-mumbai",
+            base_url=base_url,
+        )
+    except Exception as e:
+        import traceback
+
+        traceback.print_exc()
+        logger.error("Error during environment setup: " + str(e))
+        return "ERROR", metadata
+
     logger.debug(f"finished setting up env {env_id}")
 
     obs = reset_res["obs"]
@@ -249,6 +257,10 @@ async def evaluate_tasks_parallel(
     if not os.path.exists(output_folder):
         os.makedirs(output_folder)
 
+    print(f"got {num_vms} servers, waiting for them to be ready...")
+    await asyncio.sleep(10)
+    print("starting evaluation...")
+
     try:
         semaphore = asyncio.Semaphore(max_concurrent)  # Limit concurrent tasks
         file_lock = asyncio.Lock()  # Ensure thread-safe file operations
@@ -266,7 +278,12 @@ async def evaluate_tasks_parallel(
         ]
         result = await tqdm_asyncio.gather(*tasks)
         return result
-    except KeyboardInterrupt:
+    except Exception:
+        import traceback
+
+        traceback.print_exc()
+
+        print("error, closing vms")
         await asyncio.gather(*[meta_return_vm(vm, META_ENDPOINT) for vm in vm_pool])
 
 
@@ -276,9 +293,19 @@ if __name__ == "__main__":
     date = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
     with open("/home/ubuntu/induction-labs/repos/modeling/solveable_tasks.json") as f:
         tasks = json.load(f)
-        tasks = tasks * 3  # run each task 3 times
+        tasks = tasks * 10  # run each task 5 times
 
     with logging_redirect_tqdm():
+        gpu_count = 8
+        parallel_requests_per_gpu = 9
+        parallel_vms = 3
+
+        concurrent_requests = gpu_count * parallel_requests_per_gpu
+        number_of_osworld_vms = gpu_count * parallel_requests_per_gpu // parallel_vms
+        print(
+            f"starting evaluation with {concurrent_requests} concurrent requests and {number_of_osworld_vms} vms"
+        )
+
         asyncio.run(
             evaluate_tasks_parallel(
                 tasks=tasks,
@@ -292,7 +319,8 @@ if __name__ == "__main__":
                 ),
                 output_folder="osworld_uitars_testing",
                 recording_output_folder=f"testing-task-{date}",
-                max_concurrent=8,
-                num_vms=4,
+                # 4 requests per gpu - i think we can do more
+                max_concurrent=concurrent_requests,
+                num_vms=number_of_osworld_vms,
             )
         )
