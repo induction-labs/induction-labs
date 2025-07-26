@@ -60,6 +60,11 @@ flash-attn = [
   # "flash-attn @ https://github.com/Dao-AILab/flash-attention/releases/download/v2.8.2/flash_attn-2.8.2+cu12torch2.7cxx11abiTRUE-cp312-cp312-linux_x86_64.whl ; sys_platform == 'linux' and platform_machine == 'x86_64'",
   "flash-attn-local ; sys_platform == 'linux' and platform_machine == 'x86_64'",
 ]
+vllm = [
+  "qwen-vl-utils>=0.0.11",
+  "fastapi[standard]>=0.116.1",
+  "vllm>=0.10.0",
+]
 head = ["ray[default,client]"]
 [tool.uv]
 default-groups = ["dev", "head", "k8s", "ssh-required"]
