@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import contextlib
 import os
 import uuid
 from dataclasses import dataclass
@@ -11,6 +12,7 @@ from tqdm.asyncio import tqdm_asyncio
 from tqdm.contrib.logging import logging_redirect_tqdm
 
 from modeling.environments.agents.uitars15 import UITarsAgent
+from modeling.environments.create_osworld_vms import AsyncVMRoundRobin, create_vm_pool
 from modeling.environments.osworld_endpoints import (
     end_action_record,
     evaluate,
@@ -32,6 +34,7 @@ logging.basicConfig(level=logging.INFO)
 logging.getLogger("aiohttp").setLevel(logging.DEBUG)
 USE_VLLM = True
 
+
 META_ENDPOINT = "http://34.136.17.148"
 
 
@@ -46,7 +49,7 @@ MODEL_ENDPOINT = (
 )
 
 
-class AsyncRoundRobin:
+class AsyncRoundRobinLegacy:
     def __init__(self, items):
         self._items = list(items)  # keep a copy
         self._i = 0  # current index
@@ -178,9 +181,11 @@ async def eval_task_with_semaphore(
     output_folder: str,
     recording_output_folder: str,
     file_lock: asyncio.Lock,
-    vms: AsyncRoundRobin,
+    vms: AsyncVMRoundRobin,
     task: dict,
+    task_index: int = 0,
 ):
+    await asyncio.sleep(task_index * 0.01)
     async with semaphore:
         agent = UITarsAgent(
             model_endpoint=MODEL_ENDPOINT,
@@ -250,10 +255,9 @@ async def evaluate_tasks_parallel(
             else:
                 logger.info("Model changed successfully")
 
-    vm_pool = await asyncio.gather(
-        *[meta_get_vm(META_ENDPOINT) for _ in range(num_vms)]
+    vms = await create_vm_pool(
+        num_vms=num_vms,
     )
-    vms = AsyncRoundRobin(vm_pool)
 
     if not os.path.exists(output_folder):
         os.makedirs(output_folder)
@@ -274,18 +278,32 @@ async def evaluate_tasks_parallel(
                 file_lock,
                 vms,
                 task,
+                task_index=i,
             )
-            for task in tasks
+            for i, task in enumerate(tasks)
         ]
         result = await tqdm_asyncio.gather(*tasks)
         return result
     except Exception:
         import traceback
-
         traceback.print_exc()
 
         print("error, closing vms")
-        await asyncio.gather(*[meta_return_vm(vm, META_ENDPOINT) for vm in vm_pool])
+    finally:
+        await vms.cleanup()
+        await cancel_all_tasks()
+
+async def cancel_all_tasks():
+    loop = asyncio.get_running_loop()
+    current = asyncio.current_task()              # don’t cancel ourselves
+    tasks = [t for t in asyncio.all_tasks(loop) if t is not current]
+
+    for t in tasks:
+        t.cancel()
+
+    # Wait for every task to acknowledge the cancellation
+    with contextlib.suppress(asyncio.CancelledError):
+        await asyncio.gather(*tasks, return_exceptions=True)
 
 
 if __name__ == "__main__":
@@ -298,8 +316,11 @@ if __name__ == "__main__":
 
     with logging_redirect_tqdm():
         gpu_count = 8
-        parallel_requests_per_gpu = 9
+        parallel_requests_per_gpu = 12
         parallel_vms = 3
+        # gpu_count = 1
+        # parallel_requests_per_gpu = 1
+        # parallel_vms = 1
 
         concurrent_requests = gpu_count * parallel_requests_per_gpu
         number_of_osworld_vms = gpu_count * parallel_requests_per_gpu // parallel_vms
