@@ -221,6 +221,7 @@ async def eval_task_with_semaphore(
             "reward": reward,
             # "metadata": metadata,
             "output_folder": f"gs://induction-labs-data-ext-mumbai/evals/{dump_folder}",
+            "trajectory_length": len(metadata),
         }
 
         async with file_lock:
