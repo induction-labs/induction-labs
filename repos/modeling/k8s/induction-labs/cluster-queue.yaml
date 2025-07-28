@@ -10,9 +10,9 @@ spec:
         - name: cpu-flavor
           resources:
             - name: cpu
-              nominalQuota: 100
+              nominalQuota: 416 # 208 per node
             - name: memory
-              nominalQuota: 1000Gi
+              nominalQuota: 3000Gi
     - coveredResources: ["nvidia.com/gpu"]
       flavors:
         - name: gpu-flavor
