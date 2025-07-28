@@ -26,7 +26,7 @@ from modeling.utils.cloud_path import CloudPath
 
 processor_config = VideoProcessorConfig.Qwen25VL("ByteDance-Seed/UI-TARS-1.5-7B")
 run_name = "uitars_sft_7b"
-num_devices = 1
+num_devices = 8
 UITarsActionExperimentConfig_GPU = ExperimentConfig(
     metadata=ExperimentMetadata(
         wandb=WandbConfig(project="UITars_7B_sft", name=run_name),
@@ -49,27 +49,32 @@ UITarsActionExperimentConfig_GPU = ExperimentConfig(
         model_name="ByteDance-Seed/UI-TARS-1.5-7B",
         tokenizer_name="ByteDance-Seed/UI-TARS-1.5-7B",
         optimizer=OptimizerType.ADAMW,
+        freeze_vision=True,
     ),
-    train_datapack=VlDatapackConfig(),
-    validation_datapack=VlDatapackConfig(),
+    train_datapack=VlDatapackConfig(
+        dataset_path="gs://induction-labs/jonathan/sampled_trajectories/osworld_uitars_10x_en_5k/samples_correct_expanded_5_under_20_turns_train.jsonl"
+    ),
+    validation_datapack=VlDatapackConfig(
+        dataset_path="gs://induction-labs/jonathan/sampled_trajectories/osworld_uitars_10x_en_5k/samples_correct_expanded_5_under_20_turns_test.jsonl"
+    ),
     run=RunConfig(
         lr=LinearLRSchedule(
-            peak_lr=1e-4,
-            end_lr=1e-5,
+            peak_lr=1e-5,
+            end_lr=5e-6,
             warmup_steps=100,
-            end_step=500,  # 10k steps
+            end_step=750,  # 10k steps
         ),
-        sequence_length=8192,
+        sequence_length=8192 * 2,
         batch_size=num_devices,
-        num_steps=500,
-        validation_every_n_steps=50,
+        num_steps=750,
+        validation_every_n_steps=25,
         distributed=DistributedConfig(
             devices_per_node=num_devices,
         ),
         attn_impl=AttentionImplementation.SDPA,
         accelerator=Accelerator.CUDA,
         precision=DType.bf16,
-        seed=42,
+        seed=52,
     ),
 )
 

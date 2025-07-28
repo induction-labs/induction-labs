@@ -44,7 +44,16 @@ class Qwen25VLActionLIT(BaseLITModule[MODEL_TYPE, VlDataSample, "VlSftLITConfig"
         This method should be implemented by subclasses.
         """
         return self.model(
-            **inputs.model_dump(),
+            **{
+                **inputs.model_dump(),
+                "pixel_values": inputs.pixel_values
+                if inputs.pixel_values.shape[0] != 0
+                else None,
+                "image_grid_thw": inputs.image_grid_thw
+                if inputs.image_grid_thw.shape[0] != 0
+                else None,
+            },
+            use_cache=False,
         )
 
     def run_training_step(self, inputs: VlDataSample):
@@ -53,7 +62,6 @@ class Qwen25VLActionLIT(BaseLITModule[MODEL_TYPE, VlDataSample, "VlSftLITConfig"
         return outputs.loss, {}
 
     def run_validation_step(self, inputs: VlDataSample, global_step: int):
-        # Forward pass through the model
         outputs = self.call_model(inputs)
 
         return outputs.loss, {}
@@ -65,6 +73,8 @@ class Qwen25VLActionLIT(BaseLITModule[MODEL_TYPE, VlDataSample, "VlSftLITConfig"
             self.module_config.model_name,
             trust_remote_code=True,
         )
+        for param in model.model.visual.parameters():
+            param.requires_grad = not self.module_config.freeze_vision
 
         assert isinstance(model, MODEL_TYPE), (
             f"Expected model to be of type Qwen2_5OmniThinkerForActionModelling, "
@@ -114,6 +124,8 @@ class Qwen25VLActionLIT(BaseLITModule[MODEL_TYPE, VlDataSample, "VlSftLITConfig"
 class VlSftLITConfig(BaseModuleConfig):
     config_path: str = "modeling.modules.vl_sft.qwen_25vl.VlSftLITConfig"
     tokenizer_name: str = "Qwen/Qwen2.5-Omni-3B"
+
+    freeze_vision: bool = False
 
     def create_module(
         self,

@@ -289,9 +289,9 @@ class ExperimentActor(BaseActor[ActorArgs]):
         assert hasattr(self, "state"), (
             "This method should not be called before the actor has been initialized."
         )
-        sample = sample.to_device(self.device)
-        self.module.model.eval()
         with torch.no_grad():
+            sample = sample.to_device(self.device)
+            self.module.model.eval()
             metrics = self.module.validation_step(sample)
 
         # Add learning rate to metrics

@@ -137,6 +137,44 @@ def load_turns_gcs(gs_uri: str):
     ]  # mimic .iloc[0:-1]
 
 
+IM_START = 151644  # "<|im_start|>"
+IM_END = 151645  # "<|im_end|>"
+ASSISTANT_ID = 77091  # "assistant"
+
+
+def mask_assistant(token_ids) -> torch.BoolTensor:
+    """
+    Args
+    ----
+    token_ids : 1-D list/LongTensor
+        Full sequence that was fed to the model.
+
+    Returns
+    -------
+    torch.BoolTensor
+        True for every token inside an assistant block, False elsewhere.
+    """
+    ids = torch.as_tensor(token_ids, dtype=torch.long)
+    mask = torch.zeros_like(ids, dtype=torch.bool)
+
+    inside = False
+    i = 0
+    while i < len(ids):
+        # look for "<|im_start|>assistant"
+        if ids[i] == IM_START and i + 1 < len(ids) and ids[i + 1] == ASSISTANT_ID:
+            inside = True
+            mask[i] = mask[i + 1] = True  # include the two-token header
+            i += 2
+            continue
+
+        if inside:
+            mask[i] = True
+            if ids[i] == IM_END:  # end of the assistant turn
+                inside = False
+        i += 1
+    return mask
+
+
 class VlDataset(BaseDataset[VlDataSample, VlDatasetArgs]):
     """
     A PyTorch Dataset for VL model tasks.
@@ -202,43 +240,66 @@ class VlDataset(BaseDataset[VlDataSample, VlDatasetArgs]):
                 ],
             }
         ]
-        for turn in turns:
-            messages.append(
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "image",
-                            "image": "data:image/png;base64," + turn["image"],
-                        }
-                    ],
-                }
-            )
-            messages.append(
-                {
-                    "role": "assistant",
-                    "content": [
-                        {"type": "text", "text": turn["text"]},
-                    ],
-                }
-            )
-
-        # XXX: limit to 5 messages for now
-        messages = messages[:5]
-
-        text = self.processor.apply_chat_template(
-            messages,
-            tokenize=False,
-            add_generation_prompt=True,
+        turn_start, turn_end = (
+            sample.get("text_turns_start", 0),
+            sample.get("text_turns_end", len(turns)),
         )
-        image_inputs, _video_inputs = process_vision_info(messages)
-        inputs = self.processor(
-            text=[text],
-            images=image_inputs,
-            padding="max_length",
-            return_tensors="pt",
-            max_length=self.seq_len,
+        image_turn_start, image_turn_end = (
+            sample.get("image_turns_start", 0),
+            sample.get("image_turns_end", len(turns)),
         )
+
+        for i, turn in enumerate(turns):
+            if image_turn_start <= i < image_turn_end:
+                # only add image if within the range
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "image",
+                                "image": "data:image/png;base64," + turn["image"],
+                            }
+                        ],
+                    }
+                )
+            if turn_start <= i < turn_end:
+                messages.append(
+                    {
+                        "role": "assistant",
+                        "content": [
+                            {"type": "text", "text": turn["text"]},
+                        ],
+                    }
+                )
+
+        try:
+            text = self.processor.apply_chat_template(
+                messages,
+                tokenize=False,
+                add_generation_prompt=False,
+            )
+            image_inputs, _video_inputs = process_vision_info(messages)
+            inputs = self.processor(
+                text=[text],
+                images=image_inputs,
+                padding="max_length",
+                return_tensors="pt",
+                max_length=self.seq_len,
+                truncation=True,
+            )
+        except Exception as e:
+            # throws an error if it truncats at an image boundary. in this case, the completion is useless to us anyways
+            logger.warning(f"Warning, truncated input for {sample['attempt_id']}: {e}")
+            # initialize batch to 0, and the loss to 0
+            inputs = {
+                # fill input_ids with tokenzer.pad_token_id
+                "input_ids": torch.zeros((1, self.seq_len), dtype=torch.long)
+                + self.processor.tokenizer.pad_token_id,
+                "attention_mask": torch.zeros((1, self.seq_len), dtype=torch.long),
+                "pixel_values": torch.Tensor(),
+                "image_grid_thw": torch.Tensor(),
+            }
 
         input_ids = inputs["input_ids"][0]
         attention_mask = inputs["attention_mask"][0]
@@ -247,17 +308,22 @@ class VlDataset(BaseDataset[VlDataSample, VlDatasetArgs]):
         labels = input_ids.clone()
 
         # Mask padding tokens in labels + image tokens
+        unmask_only_last = sample.get("unmask_last_only", False)
         labels[labels == self.processor.tokenizer.pad_token_id] = -100
-        image_tokens = [
-            "<|vision_start|>",
-            "<|vision_end|>",
-            "<|vision_pad|>",
-            "<|image_pad|>",
-            "<|video_pad|>",
-        ]
-        image_token_ids = self.processor.tokenizer.convert_tokens_to_ids(image_tokens)
-        for image_token_id in image_token_ids:
-            labels[labels == image_token_id] = -100
+        assistant_tokens = mask_assistant(input_ids)
+        any_assistant_tokens = assistant_tokens.any()
+        if not any_assistant_tokens:
+            logger.warning(f"No assistant tokens found in {sample['attempt_id']}, ")
+        if unmask_only_last and any_assistant_tokens:
+            prev = torch.cat(
+                [assistant_tokens.new_tensor([False]), assistant_tokens[:-1]]
+            )
+            starts = assistant_tokens & ~prev
+            labels = torch.cumsum(starts, dim=0)
+            last_chunk = labels[assistant_tokens].max()
+            assistant_tokens = assistant_tokens & (labels == last_chunk)
+
+        labels[~assistant_tokens] = -100
 
         return VlDataSample(
             input_ids=input_ids.to(torch.long),
