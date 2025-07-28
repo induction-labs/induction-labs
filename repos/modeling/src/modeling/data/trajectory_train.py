@@ -4,7 +4,7 @@ import asyncio
 import functools
 import json
 import re
-from typing import Any, Self
+from typing import TYPE_CHECKING, Any, Self
 
 import fsspec
 import pandas as pd
@@ -24,6 +24,9 @@ from modeling.config.data import BaseDataSample, BaseDataset
 
 # from modeling.modules.vl_sft.qwen_25vl import VlSftLITConfig
 from modeling.environments.agents.uitars15 import COMPUTER_USE_15, THOUGHT_LONG
+
+if TYPE_CHECKING:
+    from modeling.modules.vl_sft.qwen_25vl import VlSftLITConfig
 
 
 @functools.lru_cache(maxsize=1)
@@ -346,14 +349,16 @@ class VlDatapackConfig(DatapackConfig[VlDataSample]):
 
     def validate_module_compatibility(
         self, module_config: ModuleConfig[Any]
-    ):  # -> VlSftLITConfig[Any]:
+    ) -> VlSftLITConfig:
         """
         Validate that the Lightning module is compatible with the data module.
         This method should be implemented by subclasses to perform any necessary checks.
         """
-        # assert isinstance(module_config, VlSftLITConfig), (
-        #     "VlDatapackConfig can only be used with VlSftConfig."
-        # )
+        from modeling.modules.vl_sft.qwen_25vl import VlSftLITConfig
+
+        assert isinstance(module_config, VlSftLITConfig), (
+            "VlDatapackConfig can only be used with VlSftConfig."
+        )
         return module_config
 
     async def _init_dataset(self, full_config: ExperimentConfig) -> VlDataset:

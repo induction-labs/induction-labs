@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, TypeVar
+from typing import TypeVar
 
 from synapse.utils.logging import configure_logging, logging
 from torch.distributed.device_mesh import DeviceMesh
@@ -11,13 +11,12 @@ from transformers.models.qwen2_5_vl.modeling_qwen2_5_vl import (
 )
 
 from modeling.config import (
-    DatapackConfig,
     InstanceConfig,
     RunConfig,
 )
 from modeling.config.distributed import MeshAxis
-from modeling.data.trajectory_train import VlDatapackConfig, VlDataSample
-from modeling.modules.base_module import BaseLITModule, BaseModuleConfig
+from modeling.data.trajectory_train import VlDataSample
+from modeling.modules.vl_sft.base import BaseVlSft, VlSftActionLITConfig
 from modeling.utils.class_property import class_property
 
 logger = configure_logging(__name__, level=logging.DEBUG)
@@ -27,7 +26,7 @@ T = TypeVar("T")
 MODEL_TYPE = Qwen2_5_VLForConditionalGeneration
 
 
-class Qwen25VLActionLIT(BaseLITModule[MODEL_TYPE, VlDataSample, "VlSftLITConfig"]):
+class Qwen25VLActionLIT(BaseVlSft[MODEL_TYPE, "VlSftLITConfig"]):
     """
     Qwen-2.5O Lightning Module for text pretraining.
     Inherits from TextPretrainLIT and uses the Qwen-2.5O model.
@@ -55,16 +54,6 @@ class Qwen25VLActionLIT(BaseLITModule[MODEL_TYPE, VlDataSample, "VlSftLITConfig"
             },
             use_cache=False,
         )
-
-    def run_training_step(self, inputs: VlDataSample):
-        outputs = self.call_model(inputs)
-
-        return outputs.loss, {}
-
-    def run_validation_step(self, inputs: VlDataSample, global_step: int):
-        outputs = self.call_model(inputs)
-
-        return outputs.loss, {}
 
     def init_model_meta(
         self,
@@ -121,7 +110,7 @@ class Qwen25VLActionLIT(BaseLITModule[MODEL_TYPE, VlDataSample, "VlSftLITConfig"
         )
 
 
-class VlSftLITConfig(BaseModuleConfig):
+class VlSftLITConfig(VlSftActionLITConfig):
     config_path: str = "modeling.modules.vl_sft.qwen_25vl.VlSftLITConfig"
     tokenizer_name: str = "Qwen/Qwen2.5-Omni-3B"
 
@@ -137,11 +126,3 @@ class VlSftLITConfig(BaseModuleConfig):
     @classmethod
     def module_cls(cls) -> type[Qwen25VLActionLIT]:
         return Qwen25VLActionLIT
-
-    def validate_datapack_compatibility(
-        self, datapack_config: DatapackConfig[Any]
-    ) -> VlDatapackConfig:
-        assert isinstance(datapack_config, VlDatapackConfig), (
-            f"Expected {datapack_config=} to be of type VlDatapackConfig"
-        )
-        return datapack_config

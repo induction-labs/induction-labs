@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from abc import abstractmethod
-from typing import Any, TypeVar
+from typing import Any
 
 from synapse.utils.logging import configure_logging, logging
 from torch import nn
@@ -20,8 +20,6 @@ logger = configure_logging(__name__, level=logging.DEBUG)
 
 l2_loss = nn.MSELoss(reduce=False)
 
-T = TypeVar("T")
-
 
 class BaseVlSft[ModelType: PreTrainedModel, ConfigType: "VlSftActionLITConfig"](
     BaseLITModule[ModelType, VlDataSample, ConfigType]
@@ -39,12 +37,17 @@ class BaseVlSft[ModelType: PreTrainedModel, ConfigType: "VlSftActionLITConfig"](
 
     def run_training_step(self, inputs: VlDataSample):
         outputs = self.call_model(inputs)
+        assert outputs.loss is not None, (
+            f"Expected model outputs to contain a loss, but got {outputs=}"
+        )
 
         return outputs.loss, {}
 
     def run_validation_step(self, inputs: VlDataSample, global_step: int):
-        # Forward pass through the model
         outputs = self.call_model(inputs)
+        assert outputs.loss is not None, (
+            f"Expected model outputs to contain a loss, but got {outputs=}"
+        )
 
         return outputs.loss, {}
 

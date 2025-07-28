@@ -51,7 +51,6 @@ Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
         #     "gs://induction-labs/checkpoints/keyboard_typing/2025-07-25T06-21-34.e3nDlMeg/step_50"
         # ),
         # model_name="Qwen/Qwen2.5-Omni-3B",
-        tokenizer_name="Qwen/Qwen2.5-Omni-7B",
         freeze_vision=False,
         freeze_network=False,
         freeze_action_embedding=False,
