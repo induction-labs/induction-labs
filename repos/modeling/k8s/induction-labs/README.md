@@ -1,5 +1,9 @@
 # K8s Setup
-
+```sh
+kubectl version
+# Server Version: v1.32.4
+# Server Version: v1.32.3+rke2r1
+```
 
 ## Hyperbolic
 
