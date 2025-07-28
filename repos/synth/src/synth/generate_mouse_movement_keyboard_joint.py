@@ -6,15 +6,21 @@ import random
 from fractions import Fraction
 from functools import partial
 from multiprocessing import Pool, set_start_method
+from pathlib import Path
 
 import numpy as np
 import tensorstore as ts
 import torch
 from google.cloud import storage
 from PIL import Image, ImageDraw, ImageFont
+from synapse import Cubic
 from synapse.actions.keyboard_press import keys_to_tokens
 from synapse.actions.keyboard_tokenizer import Tokenizer
 from synapse.actions.models import Action
+from synapse.actions.mouse_movements import (
+    cubics_to_points,
+    generate_image_from_segments,
+)
 from synapse.video_loader.typess import (
     FramesMetadata,
     StreamMetadata,
@@ -27,7 +33,7 @@ from synapse.video_loader.zarr_utils import (
     append_batch,
     create_zarr_array,
 )
-from tqdm.auto import tqdm  # one bar in the main process
+from tqdm.auto import tqdm
 
 # QWERTY proximity map for realistic inter-key timing
 _POS = {
@@ -47,7 +53,6 @@ def _key_dist(a, b):
     return 1.0
 
 
-# map space for logging
 def _map_key(ch):
     return "space" if ch == " " else ch
 
@@ -76,16 +81,59 @@ _SHIFT_KEY_MAP = {
     "?": "/",
 }
 
+OVERLAY = Image.open(
+    Path(__file__).parent / ".." / ".." / "assets" / "default.png"
+).convert("RGBA")
 
-def generate_typing_video(
+SCREEN_SIZE = smart_resize(854, 480, factor=28, min_pixels=0, max_pixels=854 * 480)
+
+tokenizer = Tokenizer.load("gs://induction-labs/common/keyboard_tokenizer_v0.0.1.json")
+
+
+def sample_cubics(n: int, delta: float) -> tuple[float, list[Cubic]]:
+    num_cubics = n
+    start_position = random.uniform(0, 1)
+    current_position = start_position
+    current_cubics = []
+    for _ in range(num_cubics):
+        permissible_range = [-current_position, 1 - current_position]
+
+        def generate_cubic(perm_range=permissible_range):
+            return Cubic(
+                m=random.uniform(-delta, delta),
+                n=random.uniform(-delta, delta),
+                a=random.uniform(perm_range[0], perm_range[1]),
+            )
+
+        cubic = generate_cubic()
+        test_vals = np.linspace(0, 1, 10)
+        results = np.array([cubic(val) for val in test_vals])
+        min_results = np.min(results)
+        max_results = np.max(results)
+
+        while min_results + current_position < 0 or max_results + current_position > 1:
+            cubic = generate_cubic()
+            results = np.array([cubic(val) for val in test_vals])
+            min_results = np.min(results)
+            max_results = np.max(results)
+
+        current_position += float(cubic(1))
+        current_cubics.append(cubic)
+
+    return start_position, current_cubics
+
+
+def generate_typing_video_with_mouse_paths(
     text: str,
-    fps: int = 10,
+    fps: int = 4,
     speed: float = 3.0,
     frame_size=(480, 854),
     font_path=None,
     font_size=24,
     random_position: bool = True,
     seed=None,
+    n_mouse_segments: int | None = None,
+    mouse_delta: float | None = None,
     # timing parameters (mu, sigma for log-normal)
     hold_mu=-2.0,
     hold_sigma=0.5,
@@ -97,10 +145,14 @@ def generate_typing_video(
     min_gap_factor=0.5,
 ):
     """
+    Generate a video with keyboard typing and mouse movement paths overlaid.
+
     Returns:
       video: np.ndarray of shape (n_frames, H, W, 3)
       key_logs: list of {"action": {...}, "timestamp": ...} dicts
       frame_times: list of frame timestamps
+      x_cubics: list of Cubic objects for x mouse movements
+      y_cubics: list of Cubic objects for y mouse movements
     """
     if seed is not None:
         random.seed(seed)
@@ -126,8 +178,8 @@ def generate_typing_video(
     else:
         x0, y0 = 10, 10
 
-    # 1) Simulate press/release events
-    raw_events = []  # (time, key, is_down)
+    # 1) Simulate keyboard press/release events
+    raw_events = []
     release_times = []
     t = 0.0
     prev = None
@@ -136,14 +188,12 @@ def generate_typing_video(
         key_name = _map_key(ch)
         needs_shift = ch.isupper() or ch in _SHIFT_KEY_MAP
 
-        # -- press phase --
         if needs_shift:
             raw_events.append((t, "shift", True))
             raw_events.append((t, ch, True))
         else:
             raw_events.append((t, key_name, True))
 
-        # -- compute hold duration --
         mu, sig = (
             (space_hold_mu, space_hold_sigma) if ch == " " else (hold_mu, hold_sigma)
         )
@@ -151,19 +201,14 @@ def generate_typing_video(
         hold = max(0.02, min(raw, 1.0)) / speed
         key_release = t + hold
 
-        # -- release phase: shift always released mid-hold, then key up --
         if needs_shift:
             if random.random() < 0.5:
-                # release shift halfway through hold
                 shift_rel = t + hold * 0.5
                 raw_events.append((shift_rel, "shift", False))
-                # then release the character key (lowercase for letters, mapped for symbols)
                 rel_key = ch.lower() if ch.isalpha() else _SHIFT_KEY_MAP[ch]
                 raw_events.append((key_release, rel_key, False))
                 release_times.append(key_release)
             else:
-                # release character key first, then shift
-                # this means we don't need to map the character key
                 raw_events.append((key_release - 0.005, key_name, False))
                 raw_events.append((key_release, "shift", False))
                 release_times.append(key_release)
@@ -173,7 +218,6 @@ def generate_typing_video(
 
         t += hold
 
-        # -- inter-key gap --
         if ch != text[-1]:
             base = random.lognormvariate(gap_mu, gap_sigma)
             if ch == " ":
@@ -186,32 +230,87 @@ def generate_typing_video(
 
     total_time = t
 
-    # 2) Build frame timestamps (include final moment)
-    frame_times = list(np.arange(0, total_time, 1 / fps))
-    if frame_times[-1] < total_time:
-        frame_times.append(total_time)
+    # 2) Generate mouse movement data
+    if n_mouse_segments is None:
+        n_mouse_segments = random.randrange(5, 12)
+    if mouse_delta is None:
+        mouse_delta = random.uniform(0.1, 1)
 
-    # 3) Render frames
-    frames = []
-    for tf in frame_times:
-        typed = sum(1 for rt in release_times if rt <= tf)
-        img = Image.new("RGB", (W, H), (30, 30, 30))
+    (x_start, x_cubics), (y_start, y_cubics) = (
+        sample_cubics(n_mouse_segments, mouse_delta),
+        sample_cubics(n_mouse_segments, mouse_delta),
+    )
+
+    # Generate mouse path image
+    ts_path, all_poly_x_path, all_poly_y_path = cubics_to_points(
+        x_start, y_start, x_cubics, y_cubics
+    )
+    mouse_path_image = generate_image_from_segments(
+        all_poly_x_path, all_poly_y_path, (W, H)
+    ).convert("RGB")
+
+    # Generate cursor positions for each frame
+    ts_cursor, all_poly_x_cursor, all_poly_y_cursor = cubics_to_points(
+        x_start, y_start, x_cubics, y_cubics, fps=fps, x_points=np.array([0, 0.5])
+    )
+
+    # 3) Extend mouse timeline to match keyboard timeline if needed
+    keyboard_frame_times = list(np.arange(0, total_time, 1 / fps))
+    if keyboard_frame_times[-1] < total_time:
+        keyboard_frame_times.append(total_time)
+
+    # Extend cursor positions if keyboard is longer than mouse movement
+    extended_ts_cursor = list(ts_cursor)
+    extended_x_cursor = list(all_poly_x_cursor)
+    extended_y_cursor = list(all_poly_y_cursor)
+
+    if len(keyboard_frame_times) > len(ts_cursor):
+        # Pad with stationary cursor at last position
+        last_x = all_poly_x_cursor[-1] if len(all_poly_x_cursor) > 0 else 0.5
+        last_y = all_poly_y_cursor[-1] if len(all_poly_y_cursor) > 0 else 0.5
+
+        for i in range(len(ts_cursor), len(keyboard_frame_times)):
+            extended_ts_cursor.append(keyboard_frame_times[i])
+            extended_x_cursor.append(last_x)
+            extended_y_cursor.append(last_y)
+
+    # Use the extended timeline
+    frame_times = extended_ts_cursor
+
+    # 4) Generate frames like the original code
+    cursor_frames = []
+    for time, x, y in zip(
+        extended_ts_cursor, extended_x_cursor, extended_y_cursor, strict=False
+    ):
+        img = mouse_path_image.copy()
         draw = ImageDraw.Draw(img)
-        # draw full text faded
-        draw.text((x0, y0), text, font=font, fill=(100, 100, 100))
-        # overlay typed portion
+
+        # Calculate how much text should be typed based on time
+        typed = sum(1 for rt in release_times if rt <= time)
+
+        # Draw text directly on the image - simple black text
+        # Draw full text in light gray
+        draw.text((x0, y0), text, font=font, fill=(150, 150, 150))
+
+        # Draw typed portion in black
         if typed > 0:
-            draw.text((x0, y0), text[:typed], font=font, fill=(200, 200, 200))
-        frames.append(np.array(img))
+            draw.text((x0, y0), text[:typed], font=font, fill=(0, 0, 0))
 
-    # copy the first frame once
-    frames.insert(0, frames[0].copy())
+        # Add cursor at current position
+        cursor_x = int(x * W)
+        cursor_y = int(y * H)
+        img.paste(OVERLAY, (cursor_x, cursor_y), OVERLAY)
 
-    video = np.stack(frames, 0)  # shape (n_frames, H, W, 3)
+        cursor_frames.append(img)
 
-    frame_times = [0.0, *frame_times]  # start with 0 timestamp
+    # Convert to numpy arrays like original: [first_frame, *frames][:, :, :, :3]
+    frames = [np.array(frame) for frame in cursor_frames]
+    video_frames = np.array([frames[0], *frames])[:, :, :, :3]
 
-    # 4) Format key logs
+    # Frame times with doubled first frame
+    frame_times = [0.0, *frame_times]
+
+    # 5) Format key logs
     key_logs = []
     for t, key, is_down in sorted(raw_events, key=lambda e: e[0]):
         key_logs.append(
@@ -221,19 +320,34 @@ def generate_typing_video(
             }
         )
 
-    return video, key_logs, frame_times
+    # Pad mouse cubic actions with zero coefficients if needed
+    number_of_actions = video_frames.shape[0] // 2
+    if number_of_actions > len(x_cubics):
+        # Add zero coefficient cubics for the extended timeline
+        from synapse import Cubic
 
+        zero_cubic = Cubic(m=0.0, n=0.0, a=0.0)
+        padded_x_cubics = list(x_cubics)
+        padded_y_cubics = list(y_cubics)
 
-with open("texts.txt") as f:
-    texts = f.read().splitlines()
+        padding_needed = number_of_actions - len(x_cubics)
+        for _ in range(padding_needed):
+            padded_x_cubics.append(zero_cubic)
+            padded_y_cubics.append(zero_cubic)
+    else:
+        padded_x_cubics = x_cubics
+        padded_y_cubics = y_cubics
 
-SCREEN_SIZE = smart_resize(854, 480, factor=28, min_pixels=0, max_pixels=854 * 480)
-
-tokenizer = Tokenizer.load("gs://induction-labs/common/keyboard_tokenizer_v0.0.1.json")
+    return video_frames, key_logs, frame_times, padded_x_cubics, padded_y_cubics
 
 
 async def upload_sample(
-    imgs: np.ndarray, actions: list[dict], output_path: str, frame_time: list[float]
+    imgs: np.ndarray,
+    actions: list[dict],
+    output_path: str,
+    frame_time: list[float],
+    x_cubics: list[Cubic],
+    y_cubics: list[Cubic],
 ):
     output_meta = FramesMetadata(
         fps=Fraction(4),
@@ -276,19 +390,15 @@ async def upload_sample(
     timestamps_array = await create_zarr_array(
         ZarrArrayAttributes(
             chunk_shape=(stream_metadata.output_video.total_frames,),
-            shape=(
-                stream_metadata.output_video.total_frames,
-            ),  # Start with 0 timestamps
+            shape=(stream_metadata.output_video.total_frames,),
             dtype=ts.uint64,
             path=output_path + "/timestamps",
         ),
     )
 
+    # Keyboard tokens
     MAX_TOKENS = 24
-    tokens_shape = (
-        stream_metadata.output_video.total_frames // 2,
-        MAX_TOKENS,  # Assuming max 32 tokens per frame
-    )
+    tokens_shape = (stream_metadata.output_video.total_frames // 2, MAX_TOKENS)
     tokens_array = await create_zarr_array(
         ZarrArrayAttributes(
             chunk_shape=tokens_shape,
@@ -306,14 +416,29 @@ async def upload_sample(
         ),
     )
 
+    # Mouse cursor actions
+    assert len(x_cubics) == len(y_cubics)
+    cursor_actions_array = await create_zarr_array(
+        ZarrArrayAttributes(
+            chunk_shape=(len(x_cubics), 2, 3),
+            shape=(len(x_cubics), 2, 3),
+            dtype=ts.float32,
+            path=output_path + "/cursor_action",
+            metadata={
+                "frames_per_action_step": 2,
+            },
+        ),
+    )
+
+    # Upload key actions as JSONL
     key_actions_jsonl_path = output_path + "/key_actions.jsonl"
     key_actions_jsonl = "\n".join(json.dumps(action) for action in actions)
     storage.Client().bucket(key_actions_jsonl_path[5:].split("/", 1)[0]).blob(
         key_actions_jsonl_path[5:].split("/", 1)[1]
     ).upload_from_string(key_actions_jsonl, content_type="application/json")
 
+    # Process keyboard tokens
     tokens = [Action(**action) for action in actions]
-    # print(frame_time[::2])
     result = keys_to_tokens(
         tokens,
         frame_time[1::2],
@@ -323,9 +448,6 @@ async def upload_sample(
         press_threshold=0.15,
     )
 
-    # print(result)
-    # print("\n\n".join([debug_actions(line[0], tokenizer) for line in result]))
-    # print(len(frame_time))
     def pad_tokens(tokens, max_len):
         return tokens + [tokenizer.mappings["[pad]"]] * (max_len - len(tokens))
 
@@ -335,7 +457,16 @@ async def upload_sample(
     ]
     tokenized_tensors = torch.tensor(result_padded, dtype=torch.uint16)
     pad_mask_array = torch.tensor(pad_mask, dtype=torch.bool)
-    # print("\n\n".join([debug_actions(line, tokenizer) for line in tokenized_tensors]))
+
+    # Process cursor actions
+    cursor_actions = torch.Tensor(
+        np.array(
+            [
+                [x.to_ndarray(), y.to_ndarray()]
+                for x, y in zip(x_cubics, y_cubics, strict=False)
+            ]
+        )
+    )
 
     imgs_zarr_trans = torch.from_numpy(imgs).permute(0, 3, 1, 2)
     await asyncio.gather(
@@ -346,25 +477,30 @@ async def upload_sample(
             ),
             append_batch(tokens_array, tokenized_tensors, 0),
             append_batch(zarr_pad_mask_array, pad_mask_array, 0),
+            append_batch(cursor_actions_array, cursor_actions, 0),
         ]
     )
 
 
 async def generate_sample(sem: asyncio.Semaphore, text: str, output_path: str):
     async with sem:
-        vid, keys, frame_time = generate_typing_video(
-            text,
-            fps=4,
-            font_path="/home/jonathan_inductionlabs_com/induction-labs/repos/synth/assets/arial.ttf",
-            speed=3,
-            random_position=True,
-            frame_size=(SCREEN_SIZE[1], SCREEN_SIZE[0]),
+        vid, keys, frame_time, x_cubics, y_cubics = (
+            generate_typing_video_with_mouse_paths(
+                text,
+                fps=4,
+                font_path="/home/jonathan_inductionlabs_com/induction-labs/repos/synth/assets/arial.ttf",
+                speed=3,
+                random_position=True,
+                frame_size=(SCREEN_SIZE[1], SCREEN_SIZE[0]),
+            )
         )
         await upload_sample(
             imgs=vid,
             actions=keys,
             output_path=output_path,
             frame_time=frame_time,
+            x_cubics=x_cubics,
+            y_cubics=y_cubics,
         )
 
 
@@ -373,7 +509,7 @@ with open("texts.txt") as f:
 
 
 async def _batch(start: int, tpl: str, width: int = 4):
-    sem = asyncio.Semaphore(width)  # 4 concurrent tasks *inside* one process
+    sem = asyncio.Semaphore(width)
     await asyncio.gather(
         *(
             generate_sample(sem, TEXTS[i], tpl.format(i=i))
@@ -383,12 +519,11 @@ async def _batch(start: int, tpl: str, width: int = 4):
 
 
 def worker(start: int, tpl: str, width: int = 4):
-    asyncio.run(_batch(start, tpl, width))  # each process owns its own loop
+    asyncio.run(_batch(start, tpl, width))
 
 
-# ── driver ───────────────────────────────────────────────────────────
 def run_all(total: int, tpl: str, n_proc: int = 6, width: int = 4):
-    starts = range(0, total, width)  # one “batch” every <width> indices
+    starts = range(0, total, width)
     with Pool(n_proc) as pool:
         for _ in tqdm(
             pool.imap_unordered(partial(worker, tpl=tpl, width=width), starts),
@@ -397,31 +532,15 @@ def run_all(total: int, tpl: str, n_proc: int = 6, width: int = 4):
             pass
 
 
-# ── entry-point ──────────────────────────────────────────────────────
 if __name__ == "__main__":
     import contextlib
 
-    # asyncio.run(_batch(
-    #     start=0,
-    #     tpl="gs://induction-labs/jonathan/synth/typing_v0/sample_{i}.zarr",
-    # ))
-
-    with contextlib.suppress(
-        RuntimeError
-    ):  # makes the script work on Windows & macOS ≥3.8 too
+    with contextlib.suppress(RuntimeError):
         set_start_method("spawn")
 
     run_all(
-        len(TEXTS),
-        "gs://induction-labs/jonathan/synth/typing_with_keyboard_v4_24/sample_{i}.zarr",
+        len(TEXTS) // 4,
+        "gs://induction-labs/jonathan/synth/typing_with_mouse_paths_v0/sample_{i}.zarr",
         n_proc=16,
         width=4,
     )
-    # print(TEXTS[0])
-    # import random
-    # value = random.randrange(10000)
-    # asyncio.run(generate_sample(
-    #     sem=asyncio.Semaphore(4),
-    #     text=TEXTS[0],
-    #     output_path=f"gs://induction-labs/jonathan/synth/typing_test/sample_{value}.zarr"
-    # ))
