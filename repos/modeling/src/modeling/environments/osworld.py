@@ -1,7 +1,7 @@
 import asyncio
+import contextlib
 import json
 import logging
-import contextlib
 import os
 import uuid
 from dataclasses import dataclass
@@ -16,8 +16,6 @@ from modeling.environments.create_osworld_vms import AsyncVMRoundRobin, create_v
 from modeling.environments.osworld_endpoints import (
     end_action_record,
     evaluate,
-    meta_get_vm,
-    meta_return_vm,
     reset,
     start_action_record,
     start_env,
@@ -121,6 +119,14 @@ async def evaluate_task(
                     "text": model_text,
                 }
             )
+            bad_states = ["INTERNAL_FAIL", "PARSE_FAIL"]
+            if outputted_action[0] in bad_states:
+                logger.error(
+                    f"Agent returned bad state {outputted_action[0]} at step {step}, stopping evaluation."
+                )
+                reward = outputted_action[0]
+                break
+
             logger.debug(f"step {step} | output {model_text}\n---")
             logger.debug(f"outputted action: {outputted_action[0]}")
             if outputted_action[0] in ["DONE", "FAIL"]:
@@ -150,15 +156,16 @@ async def evaluate_task(
         traceback.print_exc()
         logger.error("Error ending action record: " + str(e))
 
-    try:
-        eval_result = await evaluate(session, env_id, base_url=base_url)
-        reward = eval_result["evaluation"]
-    except Exception as e:
-        import traceback
+    if not isinstance(reward, str):
+        try:
+            eval_result = await evaluate(session, env_id, base_url=base_url)
+            reward = eval_result["evaluation"]
+        except Exception as e:
+            import traceback
 
-        traceback.print_exc()
-        logger.error("Error during evaluation: " + str(e))
-        reward = "ERROR"
+            traceback.print_exc()
+            logger.error("Error during evaluation: " + str(e))
+            reward = "ERROR"
 
     metadata.append(
         {
@@ -286,6 +293,7 @@ async def evaluate_tasks_parallel(
         return result
     except Exception:
         import traceback
+
         traceback.print_exc()
 
         print("error, closing vms")
@@ -293,9 +301,10 @@ async def evaluate_tasks_parallel(
         await vms.cleanup()
         await cancel_all_tasks()
 
+
 async def cancel_all_tasks():
     loop = asyncio.get_running_loop()
-    current = asyncio.current_task()              # don’t cancel ourselves
+    current = asyncio.current_task()  # don't cancel ourselves
     tasks = [t for t in asyncio.all_tasks(loop) if t is not current]
 
     for t in tasks:

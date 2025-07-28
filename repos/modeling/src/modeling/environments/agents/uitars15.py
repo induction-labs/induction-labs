@@ -929,7 +929,7 @@ class UITarsAgent:
                 self.logger.error(
                     "Reach max retry times to fetch response from client, as error flag."
                 )
-                return prediction, ["FAIL"]
+                return prediction, ["INTERNAL_FAIL"]
 
             try:
                 prediction = await self.inference(messages)
@@ -984,7 +984,7 @@ class UITarsAgent:
 
         except Exception as e:
             self.logger.error(f"Parsing action error: {prediction}, with error:\n{e}")
-            return prediction, ["FAIL"]
+            return prediction, ["PARSE_FAIL"]
 
         thoughts = ""
         for parsed_response in parsed_dict:
