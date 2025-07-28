@@ -25,6 +25,9 @@ dependencies = [
   "einops>=0.8.1",
   "synapse",
   "nvidia-cutlass-dsl>=4.1.0",
+  "qwen-vl-utils>=0.0.11",
+  "fsspec[gcs]>=2025.3.0",
+  "google-cloud-storage>=3.2.0",
 ]
 [project.scripts]
 mdl = "modeling.main:app"

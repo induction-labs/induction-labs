@@ -94,7 +94,7 @@ kubectl get jobs -o jsonpath='{range .items[?(@.status.failed>0)].metadata}{.nam
 kubectl get jobs -o jsonpath='{range .items[?(@.status.active>0)].metadata}{.name}{"\n"}{end}'
 # Queued jobs
 kubectl get jobs -o jsonpath='{range .items[?(@.spec.suspend==true)].metadata}{.name}{"\n"}{end}'
-
+kubectl exec -n induction-labs -it modeling-7fc4bd8965-p2bzz -- /bin/bash
 
 # Delete failed jobs
 kubectl get jobs -o jsonpath='{range .items[?(@.status.failed>0)].metadata}{.name}{"\n"}{end}' |

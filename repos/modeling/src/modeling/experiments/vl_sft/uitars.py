@@ -13,29 +13,23 @@ from modeling.config import (
     WandbConfig,
 )
 from modeling.config.sweep import Sweep
+from modeling.data.trajectory_train import VlDatapackConfig
 from modeling.data.video_action import (
-    RangeActionDatapackConfig,
     VideoProcessorConfig,
-    calc_min_num_tokens_for_n_actions,
-    make_raw_prompt,
 )
-from modeling.modules.action_instruct.qwen_25vl import Qwen25VLActionLITConfig
 from modeling.modules.base_module import OptimizerType
+from modeling.modules.vl_sft.qwen_25vl import VlSftLITConfig
 from modeling.types import Accelerator, DType
 from modeling.utils.cloud_path import CloudPath
 
 # from modeling.modules.base_module import CompileConfig
 
 processor_config = VideoProcessorConfig.Qwen25VL("ByteDance-Seed/UI-TARS-1.5-7B")
-raw_prompt = make_raw_prompt(
-    processor_config,
-    suffix="",
-)
-run_name = "uitars_gpu8_freeze_mlps"
+run_name = "uitars_sft_7b"
 num_devices = 8
 UITarsActionExperimentConfig_GPU = ExperimentConfig(
     metadata=ExperimentMetadata(
-        wandb=WandbConfig(project="UITars_7B_gpu8_lr_sweep", name=run_name),
+        wandb=WandbConfig(project="UITars_7B_sft", name=run_name),
         # wandb=None,
         output_dir=Path("./output") / run_name,
         # checkpoint=None,
@@ -43,68 +37,44 @@ UITarsActionExperimentConfig_GPU = ExperimentConfig(
             checkpoint_prefix=CloudPath.from_str(
                 f"gs://induction-labs/checkpoints/{run_name}",
             ),
-            checkpoint_frequency=0,  # Save every 1000 steps
+            checkpoint_frequency=100,  # Save every 100 steps
             checkpoint_first_step=False,  # Save the first step
-            checkpoint_last_step=False,  # Save the last step
+            checkpoint_last_step=True,  # Save the last step
         ),
     ),
-    module=Qwen25VLActionLITConfig(
+    module=VlSftLITConfig(
         # checkpoint_path=CloudPath.from_str(
-        #     "gs://induction-labs/checkpoints/uitars_lr_sweep_22_repro/2025-07-23T23-11-47.Zt48I8vF/step_1000"
+        #     "gs://induction-labs/checkpoints/UITars_7B_uninitialized/2025-07-17T23-05-38/step_100"
         # ),
         model_name="ByteDance-Seed/UI-TARS-1.5-7B",
-        # tokenizer_name="Qwen/Qwen2.5-Omni-7B",
-        freeze_vision=True,
-        freeze_network=True,
-        freeze_action_embedding=False,
-        freeze_action_head=False,
-        freeze_mlps=False,
-        loss_type=Qwen25VLActionLITConfig.CursorPredictionLoss.L2_DISTANCE,
+        tokenizer_name="ByteDance-Seed/UI-TARS-1.5-7B",
         optimizer=OptimizerType.ADAMW,
-        # compile=None,
-        # compile=CompileConfig(),
+        freeze_vision=True,
     ),
-    train_datapack=RangeActionDatapackConfig(
-        # prefix="gs://induction-labs/jonathan/synth/garbage_cursor_follow_v1/sample_",
-        prefix="gs://induction-labs/jonathan/synth/cursor_follow_v3/sample_",
-        raw_prompt=raw_prompt,
-        processor_config=processor_config,
-        # prefix="gs://induction-labs/jonathan/synth/noise_cursor_follow_v1/sample_",
-        end_index=55_000,  # 60k samples
-        load_keyboard_actions=False,
-        load_cursor_path=True,
+    train_datapack=VlDatapackConfig(
+        dataset_path="gs://induction-labs/jonathan/sampled_trajectories/osworld_uitars_10x_en_5k/samples_correct_expanded_5_under_20_turns_train.jsonl"
     ),
-    validation_datapack=RangeActionDatapackConfig(
-        # prefix="gs://induction-labs/jonathan/synth/garbage_cursor_follow_v1/sample_",
-        prefix="gs://induction-labs/jonathan/synth/cursor_follow_v3/sample_",
-        raw_prompt=raw_prompt,
-        processor_config=processor_config,
-        # prefix="gs://induction-labs/jonathan/synth/noise_cursor_follow_v1/sample_",
-        start_index=55_000,  # 60k samples
-        end_index=60_000,  # 60k samples
-        load_keyboard_actions=False,
-        load_cursor_path=True,
+    validation_datapack=VlDatapackConfig(
+        dataset_path="gs://induction-labs/jonathan/sampled_trajectories/osworld_uitars_10x_en_5k/samples_correct_expanded_5_under_20_turns_test.jsonl"
     ),
     run=RunConfig(
         lr=LinearLRSchedule(
-            peak_lr=1e-3,
-            end_lr=1e-5,
-            warmup_steps=20,
-            end_step=3000,  # 10k steps
+            peak_lr=1e-5,
+            end_lr=5e-6,
+            warmup_steps=100,
+            end_step=750,  # 10k steps
         ),
-        sequence_length=calc_min_num_tokens_for_n_actions(
-            840 * 476, 8, raw_prompt, processor_config
-        ),
-        batch_size=num_devices * 8,
-        num_steps=200,
-        validation_every_n_steps=20,
+        sequence_length=8192 * 2,
+        batch_size=num_devices,
+        num_steps=750,
+        validation_every_n_steps=25,
         distributed=DistributedConfig(
             devices_per_node=num_devices,
         ),
         attn_impl=AttentionImplementation.SDPA,
         accelerator=Accelerator.CUDA,
         precision=DType.bf16,
-        seed=22,
+        seed=52,
     ),
 )
 
@@ -170,12 +140,12 @@ UITarsActionSweep = (
     # )
     # .sweep(
     #     [
-    #         LinearLRSchedule(
-    #             peak_lr=1e-5,
-    #             end_lr=1e-5,
-    #             warmup_steps=0,
-    #             end_step=3_000,
-    #         ),
+    #         # LinearLRSchedule(
+    #         #     peak_lr=1e-5,
+    #         #     end_lr=1e-5,
+    #         #     warmup_steps=0,
+    #         #     end_step=3_000,
+    #         # ),
     #         *(
     #             LinearLRSchedule(
     #                 peak_lr=peak_lr,
@@ -183,9 +153,7 @@ UITarsActionSweep = (
     #                 warmup_steps=warmup_steps,
     #                 end_step=3_000,
     #             )
-    #             for peak_lr, warmup_steps in Sweep.S.product(
-    #                 [5e-4, 1e-4, 5e-5], [0, 200]
-    #             )
+    #             for peak_lr, warmup_steps in Sweep.S.product([5e-5], [0])
     #         ),
     #     ],
     #     Sweep.S.lr,
@@ -194,7 +162,7 @@ UITarsActionSweep = (
 # 0.0005
 
 
-# mdl export modeling.experiments.action_instruct.uitars.UITarsActionExperimentConfig_CPU
-# mdl export modeling.experiments.action_instruct.uitars.UITarsActionExperimentConfig_GPU
-# mdl export modeling.experiments.action_instruct.uitars.UITarsActionGPU_Test
-# mdl sweep modeling.experiments.action_instruct.uitars.UITarsActionSweep
+# mdl export modeling.experiments.vl_sft.uitars.UITarsActionExperimentConfig_CPU
+# mdl export modeling.experiments.vl_sft.uitars.UITarsActionExperimentConfig_GPU
+# mdl export modeling.experiments.vl_sft.uitars.UITarsActionGPU_Test
+# mdl sweep modeling.experiments.vl_sft.uitars.UITarsActionSweep

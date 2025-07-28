@@ -2,46 +2,31 @@ from __future__ import annotations
 
 from typing import TypeVar
 
-import numpy as np
-import torch
 from synapse.utils.logging import configure_logging, logging
-from torch import nn
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.fsdp import MixedPrecisionPolicy, fully_shard
+from transformers.models.qwen2_5_vl.modeling_qwen2_5_vl import (
+    Qwen2_5_VLCausalLMOutputWithPast,
+    Qwen2_5_VLForConditionalGeneration,
+)
 
 from modeling.config import (
     InstanceConfig,
     RunConfig,
 )
 from modeling.config.distributed import MeshAxis
-from modeling.data.video_action import ActionDataSample
+from modeling.data.trajectory_train import VlDataSample
+from modeling.modules.vl_sft.base import BaseVlSft, VlSftActionLITConfig
 from modeling.utils.class_property import class_property
-
-from .base_action import BaseActiionLIT, BaseActionLITConfig
-from .qwen_25o_actions import (
-    Qwen2_5OmniActionCausalLMOutputWithPast,
-)
-from .qwen_25vl_actions import (
-    Qwen2_5_VLActionConfig,
-    Qwen2_5_VLForActionModel,
-)
 
 logger = configure_logging(__name__, level=logging.DEBUG)
 
-MODEL_TYPE = Qwen2_5_VLForActionModel
-l2_loss = nn.MSELoss(reduce=False)
-
 T = TypeVar("T")
 
-
-def to_numpy_clean(tensor: torch.Tensor, dtype=torch.float32) -> np.ndarray:
-    """
-    Convert a PyTorch tensor to a NumPy array, ensuring it is on CPU and detached.
-    """
-    return tensor.to(dtype=dtype, device="cpu").detach().numpy()
+MODEL_TYPE = Qwen2_5_VLForConditionalGeneration
 
 
-class Qwen25VLActionLIT(BaseActiionLIT[MODEL_TYPE, "Qwen25VLActionLITConfig"]):
+class Qwen25VLActionLIT(BaseVlSft[MODEL_TYPE, "VlSftLITConfig"]):
     """
     Qwen-2.5O Lightning Module for text pretraining.
     Inherits from TextPretrainLIT and uses the Qwen-2.5O model.
@@ -53,32 +38,33 @@ class Qwen25VLActionLIT(BaseActiionLIT[MODEL_TYPE, "Qwen25VLActionLITConfig"]):
     def model_cls(cls) -> type[MODEL_TYPE]:
         return MODEL_TYPE
 
-    def call_model(
-        self, inputs: ActionDataSample
-    ) -> Qwen2_5OmniActionCausalLMOutputWithPast:
+    def call_model(self, inputs: VlDataSample) -> Qwen2_5_VLCausalLMOutputWithPast:
         """Call the model with the given inputs.
         This method should be implemented by subclasses.
         """
         return self.model(
-            action_tokens=inputs.action_tokens,
-            **inputs.qwen_inputs.model_dump(),
+            **{
+                **inputs.model_dump(),
+                "pixel_values": inputs.pixel_values
+                if inputs.pixel_values.shape[0] != 0
+                else None,
+                "image_grid_thw": inputs.image_grid_thw
+                if inputs.image_grid_thw.shape[0] != 0
+                else None,
+            },
+            use_cache=False,
         )
 
     def init_model_meta(
         self,
     ):
-        module_config = self.module_config
-        config = Qwen2_5_VLActionConfig.from_pretrained(
-            module_config.model_name,
-            freeze_network=module_config.freeze_network,
-            freeze_vision=module_config.freeze_vision,
-            freeze_action_head=module_config.freeze_action_head,
-            freeze_action_embedding=module_config.freeze_action_embedding,
-            freeze_mlps=module_config.freeze_mlps,
-            use_fun_mask=module_config.use_fun_mask,
+        model = MODEL_TYPE.from_pretrained(
+            self.module_config.model_name,
+            trust_remote_code=True,
         )
+        for param in model.model.visual.parameters():
+            param.requires_grad = not self.module_config.freeze_vision
 
-        model = MODEL_TYPE(config)
         assert isinstance(model, MODEL_TYPE), (
             f"Expected model to be of type Qwen2_5OmniThinkerForActionModelling, "
             f"got {type(model)}"
@@ -124,17 +110,11 @@ class Qwen25VLActionLIT(BaseActiionLIT[MODEL_TYPE, "Qwen25VLActionLITConfig"]):
         )
 
 
-class Qwen25VLActionLITConfig(BaseActionLITConfig):
-    """
-    Configuration class for Qwen-2.5O Lightning Module.
-    Inherits from TextPretrainLITConfig and sets the model name.
-    """
+class VlSftLITConfig(VlSftActionLITConfig):
+    config_path: str = "modeling.modules.vl_sft.qwen_25vl.VlSftLITConfig"
+    tokenizer_name: str = "Qwen/Qwen2.5-Omni-3B"
 
-    config_path: str = (
-        "modeling.modules.action_instruct.qwen_25vl.Qwen25VLActionLITConfig"
-    )
-    model_name: str = "ByteDance-Seed/UI-TARS-1.5-7B"
-    # tokenizer_name: str = "Qwen/Qwen2.5-Omni-3B"
+    freeze_vision: bool = False
 
     def create_module(
         self,

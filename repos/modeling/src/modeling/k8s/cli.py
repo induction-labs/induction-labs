@@ -168,8 +168,11 @@ def submit(
     num_gpus = distributed_config.devices_per_node * distributed_config.num_nodes
 
     # Resource calculation: 16GB memory per GPU + 4 CPUs per GPU + 16 CPUs for head node
-    memory_gb = (num_gpus * 16) + 16
-    cpu_count = (num_gpus * 4) + 4
+    # max is 3TB on lambda
+    memory_gb = (num_gpus * 64) + 64
+    # Max is 208
+    # At max this uses 24 * 8 = 192 CPUs
+    cpu_count = (num_gpus * 8) + 16
 
     logger.info(
         f"Calculated resources: {num_gpus} GPUs, {memory_gb}Gi memory, {cpu_count} CPUs"
@@ -197,6 +200,7 @@ def submit(
 
     # Update the command args to use the provided config_path
     container["args"] = [f"mdl run {config_path} -rhw"]
+    # container["args"] = ["sleep inf"]  # For debugging purposes
     logger.debug(f"Updated command args to use config: {config_path}")
 
     # Save the modified k8s yaml config beside the original config toml

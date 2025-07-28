@@ -19,12 +19,11 @@ from modeling.data.video_action import (
     make_raw_prompt,
 )
 from modeling.modules.action_instruct.qwen_25o import Qwen25OActionLITConfig
-from modeling.modules.base_module import OptimizerType
+from modeling.modules.base_module import CompileConfig, OptimizerType
 from modeling.types import Accelerator, DType
 from modeling.utils.cloud_path import CloudPath
 
-# from modeling.modules.base_module import CompileConfig
-
+CompileConfig()
 raw_prompt = make_raw_prompt(
     VideoProcessorConfig.Qwen25O(),
     prefix="",
@@ -52,7 +51,6 @@ Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
         #     "gs://induction-labs/checkpoints/keyboard_typing/2025-07-25T06-21-34.e3nDlMeg/step_50"
         # ),
         # model_name="Qwen/Qwen2.5-Omni-3B",
-        tokenizer_name="Qwen/Qwen2.5-Omni-7B",
         freeze_vision=False,
         freeze_network=False,
         freeze_action_embedding=False,
