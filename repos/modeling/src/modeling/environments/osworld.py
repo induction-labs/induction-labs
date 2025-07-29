@@ -199,6 +199,7 @@ async def eval_task_with_semaphore(
             language=eval_options.language,
             use_thinking=True,
             use_vllm=USE_VLLM,
+            temperature=eval_options.temperature,
         )
         attempt_id = uuid.uuid4().hex
         dump_folder = recording_output_folder + "/" + attempt_id

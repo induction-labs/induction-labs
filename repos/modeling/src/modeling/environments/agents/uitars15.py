@@ -733,6 +733,7 @@ class UITarsAgent:
         which_parsed_actions: str = "all",
         # Outside infos
         max_steps: int = 100,
+        temperature: float = 1,
         # UI-TARS specific settings
         use_thinking: bool = True,
         language: Literal["zh", "en"] = "zh",
@@ -770,6 +771,7 @@ class UITarsAgent:
         self.use_thinking = use_thinking
 
         self.model_endpoint = model_endpoint
+        self.temperature = temperature
 
         self.aiohttp_client = aiohttp.ClientSession(
             timeout=aiohttp.ClientTimeout(total=300, connect=5)
@@ -831,7 +833,7 @@ class UITarsAgent:
     async def inference(self, messages):
         async with self.aiohttp_client.post(
             self.model_endpoint,
-            json={"messages": messages},
+            json={"messages": messages, "temperature": self.temperature},
         ) as response:
             if response.status != 200:
                 raise Exception(f"Error in inference: {response.status}")
