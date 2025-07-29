@@ -39,6 +39,10 @@ def scroll(dx, dy, x, y, t):
     }
 
 
+def action(action, timestamp):
+    return {"action": action, "timestamp": timestamp}
+
+
 # ---------------------------------------------------------------------------
 
 
@@ -49,8 +53,13 @@ def test_click_vs_drag():
 
     out = parse_actions(ev_click + ev_drag)
     assert out == [
-        "click(point='<point>13 11</point>')",
-        ("drag(start_point='<point>20 20</point>', end_point='<point>25 20</point>')"),
+        action("click(point='<point>13 11</point>')", 0.0),
+        action(
+            (
+                "drag(start_point='<point>20 20</point>', end_point='<point>25 20</point>')"
+            ),
+            1.0,
+        ),
     ]
 
 
@@ -62,7 +71,9 @@ def test_double_click_window():
         mb(50, 50, True, 0.3),
         mb(50, 50, False, 0.35),
     ]
-    assert parse_actions(ev) == ["left_double(point='<point>50 50</point>')"]
+    assert parse_actions(ev) == [
+        action("left_double(point='<point>50 50</point>')", 0.0)
+    ]
 
 
 # 3 ───── Hotkey eats key-ups, no stray type ─────────────────────────────────
@@ -73,19 +84,25 @@ def test_hotkey_ctrl_s():
         key("s", False, 0.2),
         key("ctrl", False, 0.3),
     ]
-    assert parse_actions(ev) == ["hotkey(key='ctrl s')"]
+    assert parse_actions(ev) == [action("hotkey(key='ctrl s')", 0.0)]
 
 
 def test_hotkey_ctrl_a():
     ev = [
-        key("ctrl", True, 0.0),
+        key("b", True, 0.0),
+        key("b", False, 0.05),
+        key("ctrl", True, 0.06),
         key("a", True, 0.1),
         key("a", False, 0.2),
         key("ctrl", False, 0.3),
         key("s", True, 0.4),
         key("s", False, 0.5),
     ]
-    assert parse_actions(ev) == ["hotkey(key='ctrl a')", "type(content='s')"]
+    assert parse_actions(ev) == [
+        action("type(content='b')", 0.0),
+        action("hotkey(key='ctrl a')", 0.06),
+        action("type(content='s')", 0.4),
+    ]
 
 
 def test_weird_shift_behaviour():
@@ -99,7 +116,7 @@ def test_weird_shift_behaviour():
         key("a", True, 0.6),
         key("a", False, 0.7),
     ]
-    assert parse_actions(ev) == ["type(content='QWa')"]
+    assert parse_actions(ev) == [action("type(content='QWa')", 0.0)]
 
 
 def test_weird_shift_behaviour2():
@@ -112,7 +129,7 @@ def test_weird_shift_behaviour2():
         key("a", False, 0.5),
     ]
 
-    assert parse_actions(ev) == ["type(content='Qa')"]
+    assert parse_actions(ev) == [action("type(content='Qa')", 0.0)]
 
 
 def test_weird_shift_behaviour3():
@@ -125,7 +142,7 @@ def test_weird_shift_behaviour3():
         key("a", False, 0.5),
     ]
 
-    assert parse_actions(ev) == ["type(content='Qa')"]
+    assert parse_actions(ev) == [action("type(content='Qa')", 0.0)]
 
 
 def test_weird_shift_behaviour4():
@@ -138,7 +155,7 @@ def test_weird_shift_behaviour4():
         key("a", False, 0.5),
     ]
 
-    assert parse_actions(ev) == ["type(content='Qa')"]
+    assert parse_actions(ev) == [action("type(content='Qa')", 0.0)]
 
 
 def test_weird_shift_behaviour5():
@@ -151,7 +168,7 @@ def test_weird_shift_behaviour5():
         key("a", False, 0.5),
     ]
 
-    assert parse_actions(ev) == ["type(content='$a')"]
+    assert parse_actions(ev) == [action("type(content='$a')", 0.0)]
 
 
 def test_weird_shift_behaviour6():
@@ -164,7 +181,7 @@ def test_weird_shift_behaviour6():
         key("a", False, 0.5),
     ]
 
-    assert parse_actions(ev) == ["type(content='<a')"]
+    assert parse_actions(ev) == [action("type(content='<a')", 0.0)]
 
 
 def test_weird_shift_behaviour7():
@@ -177,7 +194,7 @@ def test_weird_shift_behaviour7():
         key("a", False, 0.5),
     ]
 
-    assert parse_actions(ev) == ["type(content='<a')"]
+    assert parse_actions(ev) == [action("type(content='<a')", 0.0)]
 
 
 # 4 ───── Typing groups (<2 s gap) and splits (>2 s) ────────────────────────
@@ -188,7 +205,10 @@ def test_typing_groups_and_gap():
         + [key("h", True, 3.0), key("h", False, 3.1)]
     )
     out = parse_actions(ev)
-    assert out == ["type(content='hello')", "type(content='h')"]
+    assert out == [
+        action("type(content='hello')", 0.0),
+        action("type(content='h')", 3.0),
+    ]
 
 
 # 5 ───── Backspace inside a group removes char; standalone is emitted ──────
@@ -205,8 +225,8 @@ def test_backspace_behaviour():
 
     out = parse_actions(ev1 + ev2)
     assert out == [
-        "type(content='a')",  # 'b' removed
-        "type(content='<Backspace>')",  # standalone
+        action("type(content='a')", 0.0),  # 'b' removed
+        action("type(content='<Backspace>')", 2.35),  # standalone
     ]
 
 
@@ -222,7 +242,7 @@ def test_type_over_time():
         key("d", False, 2.34),
     ]
     out = parse_actions(ev)
-    assert out == ["type(content='abcd')"]
+    assert out == [action("type(content='abcd')", 0.0)]
 
 
 # 6 ───── Enter encoded as newline in content string ────────────────────────
@@ -234,7 +254,7 @@ def test_enter_newline():
         key("enter", False, 0.15),
     ]
     # NB: the literal newline char is inside the expected string
-    assert parse_actions(ev) == ["type(content='x\\n')"]
+    assert parse_actions(ev) == [action("type(content='x\\n')", 0.0)]
 
 
 def test_tab_enter():
@@ -247,7 +267,7 @@ def test_tab_enter():
         key("enter", False, 0.15),
     ]
     # NB: the literal newline char is inside the expected string
-    assert parse_actions(ev) == ["type(content='p\\t\\n')"]
+    assert parse_actions(ev) == [action("type(content='p\\t\\n')", 0.0)]
 
 
 # 7 ───── Scroll direction mapping ──────────────────────────────────────────
@@ -265,7 +285,7 @@ def test_tab_enter():
 def test_scroll_directions(dx, dy, expect):
     ev = [scroll(dx, dy, 100, 100, 0.0)]
     out = parse_actions(ev)
-    want = f"scroll(point='<point>100 100</point>', direction='{expect}')"
+    want = action(f"scroll(point='<point>100 100</point>', direction='{expect}')", 0.0)
     assert out == [want]
 
 
