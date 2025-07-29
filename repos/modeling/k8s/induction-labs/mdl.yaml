@@ -57,4 +57,3 @@ spec:
         - name: dev-shm
           emptyDir:
             medium: Memory
-            sizeLimit: 100Gi

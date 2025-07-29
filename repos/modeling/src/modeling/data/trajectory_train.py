@@ -322,9 +322,9 @@ class VlDataset(BaseDataset[VlDataSample, VlDatasetArgs]):
                 [assistant_tokens.new_tensor([False]), assistant_tokens[:-1]]
             )
             starts = assistant_tokens & ~prev
-            labels = torch.cumsum(starts, dim=0)
-            last_chunk = labels[assistant_tokens].max()
-            assistant_tokens = assistant_tokens & (labels == last_chunk)
+            _labels = torch.cumsum(starts, dim=0)
+            last_chunk = _labels[assistant_tokens].max()
+            assistant_tokens = assistant_tokens & (_labels == last_chunk)
 
         labels[~assistant_tokens] = -100
 

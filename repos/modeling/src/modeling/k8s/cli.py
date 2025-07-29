@@ -169,7 +169,7 @@ def submit(
 
     # Resource calculation: 16GB memory per GPU + 4 CPUs per GPU + 16 CPUs for head node
     # max is 3TB on lambda
-    memory_gb = (num_gpus * 64) + 64
+    memory_gb = (num_gpus * 128) + 64
     # Max is 208
     # At max this uses 24 * 8 = 192 CPUs
     cpu_count = (num_gpus * 8) + 16

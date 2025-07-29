@@ -37,7 +37,7 @@ UITarsActionExperimentConfig_GPU = ExperimentConfig(
             checkpoint_prefix=CloudPath.from_str(
                 f"gs://induction-labs/checkpoints/{run_name}",
             ),
-            checkpoint_frequency=100,  # Save every 100 steps
+            checkpoint_frequency=50,  # Save every 50 steps
             checkpoint_first_step=False,  # Save the first step
             checkpoint_last_step=True,  # Save the last step
         ),
@@ -53,6 +53,7 @@ UITarsActionExperimentConfig_GPU = ExperimentConfig(
     ),
     train_datapack=VlDatapackConfig(
         dataset_path="gs://induction-labs/jonathan/sampled_trajectories/osworld_uitars_10x_en_5k/samples_correct_expanded_5_under_20_turns_train.jsonl"
+        # dataset_path="gs://induction-labs/jonathan/sampled_trajectories/osworld_uitars_10x_en_5k/samples_correct_expanded_5_under_20_turns_train_only_5.jsonl",
     ),
     validation_datapack=VlDatapackConfig(
         dataset_path="gs://induction-labs/jonathan/sampled_trajectories/osworld_uitars_10x_en_5k/samples_correct_expanded_5_under_20_turns_test.jsonl"
@@ -61,13 +62,13 @@ UITarsActionExperimentConfig_GPU = ExperimentConfig(
         lr=LinearLRSchedule(
             peak_lr=1e-5,
             end_lr=5e-6,
-            warmup_steps=100,
-            end_step=750,  # 10k steps
+            warmup_steps=20,
+            end_step=185,  # 10k steps
         ),
         sequence_length=8192 * 2,
-        batch_size=num_devices,
-        num_steps=750,
-        validation_every_n_steps=25,
+        batch_size=32,
+        num_steps=185,
+        validation_every_n_steps=10,
         distributed=DistributedConfig(
             devices_per_node=num_devices,
         ),
@@ -80,8 +81,8 @@ UITarsActionExperimentConfig_GPU = ExperimentConfig(
 
 UITarsActionGPU_Test = UITarsActionExperimentConfig_GPU.testing_config(
     num_steps=5,
-    enable_wandb=False,
-    with_val=False,
+    enable_wandb=True,
+    with_val=True,
     profile=False,
 )
 
@@ -89,7 +90,20 @@ UITarsActionExperimentConfig_CPU = UITarsActionExperimentConfig_GPU.model_copy(
     update={"run": UITarsActionExperimentConfig_GPU.run.cpu_config()}
 )
 UITarsActionSweep = (
-    Sweep(UITarsActionExperimentConfig_GPU)
+    Sweep(UITarsActionGPU_Test).sweep(
+        [8192 * 3, 20_000],
+        lambda num_workers, exp: (
+            exp.run.__setattr__("dataloader_num_workers", num_workers),
+            exp,
+        )[-1],
+    )
+    # .sweep(
+    #     [16, 8],
+    #     lambda num_workers, exp: (
+    #         exp.run.__setattr__("dataloader_num_workers", num_workers),
+    #         exp,
+    #     )[-1]
+    # )
     # .sweep(
     #     [True, False],
     #     lambda freeze_vision, exp: (
@@ -112,7 +126,7 @@ UITarsActionSweep = (
     #         exp,
     #     )[-1],
     # )
-    .sweep(range(20, 24), Sweep.S.seed)
+    # .sweep(range(20, 24), Sweep.S.seed)
     # .sweep(
     #     [
     #         # UITarsActionLITConfig.CursorPredictionLoss.L2_DISTANCE,
@@ -149,11 +163,11 @@ UITarsActionSweep = (
     #         *(
     #             LinearLRSchedule(
     #                 peak_lr=peak_lr,
-    #                 end_lr=1e-5,
-    #                 warmup_steps=warmup_steps,
-    #                 end_step=3_000,
+    #                 end_lr=peak_lr * 0.5,
+    #                 warmup_steps=20,
+    #                 end_step=185,
     #             )
-    #             for peak_lr, warmup_steps in Sweep.S.product([5e-5], [0])
+    #             for peak_lr in [5e-4] #[5e-5, 1e-4, 1e-5]
     #         ),
     #     ],
     #     Sweep.S.lr,

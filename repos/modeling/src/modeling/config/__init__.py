@@ -391,6 +391,9 @@ class RunConfig(BaseModel):
     precision: DType = DType.bf16
     quantize_model: bool = True  # Quantize the model if True. If False, only cast the optimizer weights to precision
 
+    dataloader_prefetch_factor: int = 2
+    dataloader_num_workers: int = 8
+
     @property
     def mp_policy(self) -> MixedPrecisionPolicy:
         from torch.distributed.fsdp import MixedPrecisionPolicy

@@ -12,7 +12,6 @@ from typing import Never, cast
 
 import torch
 import tqdm
-import wandb
 from ray.util.placement_group import (
     PlacementGroup,
     placement_group,
@@ -21,8 +20,8 @@ from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 from synapse.elapsed_timer import elapsed_timer
 from synapse.utils.logging import LOCAL_RANK, NODE_RANK, configure_logging
 from torch.utils.data import DataLoader
-from wandb.sdk.wandb_run import Run
 
+import wandb
 from modeling.actor import ActorArgs, ExperimentActor
 from modeling.checkpoints.save import upload_to_gcs
 from modeling.config import (
@@ -40,6 +39,7 @@ from modeling.utils.gen_id import gen_id
 from modeling.utils.max_timeout import max_timeout
 from modeling.utils.tmpdir import TmpDirContext
 from modeling.utils.typed_remote import RemoteArgs
+from wandb.sdk.wandb_run import Run
 
 logger = configure_logging(__name__, level=logging.DEBUG)
 
@@ -329,6 +329,7 @@ class ExperimentManager:
         Create a DataLoader for the training dataset.
         This method is used to create a DataLoader for the training dataset with the specified batch size and collate function.
         """
+        # see https://github.com/pytorch/pytorch/issues/13246#issuecomment-905703662
         data_loader = DataLoader(
             dataset,
             batch_size=full_config.run.batch_size,
@@ -336,9 +337,9 @@ class ExperimentManager:
             drop_last=False,
             generator=generator,
             # TODO: Figure out optimal prefetch factor + num_workers
-            prefetch_factor=2,
+            prefetch_factor=full_config.run.dataloader_prefetch_factor,
             # Need num_workers!=0 so that this runs in MP mode, so that
-            num_workers=full_config.run.distributed.world_size,
+            num_workers=full_config.run.dataloader_num_workers,
             persistent_workers=True,
             collate_fn=dataset.collate_fn(
                 batch_size=full_config.run.batch_size,
