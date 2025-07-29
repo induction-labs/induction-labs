@@ -2,6 +2,18 @@ from __future__ import annotations
 
 import math
 
+from synth.recordings.action_models import (
+    Action,
+    ClickAction,
+    DragAction,
+    HotkeyAction,
+    LeftDoubleAction,
+    Point,
+    RightSingleAction,
+    ScrollAction,
+    TypeAction,
+)
+
 SHIFT_MAP = {
     # Numbers row
     "1": "!",
@@ -64,11 +76,12 @@ def normalize_key_to_physical(key):
     return reverse_map.get(key_lower, key_lower)
 
 
-def parse_actions(raw_actions):
+def parse_actions(raw_actions) -> list[Action]:
     # Sort by timestamp to ensure chronological order
     actions = sorted(raw_actions, key=lambda x: x["timestamp"])
     for action in actions:
         print(action)
+
     parsed_actions = []
     keys_pressed_with_shift = {}  # maps physical key to shift state when pressed
 
@@ -90,8 +103,9 @@ def parse_actions(raw_actions):
     last_scroll_time = None
     last_scroll_pos = None
 
-    def add_parsed_action(action_str, timestamp):
-        parsed_actions.append({"action": action_str, "timestamp": timestamp})
+    def add_parsed_action(action_instance, timestamp):
+        """Add a parsed action with the given timestamp"""
+        parsed_actions.append(Action(action=action_instance, timestamp=timestamp))
 
     i = 0
     while i < len(actions):
@@ -104,7 +118,8 @@ def parse_actions(raw_actions):
             mouse_activity_since_typing = True
             if typing_buffer:
                 content = "".join(typing_buffer)
-                add_parsed_action(f"type(content='{content}')", typing_start_time)
+                type_action = TypeAction(content=content)
+                add_parsed_action(type_action, typing_start_time)
                 typing_buffer = []
                 typing_start_time = None
                 last_key_time = None
@@ -124,10 +139,13 @@ def parse_actions(raw_actions):
                         )
 
                         if distance >= 5:  # Minimum distance threshold for drag
-                            add_parsed_action(
-                                f"drag(start_point='<point>{mouse_down_pos[0]} {mouse_down_pos[1]}</point>', end_point='<point>{up_pos[0]} {up_pos[1]}</point>')",
-                                mouse_down_time,
+                            drag_action = DragAction(
+                                start_point=Point(
+                                    x=mouse_down_pos[0], y=mouse_down_pos[1]
+                                ),
+                                end_point=Point(x=up_pos[0], y=up_pos[1]),
                             )
+                            add_parsed_action(drag_action, mouse_down_time)
                         else:
                             # Check for double click (within 500ms and ~same position)
                             if (
@@ -141,23 +159,30 @@ def parse_actions(raw_actions):
                                 <= 5
                             ):
                                 # Replace last click with double click
-                                if parsed_actions and parsed_actions[-1][
-                                    "action"
-                                ].startswith("click("):
-                                    parsed_actions[-1]["action"] = (
-                                        f"left_double(point='<point>{up_pos[0]} {up_pos[1]}</point>')"
+                                if parsed_actions and isinstance(
+                                    parsed_actions[-1].action, ClickAction
+                                ):
+                                    # Replace the last action with a double click
+                                    double_click_action = LeftDoubleAction(
+                                        point=Point(x=up_pos[0], y=up_pos[1])
+                                    )
+                                    parsed_actions[-1] = Action(
+                                        action=double_click_action,
+                                        timestamp=parsed_actions[-1].timestamp,
                                     )
                                 else:
+                                    double_click_action = LeftDoubleAction(
+                                        point=Point(x=up_pos[0], y=up_pos[1])
+                                    )
                                     add_parsed_action(
-                                        f"left_double(point='<point>{up_pos[0]} {up_pos[1]}</point>')",
-                                        mouse_down_time,
+                                        double_click_action, mouse_down_time
                                     )
                             else:
                                 # Single click
-                                add_parsed_action(
-                                    f"click(point='<point>{up_pos[0]} {up_pos[1]}</point>')",
-                                    mouse_down_time,
+                                click_action = ClickAction(
+                                    point=Point(x=up_pos[0], y=up_pos[1])
                                 )
+                                add_parsed_action(click_action, mouse_down_time)
 
                             last_click_time = timestamp
                             last_click_pos = up_pos
@@ -166,10 +191,10 @@ def parse_actions(raw_actions):
 
             elif action["button"] == "right" and action["is_down"]:
                 # Right click (only care about mouse up)
-                add_parsed_action(
-                    f"right_single(point='<point>{action['x']} {action['y']}</point>')",
-                    timestamp,
+                right_click_action = RightSingleAction(
+                    point=Point(x=action["x"], y=action["y"])
                 )
+                add_parsed_action(right_click_action, timestamp)
 
         # Handle keyboard events
         elif action["action"] == "key_button":
@@ -192,16 +217,14 @@ def parse_actions(raw_actions):
                         # It's a hotkey - flush any typing buffer first
                         if typing_buffer:
                             content = "".join(typing_buffer)
-                            add_parsed_action(
-                                f"type(content='{content}')", typing_start_time
-                            )
+                            type_action = TypeAction(content=content)
+                            add_parsed_action(type_action, typing_start_time)
                             typing_buffer = []
                             typing_start_time = None
 
-                        hotkey_combo = " ".join([*non_shift_modifiers, key])
-                        add_parsed_action(
-                            f"hotkey(key='{hotkey_combo}')", modifier_start_time
-                        )
+                        hotkey_combo = [*non_shift_modifiers, key]
+                        hotkey_action = HotkeyAction(key=hotkey_combo)
+                        add_parsed_action(hotkey_action, modifier_start_time)
                         modifier_start_time = None
                         mouse_activity_since_typing = False
                     else:
@@ -218,9 +241,8 @@ def parse_actions(raw_actions):
                         or mouse_activity_since_typing
                     ):
                         content = "".join(typing_buffer)
-                        add_parsed_action(
-                            f"type(content='{content}')", typing_start_time
-                        )
+                        type_action = TypeAction(content=content)
+                        add_parsed_action(type_action, typing_start_time)
                         typing_buffer = []
                         typing_start_time = timestamp
                 else:
@@ -250,14 +272,13 @@ def parse_actions(raw_actions):
                                 # Standalone backspace
                                 if typing_buffer:
                                     content = "".join(typing_buffer)
-                                    add_parsed_action(
-                                        f"type(content='{content}')", typing_start_time
-                                    )
+                                    type_action = TypeAction(content=content)
+                                    add_parsed_action(type_action, typing_start_time)
                                     typing_buffer = []
                                     typing_start_time = None
-                                add_parsed_action(
-                                    "type(content='<Backspace>')", timestamp
-                                )
+
+                                backspace_action = TypeAction(content="<Backspace>")
+                                add_parsed_action(backspace_action, timestamp)
                         elif final_char.lower() == "space":
                             typing_buffer.append(" ")
                             mouse_activity_since_typing = False
@@ -274,9 +295,8 @@ def parse_actions(raw_actions):
                             # Other special keys - flush typing buffer
                             if typing_buffer:
                                 content = "".join(typing_buffer)
-                                add_parsed_action(
-                                    f"type(content='{content}')", typing_start_time
-                                )
+                                type_action = TypeAction(content=content)
+                                add_parsed_action(type_action, typing_start_time)
                                 typing_buffer = []
                                 typing_start_time = None
                             mouse_activity_since_typing = False
@@ -307,10 +327,10 @@ def parse_actions(raw_actions):
                 else:
                     direction = "left" if action["delta_x"] < 0 else "right"
 
-                add_parsed_action(
-                    f"scroll(point='<point>{action['x']} {action['y']}</point>', direction='{direction}')",
-                    timestamp,
+                scroll_action = ScrollAction(
+                    point=Point(x=action["x"], y=action["y"]), direction=direction
                 )
+                add_parsed_action(scroll_action, timestamp)
                 last_scroll_time = timestamp
                 last_scroll_pos = scroll_pos
 
@@ -319,12 +339,7 @@ def parse_actions(raw_actions):
     # Flush any remaining typing buffer
     if typing_buffer:
         content = "".join(typing_buffer)
-        add_parsed_action(f"type(content='{content}')", typing_start_time)
+        type_action = TypeAction(content=content)
+        add_parsed_action(type_action, typing_start_time)
 
     return parsed_actions
-
-
-# Example usage:
-# parsed = parse_actions(your_keylog_data)
-# for action in parsed:
-#     print(action)
