@@ -25,7 +25,7 @@ from modeling.utils.cloud_path import CloudPath
 # from modeling.modules.base_module import CompileConfig
 
 processor_config = VideoProcessorConfig.Qwen25VL("ByteDance-Seed/UI-TARS-1.5-7B")
-run_name = "uitars_sft_7b"
+run_name = "uitars_sft_7b_yehaw"
 num_devices = 8
 UITarsActionExperimentConfig_GPU = ExperimentConfig(
     metadata=ExperimentMetadata(
@@ -37,7 +37,7 @@ UITarsActionExperimentConfig_GPU = ExperimentConfig(
             checkpoint_prefix=CloudPath.from_str(
                 f"gs://induction-labs/checkpoints/{run_name}",
             ),
-            checkpoint_frequency=50,  # Save every 50 steps
+            checkpoint_frequency=160,  # Save every 80 steps
             checkpoint_first_step=False,  # Save the first step
             checkpoint_last_step=True,  # Save the last step
         ),
@@ -52,22 +52,23 @@ UITarsActionExperimentConfig_GPU = ExperimentConfig(
         freeze_vision=True,
     ),
     train_datapack=VlDatapackConfig(
-        dataset_path="gs://induction-labs/jonathan/sampled_trajectories/osworld_uitars_10x_en_5k/samples_correct_expanded_5_under_20_turns_train.jsonl"
+        dataset_path="gs://induction-labs/jonathan/sampled_trajectories/all_trajectories/samples_correct_trajectories_expanded_under_20_train.jsonl"
+        # dataset_path="gs://induction-labs/jonathan/sampled_trajectories/osworld_uitars_10x_en_5k/samples_correct_expanded_5_under_20_turns_train.jsonl"
         # dataset_path="gs://induction-labs/jonathan/sampled_trajectories/osworld_uitars_10x_en_5k/samples_correct_expanded_5_under_20_turns_train_only_5.jsonl",
     ),
     validation_datapack=VlDatapackConfig(
-        dataset_path="gs://induction-labs/jonathan/sampled_trajectories/osworld_uitars_10x_en_5k/samples_correct_expanded_5_under_20_turns_test.jsonl"
+        dataset_path="gs://induction-labs/jonathan/sampled_trajectories/all_trajectories/samples_correct_trajectories_expanded_under_20_test.jsonl"
     ),
     run=RunConfig(
         lr=LinearLRSchedule(
             peak_lr=1e-5,
             end_lr=5e-6,
-            warmup_steps=20,
-            end_step=185,  # 10k steps
+            warmup_steps=40,
+            end_step=420 * 2,  # 10k steps
         ),
         sequence_length=8192 * 2,
-        batch_size=32,
-        num_steps=185,
+        batch_size=16,
+        num_steps=420 * 2,
         validation_every_n_steps=10,
         distributed=DistributedConfig(
             devices_per_node=num_devices,
@@ -75,7 +76,7 @@ UITarsActionExperimentConfig_GPU = ExperimentConfig(
         attn_impl=AttentionImplementation.SDPA,
         accelerator=Accelerator.CUDA,
         precision=DType.bf16,
-        seed=52,
+        seed=93208,
     ),
 )
 
@@ -90,13 +91,14 @@ UITarsActionExperimentConfig_CPU = UITarsActionExperimentConfig_GPU.model_copy(
     update={"run": UITarsActionExperimentConfig_GPU.run.cpu_config()}
 )
 UITarsActionSweep = (
-    Sweep(UITarsActionGPU_Test).sweep(
-        [8192 * 3, 20_000],
-        lambda num_workers, exp: (
-            exp.run.__setattr__("dataloader_num_workers", num_workers),
-            exp,
-        )[-1],
-    )
+    Sweep(UITarsActionExperimentConfig_GPU)
+    # .sweep(
+    #     [8192 * 3, 20_000],
+    #     lambda num_workers, exp: (
+    #         exp.run.__setattr__("dataloader_num_workers", num_workers),
+    #         exp,
+    #     )[-1],
+    # )
     # .sweep(
     #     [16, 8],
     #     lambda num_workers, exp: (
@@ -152,26 +154,26 @@ UITarsActionSweep = (
     #         exp,
     #     )[-1],
     # )
-    # .sweep(
-    #     [
-    #         # LinearLRSchedule(
-    #         #     peak_lr=1e-5,
-    #         #     end_lr=1e-5,
-    #         #     warmup_steps=0,
-    #         #     end_step=3_000,
-    #         # ),
-    #         *(
-    #             LinearLRSchedule(
-    #                 peak_lr=peak_lr,
-    #                 end_lr=peak_lr * 0.5,
-    #                 warmup_steps=20,
-    #                 end_step=185,
-    #             )
-    #             for peak_lr in [5e-4] #[5e-5, 1e-4, 1e-5]
-    #         ),
-    #     ],
-    #     Sweep.S.lr,
-    # )
+    .sweep(
+        [
+            # LinearLRSchedule(
+            #     peak_lr=1e-5,
+            #     end_lr=1e-5,
+            #     warmup_steps=0,
+            #     end_step=3_000,
+            # ),
+            *(
+                LinearLRSchedule(
+                    peak_lr=peak_lr,
+                    end_lr=peak_lr * 0.5,
+                    warmup_steps=40,
+                    end_step=420 * 2,
+                )
+                for peak_lr in [5e-6]  # [1e-5, 5e-5, 5e-6, 1e-4]
+            ),
+        ],
+        Sweep.S.lr,
+    )
 )
 # 0.0005
 
