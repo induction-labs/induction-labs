@@ -194,23 +194,29 @@ class ExperimentManager:
                 full_config=self.exp_config,
             ),
         )
+        train_dataloader, train_config = ExperimentManager.make_dataloader(
+            dataset=train_dataset,
+            full_config=self.exp_config,
+            generator=self.state.generator,
+        )
+        validation_dataloader, validation_config = ExperimentManager.make_dataloader(
+            dataset=validation_dataset,
+            full_config=self.exp_config,
+            generator=self.state.generator,
+        )
+
+        logger.info(f"Train DataLoader Config: {train_config}")
+        logger.info(f"Validation DataLoader Config: {validation_config}")
 
         module_cls = cast(type[BaseLITModule], self.exp_config.module.module_cls())
 
-        train_iter = iter(
-            ExperimentManager.make_dataloader(
-                dataset=train_dataset,
-                full_config=self.exp_config,
-                generator=self.state.generator,
-            )
+        train_iter = cast(
+            Iterator[list[SampleWithMetadata[BaseDataSample]]], iter(train_dataloader)
         )
 
-        validation_dataloader = iter(
-            ExperimentManager.make_dataloader(
-                dataset=validation_dataset,
-                full_config=self.exp_config,
-                generator=self.state.generator,
-            )
+        validation_iter = cast(
+            Iterator[list[SampleWithMetadata[BaseDataSample]]],
+            iter(validation_dataloader),
         )
 
         # # Training loop
@@ -228,10 +234,9 @@ class ExperimentManager:
             ) >= 1 and step % val_steps == 0:
                 with elapsed_timer("validation_step") as validation_timer:
                     logger.debug(f"Running validation step at {step=}")
-                    validation_batch = cast(
-                        list[SampleWithMetadata[BaseDataSample]],
-                        next(validation_dataloader),
-                    )
+                    validation_batch = next(validation_iter)
+                    indices = [data.indices for data in validation_batch]
+                    logger.info(f"Validation step {step}: {indices=} indices")
                     all_validation_metrics = await asyncio.gather(
                         *[
                             actor.validation_step.remote(data.sample)
@@ -242,8 +247,6 @@ class ExperimentManager:
                             )
                         ]
                     )
-                    indices = [data.indices for data in validation_batch]
-                    logger.info(f"Validation step {step}: {indices=} indices")
                     # Reduce metrics to get mean
                     validation_metrics = module_cls.validation_wandb_metrics(
                         all_validation_metrics, global_step=step
@@ -251,11 +254,13 @@ class ExperimentManager:
                 validation_metrics["validation/head_time"] = validation_timer.elapsed
                 self.wandb_log(validation_metrics, step=step)
             with elapsed_timer("training_step") as training_timer:
-                batch = cast(list[SampleWithMetadata[BaseDataSample]], next(train_iter))
+                batch = next(train_iter)
                 assert isinstance(batch, list), f"{batch=}"
                 assert len(batch) == len(self.state.actors), (
                     f"{len(batch)=} != {len(self.state.actors)=}"
                 )
+                indices = [data.indices for data in batch]
+                logger.info(f"Training step {step}: {indices=} indices")
 
                 all_train_metrics = await asyncio.gather(
                     *[
@@ -265,9 +270,6 @@ class ExperimentManager:
                         )
                     ]
                 )
-                # Get indices from the samples
-                indices = [data.indices for data in batch]
-                logger.info(f"Training step {step}: {indices=} indices")
                 # Reduce metrics to get mean
 
                 train_metrics = module_cls.training_wandb_metrics(all_train_metrics)
@@ -296,10 +298,10 @@ class ExperimentManager:
             val_steps := self.exp_config.run.validation_every_n_steps
         ) >= 1 and step % val_steps == 0:
             logger.debug(f"Running validation step at {step=}")
-            validation_batch = cast(list[BaseDataSample], next(validation_dataloader))
+            validation_batch = next(validation_iter)
             all_validation_metrics = await asyncio.gather(
                 *[
-                    actor.validation_step.remote(data)
+                    actor.validation_step.remote(data.sample)
                     for actor, data in zip(
                         self.state.actors.all_actors, validation_batch, strict=True
                     )
@@ -335,11 +337,15 @@ class ExperimentManager:
         dataset: BaseDataset[DataSample, Never],
         full_config: ExperimentConfig[DataSample],
         generator: torch.Generator,
-    ):
+    ) -> tuple[DataLoader[list[SampleWithMetadata[DataSample]]], dict]:
         """
         Create a DataLoader for the training dataset.
         This method is used to create a DataLoader for the training dataset with the specified batch size and collate function.
+        Returns a tuple of (dataloader, config_dict).
         """
+        # seed = full_config.run.seed
+        # generator = torch.Generator(device="cpu").manual_seed(seed)
+
         # see https://github.com/pytorch/pytorch/issues/13246#issuecomment-905703662
         data_loader = DataLoader(
             dataset,
@@ -359,7 +365,32 @@ class ExperimentManager:
         )
         # We need to cast here because DataLoader should be parameterized with the return type of collate_fn
         # but it currently isn't due to limitations in mypy https://github.com/python/mypy/issues/3737
-        return cast(DataLoader[list[SampleWithMetadata[DataSample]]], data_loader)
+        typed_data_loader = cast(
+            DataLoader[list[SampleWithMetadata[DataSample]]], data_loader
+        )
+
+        # Get configuration information
+        batch_size = data_loader.batch_size
+        dataset_size = len(dataset) if hasattr(dataset, "__len__") else "unknown"
+        num_steps = len(data_loader)
+
+        # Get generator seed if available
+
+        sampler_name = (
+            data_loader.sampler.__class__.__name__ if data_loader.sampler else "None"
+        )
+
+        config = {
+            "batch_size": batch_size,
+            "total_samples": dataset_size,
+            "steps_per_epoch": num_steps,
+            "generator_seed": generator.initial_seed(),
+            "shuffle": sampler_name,
+            "drop_last": data_loader.drop_last,
+            "num_workers": data_loader.num_workers,
+        }
+
+        return typed_data_loader, config
 
     @staticmethod
     def init_wandb(exp_config: UnifiedExperimentConfig) -> Run | None:
