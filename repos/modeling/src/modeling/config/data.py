@@ -149,7 +149,15 @@ class BaseDataset(
         """
         import asyncio
 
-        sample = asyncio.run(self.get_item(idx))
+        return asyncio.run(self.get_item_async(idx))
+
+    @final
+    async def get_item_async(self, idx: int) -> SampleWithMetadata[DataSample]:
+        """
+        Asynchronous method to get an item from the dataset.
+        This allows for any necessary asynchronous operations to retrieve the data sample.
+        """
+        sample = await self.get_item(idx)
         return SampleWithMetadata(
             sample=sample,
             indices=[idx],

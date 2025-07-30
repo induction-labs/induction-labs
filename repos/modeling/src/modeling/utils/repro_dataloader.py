@@ -1,9 +1,32 @@
 import torch
 import typer
+from torch.utils.data import DataLoader, Dataset
+
+
+class ReproDataset(Dataset[int]):
+    def __init__(self, length: int) -> None:
+        """
+        Initialize the dataset with a specified length.
+        """
+        self.length = length
+
+    def __len__(self) -> int:
+        """
+        Return the length of the dataset.
+        """
+        return self.length
+
+    def __getitem__(self, index: int) -> int:
+        """
+        Return the item at the specified index.
+        """
+        if index < 0 or index >= self.length:
+            raise IndexError("Index out of bounds")
+        return index
 
 
 def get_dataloader_indices_for_step(
-    generator: torch.Generator, batch_size: int, dataset_length: int, step: int
+    seed: int, batch_size: int, dataset_length: int, step: int
 ) -> list[int]:
     """
     Get the indices that would be used by a DataLoader at a specific step.
@@ -19,58 +42,28 @@ def get_dataloader_indices_for_step(
     """
     # Create a copy of the generator to avoid modifying the original
     gen_copy = torch.Generator()
-    gen_copy.set_state(generator.get_state())
+    gen_copy.manual_seed(seed)
 
     # Generate the full permutation for the epoch
-    indices = torch.randperm(dataset_length, generator=gen_copy).tolist()
+    dataset = ReproDataset(dataset_length)
+    data_loader = DataLoader(
+        dataset,
+        batch_size=batch_size,
+        shuffle=True,
+        drop_last=False,
+        generator=gen_copy,
+        # TODO: Figure out optimal prefetch factor + num_workers
+        # prefetch_factor=full_config.run.dataloader_prefetch_factor,
+        # Need num_workers!=0 so that this runs in MP mode, so that
+        # num_workers=full_config.run.dataloader_num_workers,
+        # persistent_workers=True,
+        collate_fn=torch.utils.data.default_collate,
+    )
 
-    # Calculate the start and end indices for the requested step
-    start_idx = step * batch_size
-    end_idx = min(start_idx + batch_size, dataset_length)
-
-    # Return the indices for this step
-    return indices[start_idx:end_idx]
-
-
-def simulate_dataloader_steps(
-    generator: torch.Generator,
-    batch_size: int,
-    dataset_length: int,
-    num_steps: int | None = None,
-) -> list[list[int]]:
-    """
-    Simulate multiple steps of a DataLoader and return all batch indices.
-
-    Args:
-        generator: PyTorch generator with the desired seed
-        batch_size: Size of each batch
-        dataset_length: Total length of the dataset
-        num_steps: Number of steps to simulate (if None, simulates full epoch)
-
-    Returns:
-        List of batch indices for each step
-    """
-    if num_steps is None:
-        num_steps = (dataset_length + batch_size - 1) // batch_size  # Ceiling division
-
-    # Create a copy of the generator to avoid modifying the original
-    gen_copy = torch.Generator()
-    gen_copy.set_state(generator.get_state())
-
-    # Generate the full permutation for the epoch
-    indices = torch.randperm(dataset_length, generator=gen_copy).tolist()
-
-    # Split into batches
-    batches = []
-    for step in range(num_steps):
-        start_idx = step * batch_size
-        end_idx = min(start_idx + batch_size, dataset_length)
-        if start_idx < dataset_length:
-            batches.append(indices[start_idx:end_idx])
-        else:
-            break
-
-    return batches
+    # Now just iterator through the DataLoader to get the indices for the specified step
+    for current_step, batch in enumerate(data_loader):
+        if current_step == step:
+            return batch.tolist()
 
 
 def main(
@@ -82,13 +75,10 @@ def main(
     """
     Get the indices that would be used by a DataLoader at a specific step.
     """
-    # Create generator with the specified seed
-    generator = torch.Generator()
-    generator.manual_seed(seed)
 
     # Get indices for the target step
     indices = get_dataloader_indices_for_step(
-        generator, batch_size, dataset_length, target_step
+        seed, batch_size, dataset_length, target_step
     )
 
     # Output the indices
@@ -98,3 +88,19 @@ def main(
 
 if __name__ == "__main__":
     typer.run(main)
+
+
+# seed 93208839
+# batch size 16
+# dataset length 27160
+# target step 0
+# uv run python src/modeling/utils/repro_dataloader.py 93208839 16 27160 0
+
+# Step 47 indices: [13465, 5268, 24642, 6433, 363, 5182, 10119, 1745, 7241, 3610, 16782, 2672, 19830, 22479, 6338, 25899]
+
+
+# seed 93208
+# batch size 16
+# dataset length 13580
+# target step 370
+# uv run python src/modeling/utils/repro_dataloader.py 93208 16 13580 370

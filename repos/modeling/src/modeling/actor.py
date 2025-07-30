@@ -257,10 +257,12 @@ class ExperimentActor(BaseActor[ActorArgs]):
             self.module.model.train()
             self.state.optimizer.zero_grad(set_to_none=True)
             loss, metrics = self.module.training_step(sample)
+            # logger.info(f"finished forward pass loss: {loss.item()}")
 
             # Backward pass
             # with torch.profiler.record_function("backward"):
             loss.backward()
+            # logger.info("finished backward pass")
             clip_norm_og = torch.nn.utils.clip_grad_norm_(
                 self.state.module.model.parameters(),
                 self.experiment_config.run.grad_clip or float("inf"),
