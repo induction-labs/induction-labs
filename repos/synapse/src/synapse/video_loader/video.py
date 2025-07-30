@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 import gcsfs
 from smart_open import open as smart_open
 
-from synapse.elapsed_timer import elapsed_timer
+from synapse.elapsed_timer.elapsed_timer import elapsed_timer
 from synapse.video_loader.typess import (
     FramesMetadata,
     StreamMetadata,

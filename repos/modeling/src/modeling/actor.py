@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any, Optional
 
 import torch
 from pydantic import BaseModel
-from synapse.elapsed_timer import elapsed_timer
+from synapse.elapsed_timer.elapsed_timer import elapsed_timer
 from synapse.utils.logging import configure_logging, logging
 from torch.optim import Optimizer
 from transformers.modeling_utils import PreTrainedModel

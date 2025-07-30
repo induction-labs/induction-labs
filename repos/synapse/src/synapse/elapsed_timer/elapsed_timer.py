@@ -7,7 +7,6 @@ from contextlib import contextmanager
 from typing import Self
 
 from pydantic import BaseModel
-
 from synapse.utils.logging import configure_logging, logging
 
 timing_logger = configure_logging(__name__, level=logging.DEBUG)

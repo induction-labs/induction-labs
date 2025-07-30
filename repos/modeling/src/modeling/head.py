@@ -18,7 +18,7 @@ from ray.util.placement_group import (
     placement_group,
 )
 from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
-from synapse.elapsed_timer import elapsed_timer
+from synapse.elapsed_timer.elapsed_timer import elapsed_timer
 from synapse.utils.logging import LOCAL_RANK, NODE_RANK, configure_logging
 from torch.utils.data import DataLoader
 from wandb.sdk.wandb_run import Run

@@ -9,7 +9,7 @@ from typing import cast
 import torch
 import torch.distributed as dist
 from pydantic import AnyUrl, UrlConstraints
-from synapse.elapsed_timer import elapsed_timer
+from synapse.elapsed_timer.elapsed_timer import elapsed_timer
 from synapse.utils.logging import configure_logging
 
 from modeling.config import DistributedConfig, InstanceConfig

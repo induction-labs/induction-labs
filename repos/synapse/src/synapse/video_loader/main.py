@@ -6,7 +6,7 @@ from pathlib import Path
 
 import gcsfs
 
-from synapse.elapsed_timer import elapsed_timer
+from synapse.elapsed_timer.elapsed_timer import elapsed_timer
 from synapse.redis.main import (
     GCSVideoQueue,
     get_redis_client,

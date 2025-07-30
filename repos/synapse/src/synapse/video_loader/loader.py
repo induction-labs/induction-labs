@@ -3,7 +3,7 @@ from __future__ import annotations
 import tensorstore as ts
 from tqdm import tqdm
 
-from synapse.elapsed_timer import elapsed_timer
+from synapse.elapsed_timer.elapsed_timer import elapsed_timer
 from synapse.utils.logging import configure_logging
 from synapse.video_loader.video import (
     StreamVideoArgs,
