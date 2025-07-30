@@ -17,12 +17,14 @@ from modeling.data.trajectory_train import VlDatapackConfig
 from modeling.data.video_action import (
     VideoProcessorConfig,
 )
-from modeling.modules.base_module import CompileConfig, OptimizerType
+from modeling.modules.base_module import OptimizerType
 from modeling.modules.vl_sft.qwen_25vl import VlSftLITConfig
 from modeling.types import Accelerator, DType
 from modeling.utils.cloud_path import CloudPath
 
-processor_config = VideoProcessorConfig.Qwen25VL("ByteDance-Seed/UI-TARS-1.5-7B")
+model_name = "ByteDance-Seed/UI-TARS-1.5-7B"
+# model_name = "Qwen/Qwen2.5-VL-3B-Instruct"
+processor_config = VideoProcessorConfig.Qwen25VL(model_name)
 run_name = "uitars_sft_7b_yehaw_h100"
 num_devices = 8
 UITarsActionExperimentConfig_GPU = ExperimentConfig(
@@ -44,15 +46,16 @@ UITarsActionExperimentConfig_GPU = ExperimentConfig(
         # checkpoint_path=CloudPath.from_str(
         #     "gs://induction-labs/checkpoints/UITars_7B_uninitialized/2025-07-17T23-05-38/step_100"
         # ),
-        model_name="ByteDance-Seed/UI-TARS-1.5-7B",
-        tokenizer_name="ByteDance-Seed/UI-TARS-1.5-7B",
+        model_name=model_name,
+        tokenizer_name=model_name,
         optimizer=OptimizerType.ADAMW,
-        compile=CompileConfig(),
+        # compile=CompileConfig(),
         freeze_vision=True,
     ),
     train_datapack=VlDatapackConfig(
         # dataset_path="gs://induction-labs/jonathan/sampled_trajectories/all_trajectories/samples_correct_trajectories_expanded_under_20_train.jsonl"
-        dataset_path="gs://induction-labs/jonathan/sampled_trajectories/osworld_uitars_10x_en_5k/samples_correct_expanded_5_under_20_turns_train.jsonl"
+        # dataset_path="gs://induction-labs/jonathan/sampled_trajectories/osworld_uitars_10x_en_5k/samples_correct_expanded_5_under_20_turns_train.jsonl"
+        dataset_path="gs://induction-labs/jonathan/sampled_trajectories/all_trajectories/samples_correct_trajectories_expanded_under_20_train_doubled.jsonl"
         # dataset_path="gs://induction-labs/jonathan/sampled_trajectories/osworld_uitars_10x_en_5k/samples_correct_expanded_5_under_20_turns_train_only_5.jsonl",
     ),
     validation_datapack=VlDatapackConfig(
@@ -65,17 +68,17 @@ UITarsActionExperimentConfig_GPU = ExperimentConfig(
             warmup_steps=40,
             end_step=420 * 2,  # 10k steps
         ),
-        sequence_length=8192 * 4,
-        batch_size=8 * 2,
+        sequence_length=8192 * 2,
+        batch_size=num_devices * 2,
         num_steps=420 * 2,
-        validation_every_n_steps=10,
+        validation_every_n_steps=-1,
         distributed=DistributedConfig(
             devices_per_node=num_devices,
         ),
-        attn_impl=AttentionImplementation.FLASH_ATTENTION_2,
+        attn_impl=AttentionImplementation.SDPA,
         accelerator=Accelerator.CUDA,
         precision=DType.bf16,
-        seed=93208,
+        seed=93208839,
     ),
 )
 
