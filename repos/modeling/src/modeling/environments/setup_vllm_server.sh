@@ -21,8 +21,8 @@ cd induction-labs/repos/modeling || exit
 curl -LsSf https://astral.sh/uv/install.sh | sh
 uv sync --no-install-workspace --group evals
 
-STEP=200
-CKPT_PATH="induction-labs/checkpoints/uitars_sft_7b/2025-07-28T06-35-40.ebXmMEuW"
+STEP=50
+CKPT_PATH="induction-labs/checkpoints/uitars_sft_7b/2025-07-29T15-03-50.s34UyE2B"
 mkdir step_$STEP
 gcloud storage cp -r gs://$CKPT_PATH/step_$STEP/ .
 # add files into config path (TODO: save these at checkpoint save time)

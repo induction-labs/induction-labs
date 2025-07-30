@@ -5,6 +5,9 @@ from typing import TypeVar
 from synapse.utils.logging import configure_logging, logging
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.fsdp import MixedPrecisionPolicy, fully_shard
+from transformers.models.qwen2_5_vl.configuration_qwen2_5_vl import (
+    Qwen2_5_VLConfig,
+)
 from transformers.models.qwen2_5_vl.modeling_qwen2_5_vl import (
     Qwen2_5_VLCausalLMOutputWithPast,
     Qwen2_5_VLForConditionalGeneration,
@@ -58,10 +61,13 @@ class Qwen25VLActionLIT(BaseVlSft[MODEL_TYPE, "VlSftLITConfig"]):
     def init_model_meta(
         self,
     ):
-        model = MODEL_TYPE.from_pretrained(
-            self.module_config.model_name,
-            trust_remote_code=True,
+        module_config = self.module_config
+        config = Qwen2_5_VLConfig.from_pretrained(
+            module_config.model_name,
+            freeze_vision=module_config.freeze_vision,
         )
+
+        model = MODEL_TYPE(config)
         for param in model.model.visual.parameters():
             param.requires_grad = not self.module_config.freeze_vision
 
