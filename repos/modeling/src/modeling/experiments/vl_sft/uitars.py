@@ -17,12 +17,10 @@ from modeling.data.trajectory_train import VlDatapackConfig
 from modeling.data.video_action import (
     VideoProcessorConfig,
 )
-from modeling.modules.base_module import OptimizerType
+from modeling.modules.base_module import CompileConfig, OptimizerType
 from modeling.modules.vl_sft.qwen_25vl import VlSftLITConfig
 from modeling.types import Accelerator, DType
 from modeling.utils.cloud_path import CloudPath
-
-# from modeling.modules.base_module import CompileConfig
 
 processor_config = VideoProcessorConfig.Qwen25VL("ByteDance-Seed/UI-TARS-1.5-7B")
 run_name = "uitars-h100-sweeps"
@@ -49,6 +47,7 @@ UITarsActionExperimentConfig_GPU = ExperimentConfig(
         model_name="ByteDance-Seed/UI-TARS-1.5-7B",
         tokenizer_name="ByteDance-Seed/UI-TARS-1.5-7B",
         optimizer=OptimizerType.ADAMW,
+        compile=CompileConfig(),
         freeze_vision=True,
     ),
     train_datapack=VlDatapackConfig(
@@ -66,8 +65,8 @@ UITarsActionExperimentConfig_GPU = ExperimentConfig(
             warmup_steps=40,
             end_step=420 * 2,  # 10k steps
         ),
-        sequence_length=4096 * 3,
-        batch_size=8,
+        sequence_length=4096 * 4,
+        batch_size=8 * 2,
         num_steps=420 * 2,
         validation_every_n_steps=10,
         distributed=DistributedConfig(

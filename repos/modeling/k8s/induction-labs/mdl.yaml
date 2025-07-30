@@ -55,8 +55,13 @@ spec:
           volumeMounts:
             - name: dev-shm
               mountPath: /dev/shm
+            # - name: nix-store
+            #   mountPath: /nix/store
 
       volumes:
         - name: dev-shm
           emptyDir:
             medium: Memory
+        # - name: nix-store
+        #   emptyDir:
+        #     medium: Memory # Use memory for nix store to avoid disk I/O
