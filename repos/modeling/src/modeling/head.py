@@ -12,6 +12,7 @@ from typing import Never, cast
 
 import torch
 import tqdm
+import wandb
 from ray.util.placement_group import (
     PlacementGroup,
     placement_group,
@@ -20,8 +21,8 @@ from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 from synapse.elapsed_timer import elapsed_timer
 from synapse.utils.logging import LOCAL_RANK, NODE_RANK, configure_logging
 from torch.utils.data import DataLoader
+from wandb.sdk.wandb_run import Run
 
-import wandb
 from modeling.actor import ActorArgs, ExperimentActor
 from modeling.checkpoints.save import upload_to_gcs
 from modeling.config import (
@@ -29,7 +30,12 @@ from modeling.config import (
     RuntimeConfig,
     UnifiedExperimentConfig,
 )
-from modeling.config.data import BaseDataSample, BaseDataset, DataSample
+from modeling.config.data import (
+    BaseDataSample,
+    BaseDataset,
+    DataSample,
+    SampleWithMetadata,
+)
 from modeling.config.distributed import DistributedConfig, InstanceConfig
 from modeling.distributed.distributed import TorchUrl
 from modeling.distributed.ray_head import RayUrl, initialize_ray_head
@@ -39,7 +45,6 @@ from modeling.utils.gen_id import gen_id
 from modeling.utils.max_timeout import max_timeout
 from modeling.utils.tmpdir import TmpDirContext
 from modeling.utils.typed_remote import RemoteArgs
-from wandb.sdk.wandb_run import Run
 
 logger = configure_logging(__name__, level=logging.DEBUG)
 
@@ -224,11 +229,12 @@ class ExperimentManager:
                 with elapsed_timer("validation_step") as validation_timer:
                     logger.debug(f"Running validation step at {step=}")
                     validation_batch = cast(
-                        list[BaseDataSample], next(validation_dataloader)
+                        list[SampleWithMetadata[BaseDataSample]],
+                        next(validation_dataloader),
                     )
                     all_validation_metrics = await asyncio.gather(
                         *[
-                            actor.validation_step.remote(data)
+                            actor.validation_step.remote(data.sample)
                             for actor, data in zip(
                                 self.state.actors.all_actors,
                                 validation_batch,
@@ -236,6 +242,8 @@ class ExperimentManager:
                             )
                         ]
                     )
+                    indices = [data.indices for data in validation_batch]
+                    logger.info(f"Validation step {step}: {indices=} indices")
                     # Reduce metrics to get mean
                     validation_metrics = module_cls.validation_wandb_metrics(
                         all_validation_metrics, global_step=step
@@ -243,7 +251,7 @@ class ExperimentManager:
                 validation_metrics["validation/head_time"] = validation_timer.elapsed
                 self.wandb_log(validation_metrics, step=step)
             with elapsed_timer("training_step") as training_timer:
-                batch = cast(list[BaseDataSample], next(train_iter))
+                batch = cast(list[SampleWithMetadata[BaseDataSample]], next(train_iter))
                 assert isinstance(batch, list), f"{batch=}"
                 assert len(batch) == len(self.state.actors), (
                     f"{len(batch)=} != {len(self.state.actors)=}"
@@ -251,12 +259,15 @@ class ExperimentManager:
 
                 all_train_metrics = await asyncio.gather(
                     *[
-                        actor.train_step.remote(data)
+                        actor.train_step.remote(data.sample)
                         for actor, data in zip(
                             self.state.actors.all_actors, batch, strict=True
                         )
                     ]
                 )
+                # Get indices from the samples
+                indices = [data.indices for data in batch]
+                logger.info(f"Training step {step}: {indices=} indices")
                 # Reduce metrics to get mean
 
                 train_metrics = module_cls.training_wandb_metrics(all_train_metrics)
@@ -324,7 +335,7 @@ class ExperimentManager:
         dataset: BaseDataset[DataSample, Never],
         full_config: ExperimentConfig[DataSample],
         generator: torch.Generator,
-    ) -> DataLoader[list[DataSample]]:
+    ):
         """
         Create a DataLoader for the training dataset.
         This method is used to create a DataLoader for the training dataset with the specified batch size and collate function.
@@ -348,7 +359,7 @@ class ExperimentManager:
         )
         # We need to cast here because DataLoader should be parameterized with the return type of collate_fn
         # but it currently isn't due to limitations in mypy https://github.com/python/mypy/issues/3737
-        return cast(DataLoader[list[DataSample]], data_loader)
+        return cast(DataLoader[list[SampleWithMetadata[DataSample]]], data_loader)
 
     @staticmethod
     def init_wandb(exp_config: UnifiedExperimentConfig) -> Run | None:
