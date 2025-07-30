@@ -40,6 +40,10 @@ kubectl cluster-info
 
 # Container Registry Setup
 ```sh
+
+
+# https://depot.dev/orgs/xzsqsmmrvp/projects/v2tbx2d1w1/settings
+
 set DEPOT_KEY "depot_project_..."
 kubectl create secret docker-registry depot-registry-secret \
     --namespace induction-labs \

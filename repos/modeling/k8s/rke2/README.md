@@ -11,6 +11,6 @@ sudo systemctl restart docker
 ## Taints
 
 ```sh
-kubectl taint nodes gpu1 nvidia.com/gpu=present:NoSchedule
+kubectl taint nodes gpu1 nvidia.com/gpu=true:NoSchedule
 kubectl get nodes gpu1 -o yaml | grep -C 2 taint
 ```

@@ -2324,6 +2324,18 @@ wheels = [
 ]
 
 [[package]]
+name = "jsonlines"
+version = "4.0.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "attrs" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/35/87/bcda8e46c88d0e34cad2f09ee2d0c7f5957bccdb9791b0b934ec84d84be4/jsonlines-4.0.0.tar.gz", hash = "sha256:0c6d2c09117550c089995247f605ae4cf77dd1533041d366351f6f298822ea74", size = 11359, upload_time = "2023-09-01T12:34:44.187Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/f8/62/d9ba6323b9202dd2fe166beab8a86d29465c41a0288cbe229fac60c1ab8d/jsonlines-4.0.0-py3-none-any.whl", hash = "sha256:185b334ff2ca5a91362993f42e83588a360cf95ce4b71a73548502bda52a7c55", size = 8701, upload_time = "2023-09-01T12:34:42.563Z" },
+]
+
+[[package]]
 name = "jsonpointer"
 version = "3.0.0"
 source = { registry = "https://pypi.org/simple" }
@@ -5766,6 +5778,8 @@ name = "synth"
 version = "0.1.0"
 source = { editable = "repos/synth" }
 dependencies = [
+    { name = "gcsfs" },
+    { name = "jsonlines" },
     { name = "numpy" },
     { name = "pillow" },
     { name = "synapse" },
@@ -5781,6 +5795,8 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "gcsfs", specifier = ">=2025.3.0" },
+    { name = "jsonlines", specifier = ">=4.0.0" },
     { name = "numpy" },
     { name = "pillow", specifier = ">=11.2.1" },
     { name = "synapse", editable = "repos/synapse" },

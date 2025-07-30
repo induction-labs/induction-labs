@@ -169,10 +169,17 @@ def submit(
 
     # Resource calculation: 16GB memory per GPU + 4 CPUs per GPU + 16 CPUs for head node
     # max is 3TB on lambda
+    # max is 2000Gi on AWS
+    # max is 1870.2Gi on Azure
+
     memory_gb = (num_gpus * 128) + 64
-    # Max is 208
+    memory_gb = min(memory_gb, 1600)  # Limit to 2000Gi
+    # Max is 208 on lambda
+    # Max is 96 on Azure
+    # Max is 192 on AWS
     # At max this uses 24 * 8 = 192 CPUs
     cpu_count = (num_gpus * 8) + 16
+    cpu_count = min(cpu_count, 192)  # Limit to 192 CPUs
 
     logger.info(
         f"Calculated resources: {num_gpus} GPUs, {memory_gb}Gi memory, {cpu_count} CPUs"

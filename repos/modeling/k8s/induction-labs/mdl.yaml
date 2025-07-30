@@ -46,13 +46,16 @@ spec:
               memory: "128Gi"
               cpu: "32"
               nvidia.com/gpu: "8"
+              ephemeral-storage: "100Gi"
             requests:
               memory: "128Gi"
               cpu: "32"
               nvidia.com/gpu: "8"
+              ephemeral-storage: "100Gi"
           volumeMounts:
             - name: dev-shm
               mountPath: /dev/shm
+
       volumes:
         - name: dev-shm
           emptyDir:
