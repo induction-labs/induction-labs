@@ -16,6 +16,7 @@ from modeling.utils.max_timeout import max_timeout
 # Global state
 prefix_cache: dict[str, str] = {}  # prefix -> backend
 backend_cycle: itertools.cycle[str] | None = None
+default_model: str | None = None
 lock = asyncio.Lock()
 
 app = FastAPI()
@@ -41,6 +42,15 @@ def extract_prefix(payload: dict) -> str | None:
 @app.post("/v1/chat/completions")
 async def generate(req: Request):
     payload = await req.json()
+
+    # Set default model if not specified in request
+    if "model" not in payload or not payload["model"]:
+        if default_model:
+            payload["model"] = default_model
+            print(f"[DEFAULT-MODEL] Using default model: {default_model}")
+        else:
+            print("[NO-MODEL] No model specified and no default model configured")
+
     prefix = extract_prefix(payload)
     if prefix is None:
         print("[CACHE-MISS] No prefix found in payload")
@@ -104,12 +114,25 @@ async def serve(
             "--setup-max-timeout", help="Maximum timeout in seconds for backend setup"
         ),
     ] = 300,
+    model: Annotated[
+        str | None,
+        typer.Option(
+            "--default-model", help="Default model to use when not specified in request"
+        ),
+    ] = None,
 ):
     """Start the load balancer FastAPI server."""
     import uvicorn
 
     if not backends:
         raise typer.BadParameter("At least one backend must be specified")
+
+    # Set global default model
+
+    global default_model
+    default_model = model
+    if default_model:
+        print(f"Using default model: {default_model}")
 
     await max_timeout(
         setup_backends(backends),

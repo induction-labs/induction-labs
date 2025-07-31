@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import os
+import shutil
 import signal
 import subprocess
+import tempfile
 from datetime import datetime, timedelta
 from pathlib import Path
+from time import sleep
 from typing import Annotated
 
 import typer
@@ -13,11 +16,57 @@ from synapse.elapsed_timer import elapsed_timer
 from synapse.utils.async_typer import AsyncTyper
 from synapse.utils.logging import configure_logging, logging
 
+from modeling.checkpoints.load import download_cloud_dir
 from modeling.eval.vllm_utils import wait_for_servers_ready
+from modeling.utils.cloud_path import CloudPath
 from modeling.utils.max_timeout import max_timeout
 
 logger = configure_logging(__name__, level=logging.INFO)
 app = AsyncTyper()
+
+
+def cleanup_process_and_tmp(
+    processes: list[subprocess.Popen], model_tmpdir: Path | None
+):
+    if processes:
+        logger.info(f"Shutting down {len(processes)} servers...")
+        # Terminate all processes
+        for i, process in enumerate(processes):
+            if process.poll() is None:  # Process is still running
+                logger.info(
+                    f"Terminating process {process.pid} (GPU {i if i < len(processes) - 1 else 'load balancer'})"
+                )
+                try:
+                    process.terminate()
+                except Exception as e:
+                    logger.warning(f"Failed to terminate process {process.pid}: {e}")
+
+        # Wait a bit for graceful shutdown
+        try:
+            sleep(5)  # Wait for 5 seconds
+        except TimeoutError:
+            logger.warning("Timeout during graceful shutdown wait")
+
+        # Force kill if still running
+        for i, process in enumerate(processes):
+            if process.poll() is None:
+                logger.warning(
+                    f"Force killing process {process.pid} (GPU {i if i < len(processes) - 1 else 'load balancer'})"
+                )
+                try:
+                    process.kill()
+                except Exception as e:
+                    logger.warning(f"Failed to kill process {process.pid}: {e}")
+
+        logger.info("All servers shut down")
+        # Clean up model tmpdir if it was created
+    if model_tmpdir and model_tmpdir.exists():
+        logger.info(f"Cleaning up model tmpdir: {model_tmpdir}")
+        try:
+            shutil.rmtree(model_tmpdir)
+            logger.info("Model tmpdir cleaned up successfully")
+        except Exception as e:
+            logger.warning(f"Failed to clean up model tmpdir {model_tmpdir}: {e}")
 
 
 @app.async_command(name="start")
@@ -38,7 +87,6 @@ async def start_vllm_servers(
     """Start multiple vLLM servers using subprocess instead of tmux."""
 
     # Create timestamped log directory in tmpdir
-    import tempfile
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     log_dir = Path(tempfile.gettempdir()) / "vllm_logs" / timestamp
@@ -49,6 +97,7 @@ async def start_vllm_servers(
     env = os.environ.copy()
 
     processes: list[subprocess.Popen] = []
+    model_tmpdir: Path | None = None
 
     # Set up signal handler for graceful shutdown
     shutdown_event = asyncio.Event()
@@ -61,13 +110,43 @@ async def start_vllm_servers(
             os._exit(1)
         logger.info(f"\nReceived signal {signum}, shutting down servers...")
         shutting_down = True
-        shutdown_event.set()
+        cleanup_process_and_tmp(processes, model_tmpdir)
+        os._exit(signum)
 
     # Register signal handlers
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
     try:
+        # Handle model download if it's a gs:// path
+        if model.startswith("gs://"):
+            model_tmpdir = Path(tempfile.mkdtemp(prefix="vllm_model_"))
+            logger.info(f"Model is a GCS path, downloading to {model_tmpdir=}...")
+            cloud_path = CloudPath.from_str(model)
+
+            with elapsed_timer("model_download") as download_timer:
+                download_cloud_dir(cloud_path, model_tmpdir)
+
+            logger.info(
+                f"Model downloaded to {model_tmpdir} in {download_timer.elapsed:.2f} seconds"
+            )
+
+            # Copy config files from eval/uitars_config to the model directory
+            config_dir = Path(__file__).parent / "uitars_config"
+            if config_dir.exists():
+                logger.info(f"Copying config files from {config_dir} to {model_tmpdir}")
+                for config_file in config_dir.iterdir():
+                    if config_file.is_file():
+                        dest_file = model_tmpdir / config_file.name
+                        shutil.copy2(config_file, dest_file)
+                        logger.debug(f"Copied {config_file.name}")
+                logger.info("Config files copied successfully")
+            else:
+                logger.warning(f"Config directory {config_dir} not found")
+
+            # Use the local path for vLLM
+            model = str(model_tmpdir)
+
         logger.info(
             f"Starting vllm {model=} on {num_gpus=} GPUs, starting at port {base_port}"
         )
@@ -128,7 +207,7 @@ async def start_vllm_servers(
 
         # Wait for all servers to be ready
         backend_urls = [
-            f"http://127.0.0.1:{base_port + i}" for i in range(len(processes))
+            f"http://localhost:{base_port + i}" for i in range(len(processes))
         ]
         with elapsed_timer("vllm_servers_startup") as startup_timer:
             await max_timeout(
@@ -152,18 +231,15 @@ async def start_vllm_servers(
                 open(lb_stderr_log, "w") as lb_stderr_file,
             ):
                 # Generate backend URLs for the load balancer
-                backend_urls = [
-                    f"http://127.0.0.1:{base_port + i}" for i in range(len(processes))
-                ]
 
                 lb_cmd = [
-                    "python",
-                    "-m",
-                    "modeling.eval.cli",
+                    "eve",
                     "lb",
                     "serve",
                     "--port",
                     str(load_balancer_port),
+                    "--default-model",
+                    model,
                 ]
                 # Add each backend URL as a separate --backend argument
                 for url in backend_urls:
@@ -201,60 +277,32 @@ async def start_vllm_servers(
             f"Load balancer is ready! Setup took {lb_timer.elapsed:.2f} seconds"
         )
 
+        logger.info("To test the setup, you can run:")
+        logger.info(test_command)
+        logger.info("------------------------------------\n")
+
         # Wait for shutdown signal
         await shutdown_event.wait()
 
     except Exception as e:
         logger.error(f"Unexpected error: {e}")
     finally:
-        if processes:
-            logger.info("Shutting down servers...")
-            # Terminate all processes
-            for i, process in enumerate(processes):
-                if process.poll() is None:  # Process is still running
-                    logger.info(
-                        f"Terminating process {process.pid} (GPU {i if i < len(processes) - 1 else 'load balancer'})"
-                    )
-                    try:
-                        process.terminate()
-                    except Exception as e:
-                        logger.warning(
-                            f"Failed to terminate process {process.pid}: {e}"
-                        )
-
-            # Wait a bit for graceful shutdown
-            try:
-                await asyncio.wait_for(asyncio.sleep(2), timeout=3.0)
-            except TimeoutError:
-                logger.warning("Timeout during graceful shutdown wait")
-
-            # Force kill if still running
-            for i, process in enumerate(processes):
-                if process.poll() is None:
-                    logger.warning(
-                        f"Force killing process {process.pid} (GPU {i if i < len(processes) - 1 else 'load balancer'})"
-                    )
-                    try:
-                        process.kill()
-                    except Exception as e:
-                        logger.warning(f"Failed to kill process {process.pid}: {e}")
-
-            logger.info("All servers shut down")
-
+        cleanup_process_and_tmp(processes, model_tmpdir)
         # Restore default signal handlers to prevent hanging
         signal.signal(signal.SIGINT, signal.SIG_DFL)
         signal.signal(signal.SIGTERM, signal.SIG_DFL)
 
 
-# uv run python -m modeling.val.vllm_server start --help
+# eve vllm start --help
+# eve vllm start "gs://induction-labs/checkpoints/uitars_sft_7b_yehaw_good_nice/2025-07-31T05-18-29.nTtAsFOt/step_-1" --num-gpus 1
+
 if __name__ == "__main__":
     app()
 
-"""
-curl -X POST http://localhost:8080/v1/chat/completions \
+test_command = """
+curl -X POST http://127.0.0.1:8080/v1/chat/completions \
     -H "Content-Type: application/json" \
     -d '{
-      "model": "ByteDance-Seed/UI-TARS-1.5-7B",
       "messages": [
         {
           "role": "user", 
