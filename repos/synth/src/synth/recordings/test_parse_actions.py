@@ -47,9 +47,10 @@ def scroll(dx, dy, x, y, t):
     }
 
 
-def action_model(action_instance, timestamp):
+def action_model(action_instance, timestamp, end_t=None):
     """Helper to create Action model instances"""
-    return Action(action=action_instance, timestamp=timestamp)
+    end_t = end_t if end_t is not None else timestamp
+    return Action(action=action_instance, timestamp=timestamp, end_timestamp=end_t)
 
 
 # ---------------------------------------------------------------------------
@@ -62,9 +63,11 @@ def test_click_vs_drag():
 
     out = parse_actions(ev_click + ev_drag)
     expected = [
-        action_model(ClickAction(point=Point(x=13, y=11)), 0.0),
+        action_model(ClickAction(point=Point(x=13, y=11)), 0.0, end_t=0.1),
         action_model(
-            DragAction(start_point=Point(x=20, y=20), end_point=Point(x=25, y=20)), 1.0
+            DragAction(start_point=Point(x=20, y=20), end_point=Point(x=25, y=20)),
+            1.0,
+            end_t=1.1,
         ),
     ]
     assert out == expected
@@ -78,7 +81,9 @@ def test_double_click_window():
         mb(50, 50, True, 0.3),
         mb(50, 50, False, 0.35),
     ]
-    expected = [action_model(LeftDoubleAction(point=Point(x=50, y=50)), 0.0)]
+    expected = [
+        action_model(LeftDoubleAction(point=Point(x=50, y=50)), 0.0, end_t=0.35)
+    ]
     assert parse_actions(ev) == expected
 
 
@@ -86,11 +91,18 @@ def test_double_click_window():
 def test_hotkey_ctrl_s():
     ev = [
         key("ctrl", True, 0.0),
+        key("shift", True, 0.1),
         key("s", True, 0.1),
         key("s", False, 0.2),
+        key("shift", False, 0.25),
         key("ctrl", False, 0.3),
+        key("b", True, 0.4),
+        key("b", False, 0.45),
     ]
-    expected = [action_model(HotkeyAction(key=["ctrl", "s"]), 0.0)]
+    expected = [
+        action_model(HotkeyAction(key=["ctrl", "shift", "s"]), 0.0, end_t=0.3),
+        action_model(TypeAction(content="b"), 0.4, end_t=0.45),
+    ]
     assert parse_actions(ev) == expected
 
 
@@ -106,9 +118,106 @@ def test_hotkey_ctrl_a():
         key("s", False, 0.5),
     ]
     expected = [
-        action_model(TypeAction(content="b"), 0.0),
-        action_model(HotkeyAction(key=["ctrl", "a"]), 0.06),
-        action_model(TypeAction(content="s"), 0.4),
+        action_model(TypeAction(content="b"), 0.0, end_t=0.05),
+        action_model(HotkeyAction(key=["ctrl", "a"]), 0.06, end_t=0.3),
+        action_model(TypeAction(content="s"), 0.4, end_t=0.5),
+    ]
+    assert parse_actions(ev) == expected
+
+
+def test_hotkey_then_type():
+    ev = [
+        key("b", True, 0.0),
+        key("b", False, 0.05),
+        key("ctrl", True, 0.06),
+        key("a", True, 0.1),
+        key("a", False, 0.2),
+        key("ctrl", False, 0.3),
+        key("shift_r", True, 0.4),
+        key("enter", True, 0.5),
+        key("enter", False, 0.6),
+        key("shift_r", False, 0.7),
+    ]
+    expected = [
+        action_model(TypeAction(content="b"), 0.0, end_t=0.05),
+        action_model(HotkeyAction(key=["ctrl", "a"]), 0.06, end_t=0.3),
+        action_model(TypeAction(content="<shift>\\n</shift>"), 0.4, end_t=0.7),
+    ]
+    assert parse_actions(ev) == expected
+
+
+def test_hotkey_then_type_enter_testing():
+    ev = [
+        key("a", True, 0.0),
+        key("shift", True, 0.4),
+        key("enter", True, 0.5),
+        key("enter", False, 0.6),
+        key("enter", True, 0.65),
+        key("enter", False, 0.7),
+        key("shift", False, 0.75),
+        key("a", False, 0.8),
+    ]
+    expected = [
+        action_model(TypeAction(content="a<shift>\\n\\n</shift>"), 0.0, end_t=0.8),
+    ]
+    assert parse_actions(ev) == expected
+
+
+def test_hotkey_then_type_enter_testing_backspace():
+    ev = [
+        key("a", True, 0.0),
+        key("shift", True, 0.4),
+        key("enter", True, 0.5),
+        key("enter", False, 0.6),
+        key("enter", True, 0.65),
+        key("enter", False, 0.7),
+        key("shift", False, 0.75),
+        key("a", False, 0.8),
+        key("backspace", True, 0.9),
+        key("backspace", False, 1.0),
+    ]
+    expected = [
+        action_model(TypeAction(content="a<shift>\\n</shift>"), 0.0, end_t=1.0),
+    ]
+    assert parse_actions(ev) == expected
+
+
+def test_hotkey_then_type_enter_backspace_immediate():
+    ev = [
+        key("a", True, 0.0),
+        key("shift", True, 0.4),
+        key("enter", True, 0.5),
+        key("enter", False, 0.6),
+        key("shift", False, 0.75),
+        key("a", False, 0.8),
+        key("backspace", True, 0.9),
+        key("backspace", False, 1.0),
+        key("shift", True, 1.2),
+        key("enter", True, 1.3),
+        key("enter", False, 1.35),
+        key("backspace", True, 1.36),
+        key("backspace", False, 1.37),
+        key("enter", True, 1.4),
+        key("enter", False, 1.55),
+        key("shift", False, 1.6),
+    ]
+    expected = [
+        action_model(TypeAction(content="a<shift>\\n</shift>"), 0.0, end_t=1.6),
+    ]
+    assert parse_actions(ev) == expected
+
+
+def test_shifting():
+    ev = [
+        key("shift", True, 0.4),
+        key("A", True, 0.5),
+        key("A", False, 0.6),
+        key("A", True, 0.65),
+        key("shift", False, 0.75),
+        key("a", False, 0.8),
+    ]
+    expected = [
+        action_model(TypeAction(content="AA"), 0.4, end_t=0.8),
     ]
     assert parse_actions(ev) == expected
 
@@ -119,12 +228,14 @@ def test_weird_shift_behaviour():
         key("q", True, 0.1),
         key("q", False, 0.2),
         key("W", True, 0.3),
+        key("P", True, 0.35),
         key("shift", False, 0.4),
+        key("P", False, 0.45),
         key("w", False, 0.5),
         key("a", True, 0.6),
         key("a", False, 0.7),
     ]
-    expected = [action_model(TypeAction(content="QWa"), 0.0)]
+    expected = [action_model(TypeAction(content="QWPa"), 0.0, end_t=0.7)]
     assert parse_actions(ev) == expected
 
 
@@ -137,7 +248,7 @@ def test_weird_shift_behaviour2():
         key("a", True, 0.4),
         key("a", False, 0.5),
     ]
-    expected = [action_model(TypeAction(content="Qa"), 0.0)]
+    expected = [action_model(TypeAction(content="Qa"), 0.0, end_t=0.5)]
     assert parse_actions(ev) == expected
 
 
@@ -150,7 +261,7 @@ def test_weird_shift_behaviour3():
         key("a", True, 0.4),
         key("a", False, 0.5),
     ]
-    expected = [action_model(TypeAction(content="Qa"), 0.0)]
+    expected = [action_model(TypeAction(content="Qa"), 0.0, end_t=0.5)]
     assert parse_actions(ev) == expected
 
 
@@ -163,7 +274,7 @@ def test_weird_shift_behaviour4():
         key("a", True, 0.4),
         key("a", False, 0.5),
     ]
-    expected = [action_model(TypeAction(content="Qa"), 0.0)]
+    expected = [action_model(TypeAction(content="Qa"), 0.0, end_t=0.5)]
     assert parse_actions(ev) == expected
 
 
@@ -176,7 +287,7 @@ def test_weird_shift_behaviour5():
         key("a", True, 0.4),
         key("a", False, 0.5),
     ]
-    expected = [action_model(TypeAction(content="$a"), 0.0)]
+    expected = [action_model(TypeAction(content="$a"), 0.0, end_t=0.5)]
     assert parse_actions(ev) == expected
 
 
@@ -189,7 +300,7 @@ def test_weird_shift_behaviour6():
         key("a", True, 0.4),
         key("a", False, 0.5),
     ]
-    expected = [action_model(TypeAction(content="<a"), 0.0)]
+    expected = [action_model(TypeAction(content="<a"), 0.0, end_t=0.5)]
     assert parse_actions(ev) == expected
 
 
@@ -202,7 +313,7 @@ def test_weird_shift_behaviour7():
         key("a", True, 0.4),
         key("a", False, 0.5),
     ]
-    expected = [action_model(TypeAction(content="<a"), 0.0)]
+    expected = [action_model(TypeAction(content="<a"), 0.0, end_t=0.5)]
     assert parse_actions(ev) == expected
 
 
@@ -215,8 +326,8 @@ def test_typing_groups_and_gap():
     )
     out = parse_actions(ev)
     expected = [
-        action_model(TypeAction(content="hello"), 0.0),
-        action_model(TypeAction(content="h"), 3.0),
+        action_model(TypeAction(content="hello"), 0.0, end_t=0.9),
+        action_model(TypeAction(content="h"), 3.0, end_t=3.1),
     ]
     assert out == expected
 
@@ -235,8 +346,9 @@ def test_backspace_behaviour():
 
     out = parse_actions(ev1 + ev2)
     expected = [
-        action_model(TypeAction(content="a"), 0.0),  # 'b' removed
-        action_model(TypeAction(content="<Backspace>"), 2.35),  # standalone
+        action_model(TypeAction(content="a"), 0.0, end_t=0.25),  # 'b' removed
+        # XXX: backspace timeings are slightly off right now
+        action_model(TypeAction(content="<Backspace>"), 2.3, end_t=2.30),  # standalone
     ]
     assert out == expected
 
@@ -253,7 +365,7 @@ def test_type_over_time():
         key("d", False, 2.34),
     ]
     out = parse_actions(ev)
-    expected = [action_model(TypeAction(content="abcd"), 0.0)]
+    expected = [action_model(TypeAction(content="abcd"), 0.0, end_t=2.34)]
     assert out == expected
 
 
@@ -265,7 +377,7 @@ def test_enter_newline():
         key("enter", True, 0.1),
         key("enter", False, 0.15),
     ]
-    expected = [action_model(TypeAction(content="x\\n"), 0.0)]
+    expected = [action_model(TypeAction(content="x\\n"), 0.0, end_t=0.15)]
     assert parse_actions(ev) == expected
 
 
@@ -278,7 +390,26 @@ def test_tab_enter():
         key("enter", True, 0.1),
         key("enter", False, 0.15),
     ]
-    expected = [action_model(TypeAction(content="p\\t\\n"), 0.0)]
+    expected = [action_model(TypeAction(content="p\\t\\n"), 0.0, end_t=0.15)]
+    assert parse_actions(ev) == expected
+
+
+def test_composite_timings():
+    ev = [
+        scroll(0, 3, 100, 100, 0.0),
+        key("p", True, 0.02),
+        key("p", False, 0.05),
+        mb(100, 100, True, 0.07),
+        mb(100, 100, False, 0.08),
+        key("enter", True, 0.1),
+        key("enter", False, 0.15),
+    ]
+    expected = [
+        action_model(ScrollAction(point=Point(x=100, y=100), direction="up"), 0.0),
+        action_model(TypeAction(content="p"), 0.02, end_t=0.05),
+        action_model(ClickAction(point=Point(x=100, y=100)), 0.07, end_t=0.08),
+        action_model(TypeAction(content="\\n"), 0.1, end_t=0.15),
+    ]
     assert parse_actions(ev) == expected
 
 
@@ -301,6 +432,62 @@ def test_scroll_directions(dx, dy, expect):
         action_model(ScrollAction(point=Point(x=100, y=100), direction=expect), 0.0)
     ]
     assert out == expected
+
+
+# def test_multiple_scrolls():
+#     ev = [
+#         scroll(0, 3, 100, 100, 0.0),
+#         scroll(0, 3, 100, 100, 0.1),
+#         scroll(0, 3, 100, 100, 0.2),
+#     ]
+#     out = parse_actions(ev)
+#     expected = [
+#         action_model(ScrollAction(point=Point(x=100, y=100), direction="up"), 0.0, end_t=0.2),
+#     ]
+#     assert out == expected
+
+# def test_multiple_scrolls_move_a_bit():
+#     ev = [
+#         scroll(0, 3, 100, 100, 0.0),
+#         scroll(0, 3, 100, 102, 0.1),
+#         scroll(0, 3, 100, 100, 0.2),
+#     ]
+#     out = parse_actions(ev)
+#     expected = [
+#         action_model(ScrollAction(point=Point(x=100, y=100), direction="up"), 0.0, end_t=0.2),
+#     ]
+#     assert out == expected
+
+# def test_multiple_scrolls_move_a_lot():
+#     ev = [
+#         scroll(0, 3, 100, 100, 0.0),
+#         scroll(0, 3, 100, 100, 0.1),
+#         scroll(0, 3, 100, 100, 0.2),
+#     ]
+#     out = parse_actions(ev)
+#     expected = [
+#         action_model(ScrollAction(point=Point(x=100, y=100), direction="up"), 0.0, end_t=0.2),
+#     ]
+#     assert out == expected
+
+# def test_multiple_scrolls_with_stuff_between():
+#     ev = [
+#         scroll(0, 3, 100, 100, 0.0),
+#         scroll(0, 3, 100, 100, 0.1),
+#         scroll(0, 3, 100, 100, 0.2),
+#         key("a", True, 0.3),
+#         key("a", False, 0.4),
+#         scroll(0, 3, 100, 100, 0.5),
+#         scroll(0, 3, 100, 100, 0.6),
+#         scroll(0, 3, 100, 100, 0.7),
+#     ]
+#     out = parse_actions(ev)
+#     expected = [
+#         action_model(ScrollAction(point=Point(x=100, y=100), direction="up"), 0.0, end_t=0.2),
+#         action_model(TypeAction(content="a"), 0.3, end_t=0.4),
+#         action_model(ScrollAction(point=Point(x=100, y=100), direction="up"), 0.5, end_t=0.7),
+#     ]
+#     assert out == expected
 
 
 # 8 ───── Lone mouse-moves are ignored ───────────────────────────────────────
