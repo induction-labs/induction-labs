@@ -172,7 +172,7 @@ def submit(
     # max is 2000Gi on AWS
     # max is 1870.2Gi on Azure
 
-    memory_gb = (num_gpus * 128) + 64
+    memory_gb = (num_gpus * 256) + 64
     memory_gb = min(memory_gb, 1600)  # Limit to 2000Gi
     # Max is 208 on lambda
     # Max is 96 on Azure

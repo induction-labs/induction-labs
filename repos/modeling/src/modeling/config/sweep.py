@@ -29,6 +29,11 @@ class Sweep:
             return exp
 
         @staticmethod
+        def batch_size(batch_size: int, exp: ExperimentConfig) -> ExperimentConfig:
+            exp.run.batch_size = batch_size
+            return exp
+
+        @staticmethod
         def product(list_a: list[A], list_b: list[B]) -> list[tuple[A, B]]:
             """
             Returns the Cartesian product of list_a and list_b as a list of tuples.
