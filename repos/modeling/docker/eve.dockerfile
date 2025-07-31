@@ -40,3 +40,5 @@ RUN mkdir -p -m 0600 ~/.ssh && ssh-keyscan github.com >> ~/.ssh/known_hosts
 # Now we sync *with* ssh required deps, which will always require a rebuild.
 RUN --mount=type=cache,target=/root/.cache/uv --mount=type=ssh \
   uv sync --locked --group evals --group ssh-required
+
+CMD ["eve", "--help"]

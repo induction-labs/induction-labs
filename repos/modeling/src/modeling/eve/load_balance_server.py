@@ -87,7 +87,7 @@ async def health():
 
 async def setup_backends(backends: list[str]):
     """Initialize the backend cycle with the provided backend URLs."""
-    from modeling.eval.vllm_utils import wait_for_servers_ready
+    from modeling.eve.vllm_utils import wait_for_servers_ready
 
     print(f"Verifying {len(backends)} backends are healthy: {backends}")
 

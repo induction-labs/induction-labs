@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from synapse.utils.async_typer import AsyncTyper
 
-from modeling.eval.load_balance_server import cli_app as lb_app
-from modeling.eval.vllm_server import app as vllm_app
+from modeling.eve.load_balance_server import cli_app as lb_app
+from modeling.eve.vllm_server import app as vllm_app
 
 app = AsyncTyper()
 

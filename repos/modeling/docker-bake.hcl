@@ -9,8 +9,8 @@ target "base" {
   context    = "../../"
   dockerfile = "repos/modeling/docker/base.dockerfile"
   tags = [
-    "modeling-base:latest",
-    "modeling-base:${COMMIT_SHA}",
+    "induction-base:latest",
+    "induction-base:${COMMIT_SHA}",
   ]
   args = {}
   ssh  = ["default"] # Add this line
@@ -24,7 +24,7 @@ target "mdl" {
   dockerfile = "repos/modeling/docker/mdl.dockerfile"
   args       = {}
 
-  tags = ["modeling-mdl:latest"]
+  tags = ["induction-mdl:latest"]
   secret = [
     "id=wandb_key,src=./secrets/wandb_key",
     "id=huggingface_key,src=./secrets/huggingface_key",
@@ -33,14 +33,14 @@ target "mdl" {
   ssh = ["default"] # Add this line
 }
 
-target "eval" {
+target "eve" {
   contexts = {
     base_image = "target:base"
   }
   context    = "../../"
-  dockerfile = "repos/modeling/docker/eval.dockerfile"
+  dockerfile = "repos/modeling/docker/eve.dockerfile"
   args       = {}
-  tags       = ["modeling-eval:latest"]
+  tags       = ["induction-eve:latest"]
   secret = [
     "id=wandb_key,src=./secrets/wandb_key",
     "id=huggingface_key,src=./secrets/huggingface_key",

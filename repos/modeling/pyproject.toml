@@ -32,7 +32,7 @@ dependencies = [
 ]
 [project.scripts]
 mdl = "modeling.main:app"
-eve = "modeling.eval.cli:app"
+eve = "modeling.eve.cli:app"
 
 
 [dependency-groups]

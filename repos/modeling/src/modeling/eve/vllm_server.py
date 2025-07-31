@@ -17,7 +17,7 @@ from synapse.utils.async_typer import AsyncTyper
 from synapse.utils.logging import configure_logging, logging
 
 from modeling.checkpoints.load import download_cloud_dir
-from modeling.eval.vllm_utils import wait_for_servers_ready
+from modeling.eve.vllm_utils import wait_for_servers_ready
 from modeling.utils.cloud_path import CloudPath
 from modeling.utils.max_timeout import max_timeout
 
