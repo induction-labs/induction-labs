@@ -39,7 +39,7 @@ from modeling.config.data import (
 from modeling.config.distributed import DistributedConfig, InstanceConfig
 from modeling.distributed.distributed import TorchUrl
 from modeling.distributed.ray_head import RayUrl, initialize_ray_head
-from modeling.modules.base_module import BaseLITModule
+from modeling.modules.base_module import BaseLITModule, BaseModuleConfig
 from modeling.utils.fix_rng import fix_rng
 from modeling.utils.gen_id import gen_id
 from modeling.utils.max_timeout import max_timeout
@@ -129,6 +129,8 @@ class ManagerState:
     generator: torch.Generator
     ray_host: RayUrl
     actors: RayActors
+    train_iter: Iterator[list[SampleWithMetadata[BaseDataSample]]]
+    validation_iter: Iterator[list[SampleWithMetadata[BaseDataSample]]]
     wandb: Run | None
 
 
@@ -186,38 +188,10 @@ class ExperimentManager:
         # # Get training dataloader
         # TODO: Don't use torch dataloader class rewrite manually
 
-        train_dataset, validation_dataset = await asyncio.gather(
-            self.exp_config.train_datapack._init_dataset(
-                full_config=self.exp_config,
-            ),
-            self.exp_config.validation_datapack._init_dataset(
-                full_config=self.exp_config,
-            ),
-        )
-        train_dataloader, train_config = ExperimentManager.make_dataloader(
-            dataset=train_dataset,
-            full_config=self.exp_config,
-            generator=self.state.generator,
-        )
-        validation_dataloader, validation_config = ExperimentManager.make_dataloader(
-            dataset=validation_dataset,
-            full_config=self.exp_config,
-            generator=self.state.generator,
-        )
-
-        logger.info(f"Train DataLoader Config: {train_config}")
-        logger.info(f"Validation DataLoader Config: {validation_config}")
-
         module_cls = cast(type[BaseLITModule], self.exp_config.module.module_cls())
 
-        train_iter = cast(
-            Iterator[list[SampleWithMetadata[BaseDataSample]]], iter(train_dataloader)
-        )
-
-        validation_iter = cast(
-            Iterator[list[SampleWithMetadata[BaseDataSample]]],
-            iter(validation_dataloader),
-        )
+        train_iter = self.state.train_iter
+        validation_iter = self.state.validation_iter
 
         # # Training loop
         num_steps = self.exp_config.run.num_steps
@@ -337,7 +311,7 @@ class ExperimentManager:
         dataset: BaseDataset[DataSample, Never],
         full_config: ExperimentConfig[DataSample],
         generator: torch.Generator,
-    ) -> tuple[DataLoader[list[SampleWithMetadata[DataSample]]], dict]:
+    ) -> tuple[Iterator[list[SampleWithMetadata[DataSample]]], dict]:
         """
         Create a DataLoader for the training dataset.
         This method is used to create a DataLoader for the training dataset with the specified batch size and collate function.
@@ -390,7 +364,15 @@ class ExperimentManager:
             "num_workers": data_loader.num_workers,
         }
 
-        return typed_data_loader, config
+        # Note that we return the ITERATOR of the dataloader not just the dataloader itself
+        # This is to start prefetching data - the MP prefetching only starts when the iterator is created,
+        # not when the DataLoader is created.
+
+        iterator = cast(
+            Iterator[list[SampleWithMetadata[DataSample]]], iter(typed_data_loader)
+        )
+
+        return iterator, config
 
     @staticmethod
     def init_wandb(exp_config: UnifiedExperimentConfig) -> Run | None:
@@ -471,6 +453,21 @@ class ExperimentManager:
         return {
             node_resource_str(0): float(distributed_config.devices_per_node),
         }
+
+    @staticmethod
+    def download_weights(unified_config: UnifiedExperimentConfig) -> None:
+        """
+        Download the model weights for the module.
+        This method should be called after the actor has been initialized.
+        This should only be called on global_rank 0
+        """
+        os.makedirs(unified_config.runtime_config.model_weights_dir, exist_ok=False)
+        module_cls = unified_config.module.module_cls()
+        assert isinstance(unified_config.module, BaseModuleConfig)
+        module_cls.download_weights(
+            module_config=unified_config.module,
+            tmpdir=unified_config.runtime_config.model_weights_dir,
+        )
 
     @staticmethod
     @asynccontextmanager
@@ -554,17 +551,64 @@ class ExperimentManager:
                         scheme="tcp",
                     )
                     logger.debug(f"Rank 0 address: {rank0_address}")
-                    await asyncio.gather(
+                    distributed_promise = asyncio.gather(
                         *[
                             actor.init_distributed.remote(rank0_address)
                             for actor in actors.all_actors
                         ]
                     )
-                logger.debug("Distributed training initialized for all actors.")
 
-                with elapsed_timer("Experiment.DownloadWeights"):
-                    await actors.rank0.download_weights.remote()
-                logger.debug("Model weights downloaded to actors.")
+                with elapsed_timer(
+                    "Experiment.InitDataloaders"
+                ) as init_dataloader_timer:
+                    # We initialize dataloaders here because it is a head only operation and
+                    # init distributed takes a long time.
+                    train_dataset, validation_dataset = await asyncio.gather(
+                        unified_config.train_datapack._init_dataset(
+                            full_config=unified_config,
+                        ),
+                        unified_config.validation_datapack._init_dataset(
+                            full_config=unified_config,
+                        ),
+                    )
+                    train_dataiter, train_config = ExperimentManager.make_dataloader(
+                        dataset=train_dataset,
+                        full_config=unified_config,
+                        generator=generator,
+                    )
+                    validation_dataiter, validation_config = (
+                        ExperimentManager.make_dataloader(
+                            dataset=validation_dataset,
+                            full_config=unified_config,
+                            generator=generator,
+                        )
+                    )
+                logger.debug(
+                    f"Dataloaders initialized in {init_dataloader_timer.elapsed:.2f}"
+                )
+                logger.info(f"Train dataloader config: {train_config}")
+                logger.info(f"Validation dataloader config: {validation_config}")
+
+                with elapsed_timer(
+                    "Experiment.DownloadWeights"
+                ) as download_weights_timer:
+                    # Download the model weights to the actors
+                    ExperimentManager.download_weights(unified_config)
+                logger.debug(
+                    f"Model weights downloaded to {unified_config.runtime_config.model_weights_dir} in {download_weights_timer.elapsed:.2f} seconds."
+                )
+
+                with elapsed_timer("Experiment.WaitForDistributed") as wait_dist_timer:
+                    # Wait for all actors to initialize distributed training
+                    await max_timeout(
+                        distributed_promise,
+                        timeout=timedelta(seconds=60 * 5),
+                        err_msg="Distributed training did not initialize in time",
+                    )
+
+                logger.debug(
+                    f"Distributed training initialized for all actors in {wait_dist_timer.elapsed:.2f} seconds."
+                )
 
                 with elapsed_timer("Experiment.ConfigureModel"):
                     await asyncio.gather(
@@ -590,6 +634,8 @@ class ExperimentManager:
                     wandb=wandb_run,
                     ray_host=ray_host,
                     actors=actors,
+                    train_iter=train_dataiter,
+                    validation_iter=validation_dataiter,
                 )
 
                 try:

@@ -87,4 +87,5 @@ RUN --mount=type=cache,target=/root/.cache/uv --mount=type=ssh \
 # COPY ../../ ../../
 # For now don't sync vllm :/
 
-ENTRYPOINT [ "devenv", "shell" ]
+# Use --offline to prevent devenv from trying to refresh the environment
+ENTRYPOINT [ "devenv", "shell", "--offline" ]

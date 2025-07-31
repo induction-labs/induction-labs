@@ -29,7 +29,8 @@ spec:
           # image: us-central1-docker.pkg.dev/induction-labs/induction-docker/modeling:latest
           image: registry.depot.dev/v2tbx2d1w1:snsd7rnnn4-remote
           imagePullPolicy: Always # Always pull latest
-          command: ["devenv", "shell"]
+          # Don't specify command, use default command in Dockerfile
+          # command: ["devenv", "shell", "--offline"]
           env:
             - name: LD_PRELOAD
               value: /usr/lib/x86_64-linux-gnu/libcuda.so:/usr/lib/x86_64-linux-gnu/libnvidia-ml.so.1:/lib/x86_64-linux-gnu/libnvidia-ptxjitcompiler.so.1

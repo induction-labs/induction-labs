@@ -272,15 +272,16 @@ class BaseLITModule(ABC, Generic[MODEL_TYPE, DATA_TYPE, CONFIG_TYPE]):
         """
         raise NotImplementedError("Subclasses must implement this method.")
 
-    def download_weights(self, tmpdir: Path) -> None:
+    @classmethod
+    def download_weights(cls, module_config: BaseModuleConfig, tmpdir: Path) -> None:
         """
         Abstract method to be implemented by subclasses for downloading model weights.
         """
 
         download_model_checkpoint(
             tmpdir,
-            self.module_config.model_name,
-            self.module_config.checkpoint_path,
+            module_config.model_name,
+            module_config.checkpoint_path,
         )
 
     def load_weights(self, tmpdir: Path) -> MODEL_TYPE:

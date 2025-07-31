@@ -46,6 +46,14 @@ class RuntimeConfig(BaseModel):
     start_time: datetime
     tmp_dir: Path
 
+    @property
+    def model_weights_dir(self) -> Path:
+        """
+        Return the directory where model weights are stored.
+        This is typically used for saving and loading model checkpoints.
+        """
+        return self.tmp_dir / "model_weights"
+
 
 # TODO: Make checkpoint config use different backends and have it dynamically loaded and stuff
 # for now just only use gcs checkpoints
