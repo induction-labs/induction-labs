@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import TypeVar
 
 from liger_kernel.transformers import (
-    apply_liger_kernel_to_qwen2_vl,
+    apply_liger_kernel_to_qwen2_5_vl,
 )
 from synapse.utils.logging import configure_logging, logging
 from torch.distributed.device_mesh import DeviceMesh
@@ -47,7 +47,7 @@ class Qwen25VLActionLIT(BaseVlSft[MODEL_TYPE, "VlSftLITConfig"]):
     def patch_model(self) -> Qwen2_5_VLForConditionalGeneration:
         if self.module_config.use_liger_kernel:
             logger.debug("Applying Liger Kernel to Qwen2.5 VL model")
-            apply_liger_kernel_to_qwen2_vl(model=self.model)
+            apply_liger_kernel_to_qwen2_5_vl(model=self.model)
         return super().patch_model()
 
     def call_model(self, inputs: VlDataSample) -> Qwen2_5_VLCausalLMOutputWithPast:
