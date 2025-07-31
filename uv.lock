@@ -3056,7 +3056,7 @@ requires-dist = [
     { name = "torchvision", marker = "sys_platform != 'linux'", specifier = ">=0.22.1" },
     { name = "torchvision", marker = "sys_platform == 'linux'", specifier = ">=0.22.1", index = "https://download.pytorch.org/whl/cu128" },
     { name = "tqdm", specifier = ">=4.67.1" },
-    { name = "transformers", git = "https://github.com/induction-labs/transformers.git?branch=main" },
+    { name = "transformers", git = "https://github.com/induction-labs/transformers.git?branch=fix-explicit-none-check-flashattention" },
     { name = "triton", specifier = ">=3.3.1", index = "https://download.pytorch.org/whl" },
     { name = "typer", specifier = ">=0.16.0" },
     { name = "wandb", specifier = ">=0.19.11" },
@@ -6205,8 +6205,8 @@ wheels = [
 
 [[package]]
 name = "transformers"
-version = "4.55.0.dev0"
-source = { git = "https://github.com/induction-labs/transformers.git?branch=main#b6b27929ac59b59924066f5a178669e6e1a904e5" }
+version = "4.54.0.dev0"
+source = { git = "https://github.com/induction-labs/transformers.git?branch=fix-explicit-none-check-flashattention#a6b1b0237d0ed31e30aa8a9079896f2979cfcd33" }
 dependencies = [
     { name = "filelock" },
     { name = "huggingface-hub" },
