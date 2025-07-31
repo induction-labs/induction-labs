@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import sys
 
+from rich.console import Console
 from rich.logging import RichHandler
 
 NODE_RANK = "NODE_RANK"
@@ -61,7 +62,9 @@ def configure_logging(
 
     if use_rich:
         # RichHandler automatically formats with colors, tracebacks, etc.
+        console = Console(soft_wrap=False)  # disable wrapping
         console_handler = RichHandler(
+            console=console,
             level=level,
             markup=True,  # enable markup in messages
             rich_tracebacks=True,  # pretty-print exceptions
