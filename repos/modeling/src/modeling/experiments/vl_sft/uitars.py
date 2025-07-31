@@ -17,7 +17,7 @@ from modeling.data.trajectory_train import VlDatapackConfig
 from modeling.data.video_action import (
     VideoProcessorConfig,
 )
-from modeling.modules.base_module import OptimizerType
+from modeling.modules.base_module import CompileConfig, OptimizerType
 from modeling.modules.vl_sft.qwen_25vl import VlSftLITConfig
 from modeling.types import Accelerator, DType
 from modeling.utils.cloud_path import CloudPath
@@ -49,7 +49,7 @@ UITarsActionExperimentConfig_GPU = ExperimentConfig(
         model_name=model_name,
         tokenizer_name=model_name,
         optimizer=OptimizerType.ADAMW,
-        # compile=CompileConfig(),
+        compile=CompileConfig(),
         freeze_vision=True,
     ),
     train_datapack=VlDatapackConfig(
@@ -75,7 +75,7 @@ UITarsActionExperimentConfig_GPU = ExperimentConfig(
         distributed=DistributedConfig(
             devices_per_node=num_devices,
         ),
-        attn_impl=AttentionImplementation.SDPA,
+        attn_impl=AttentionImplementation.FLASH_ATTENTION_2,
         accelerator=Accelerator.CUDA,
         precision=DType.bf16,
         seed=93208839,

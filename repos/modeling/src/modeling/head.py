@@ -234,7 +234,7 @@ class ExperimentManager:
                     f"{len(batch)=} != {len(self.state.actors)=}"
                 )
                 indices = [data.indices for data in batch]
-                logger.info(f"Training step {step}: {indices=} indices")
+                # logger.info(f"Training step {step}: {indices=} indices")
 
                 all_train_metrics = await asyncio.gather(
                     *[
