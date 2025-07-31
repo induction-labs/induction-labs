@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Annotated
 
 import typer
+from synapse.elapsed_timer import elapsed_timer
 from synapse.utils.async_typer import AsyncTyper
 from synapse.utils.logging import configure_logging, logging
 
@@ -42,7 +43,9 @@ async def start_vllm_servers(
 
     processes: list[subprocess.Popen] = []
 
-    logger.info(f"Starting {num_gpus} vLLM servers...")
+    logger.info(
+        f"Starting vllm {model=} on {num_gpus=} GPUs, starting at port {base_port}"
+    )
 
     # Start vLLM servers for each GPU
     for gpu in range(num_gpus):
@@ -95,7 +98,15 @@ async def start_vllm_servers(
 
     logger.info(f"Started {len(processes)} vLLM servers")
     logger.info(
-        f"Servers running on ports: {[base_port + i for i in range(len(processes))]}"
+        f"Servers running on ports: {[base_port + i for i in range(len(processes))]}, waiting for them to be ready..."
+    )
+
+    # Wait for all servers to be ready
+    with elapsed_timer("vllm_servers_startup") as startup_timer:
+        await wait_for_servers_ready(processes, base_port, num_gpus)
+
+    logger.info(
+        f"All {len(processes)} vLLM servers are ready! Startup took {startup_timer.elapsed:.2f} seconds"
     )
 
     try:
@@ -122,6 +133,65 @@ async def start_vllm_servers(
                 process.kill()
 
         logger.info("All servers shut down")
+
+
+async def wait_for_servers_ready(
+    processes: list[subprocess.Popen], base_port: int, num_gpus: int
+):
+    """Wait for all vLLM servers to be ready by polling their health endpoints."""
+    import aiohttp
+
+    async def check_server_ready(port: int, gpu: int) -> bool:
+        """Check if a single vLLM server is ready."""
+        try:
+            async with (
+                aiohttp.ClientSession() as session,
+                session.get(
+                    f"http://localhost:{port}/health",
+                    timeout=aiohttp.ClientTimeout(total=2),
+                ) as response,
+            ):
+                if response.status == 200:
+                    logger.info(f"GPU {gpu} server (port {port}) is ready")
+                    return True
+        except Exception:
+            # Server not ready yet, continue polling
+            pass
+        return False
+
+    ready_servers = set()
+    max_attempts = 300  # 5 minutes with 1 second intervals
+    attempt = 0
+
+    while len(ready_servers) < len(processes) and attempt < max_attempts:
+        attempt += 1
+
+        # Check all servers that aren't ready yet
+        for i, process in enumerate(processes):
+            if i in ready_servers:
+                continue
+
+            # Check if process is still running
+            if process.poll() is not None:
+                logger.error(
+                    f"GPU {i} process (PID {process.pid}) has terminated unexpectedly"
+                )
+                continue
+
+            port = base_port + i
+            if await check_server_ready(port, i):
+                ready_servers.add(i)
+
+        if len(ready_servers) < len(processes):
+            await asyncio.sleep(1)
+
+    if len(ready_servers) < len(processes):
+        not_ready = set(range(len(processes))) - ready_servers
+        logger.warning(
+            f"Timeout waiting for servers on GPUs {list(not_ready)} to be ready"
+        )
+
+    return len(ready_servers) == len(processes)
 
 
 # uv run python -m modeling.val.vllm_server start --help
