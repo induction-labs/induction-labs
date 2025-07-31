@@ -13,8 +13,8 @@ from synapse.elapsed_timer import elapsed_timer
 from synapse.utils.async_typer import AsyncTyper
 from synapse.utils.logging import configure_logging, logging
 
+from modeling.eval.vllm_utils import wait_for_servers_ready
 from modeling.utils.max_timeout import max_timeout
-from modeling.val.vllm_utils import wait_for_servers_ready
 
 logger = configure_logging(__name__, level=logging.INFO)
 app = AsyncTyper()
@@ -159,7 +159,7 @@ async def start_vllm_servers(
                 lb_cmd = [
                     "python",
                     "-m",
-                    "modeling.val.cli",
+                    "modeling.eval.cli",
                     "lb",
                     "serve",
                     "--port",
