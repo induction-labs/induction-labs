@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import os
+import signal
 import subprocess
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Annotated
 
@@ -11,6 +12,9 @@ import typer
 from synapse.elapsed_timer import elapsed_timer
 from synapse.utils.async_typer import AsyncTyper
 from synapse.utils.logging import configure_logging, logging
+
+from modeling.utils.max_timeout import max_timeout
+from modeling.val.vllm_utils import wait_for_servers_ready
 
 logger = configure_logging(__name__, level=logging.INFO)
 app = AsyncTyper()
@@ -27,173 +31,242 @@ async def start_vllm_servers(
     num_gpus: Annotated[
         int, typer.Option("--num-gpus", "-n", help="Number of GPUs to use")
     ] = 8,
+    load_balancer_port: Annotated[
+        int, typer.Option("--load-balancer-port", "-lb", help="Port for load balancer")
+    ] = 8080,
 ):
     """Start multiple vLLM servers using subprocess instead of tmux."""
 
-    # Create timestamped log directory
+    # Create timestamped log directory in tmpdir
+    import tempfile
+
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    log_dir = Path(__file__).parent / "logs" / timestamp
+    log_dir = Path(tempfile.gettempdir()) / "vllm_logs" / timestamp
     log_dir.mkdir(parents=True, exist_ok=True)
     logger.info(f"Logs will be saved to: {log_dir}")
 
     # Environment variables needed by vLLM / CUDA
     env = os.environ.copy()
-    # env["NIX_LDFLAGS"] = "-L/usr/lib/x86_64-linux-gnu"
-    # env["NIX_CFLAGS_COMPILE"] = "-I/usr/local/cuda/include"
 
     processes: list[subprocess.Popen] = []
 
-    logger.info(
-        f"Starting vllm {model=} on {num_gpus=} GPUs, starting at port {base_port}"
-    )
+    # Set up signal handler for graceful shutdown
+    shutdown_event = asyncio.Event()
+    shutting_down = False
 
-    # Start vLLM servers for each GPU
-    for gpu in range(num_gpus):
-        port = base_port + gpu
+    def signal_handler(signum, _):
+        nonlocal shutting_down
+        if shutting_down:
+            logger.info(f"\nReceived signal {signum} again, force exiting...")
+            os._exit(1)
+        logger.info(f"\nReceived signal {signum}, shutting down servers...")
+        shutting_down = True
+        shutdown_event.set()
 
-        # Set CUDA_VISIBLE_DEVICES for this specific process
-        process_env = env.copy()
-        process_env["CUDA_VISIBLE_DEVICES"] = str(gpu)
+    # Register signal handlers
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
 
-        cmd = [
-            "vllm",
-            "serve",
-            model,
-            "--port",
-            str(port),
-            "--enable-prefix-caching",
-            "--tensor-parallel-size",
-            "1",
+    try:
+        logger.info(
+            f"Starting vllm {model=} on {num_gpus=} GPUs, starting at port {base_port}"
+        )
+
+        # Start vLLM servers for each GPU
+        for gpu in range(num_gpus):
+            port = base_port + gpu
+
+            # Set CUDA_VISIBLE_DEVICES for this specific process
+            process_env = env.copy()
+            process_env["CUDA_VISIBLE_DEVICES"] = str(gpu)
+
+            cmd = [
+                "vllm",
+                "serve",
+                model,
+                "--port",
+                str(port),
+                "--enable-prefix-caching",
+                "--tensor-parallel-size",
+                "1",
+            ]
+
+            logger.info(f"Starting vLLM server on GPU {gpu}, port {port}")
+
+            # Create log files for this GPU
+            stdout_log = log_dir / f"gpu_{gpu}_stdout.log"
+            stderr_log = log_dir / f"gpu_{gpu}_stderr.log"
+
+            try:
+                with (
+                    open(stdout_log, "w") as stdout_file,
+                    open(stderr_log, "w") as stderr_file,
+                ):
+                    process = subprocess.Popen(
+                        cmd,
+                        env=process_env,
+                        stdout=stdout_file,
+                        stderr=stderr_file,
+                        text=True,
+                    )
+                    processes.append(process)
+                    logger.info(f"Started process {process.pid} for GPU {gpu}")
+                    logger.info(f"  stdout: {stdout_log}")
+                    logger.info(f"  stderr: {stderr_log}")
+
+                    # Small delay to prevent overwhelming the system
+                    await asyncio.sleep(0.1)
+
+            except Exception as e:
+                logger.error(f"Failed to start vLLM server for GPU {gpu}: {e}")
+                continue
+
+        logger.info(f"Started {len(processes)} vLLM servers")
+        logger.info(
+            f"Servers running on ports: {[base_port + i for i in range(len(processes))]}, waiting for them to be ready..."
+        )
+
+        # Wait for all servers to be ready
+        backend_urls = [
+            f"http://127.0.0.1:{base_port + i}" for i in range(len(processes))
         ]
+        with elapsed_timer("vllm_servers_startup") as startup_timer:
+            await max_timeout(
+                wait_for_servers_ready(backend_urls),
+                timedelta(minutes=5),
+                "Timeout waiting for vLLM servers to be ready",
+            )
 
-        logger.info(f"Starting vLLM server on GPU {gpu}, port {port}")
+        logger.info(
+            f"All {len(processes)} vLLM servers are ready! Startup took {startup_timer.elapsed:.2f} seconds"
+        )
 
-        # Create log files for this GPU
-        stdout_log = log_dir / f"gpu_{gpu}_stdout.log"
-        stderr_log = log_dir / f"gpu_{gpu}_stderr.log"
+        # Start the load balancer FastAPI server
+        logger.info(f"Starting load balancer on port {load_balancer_port}")
+        lb_stdout_log = log_dir / "load_balancer_stdout.log"
+        lb_stderr_log = log_dir / "load_balancer_stderr.log"
 
         try:
             with (
-                open(stdout_log, "w") as stdout_file,
-                open(stderr_log, "w") as stderr_file,
+                open(lb_stdout_log, "w") as lb_stdout_file,
+                open(lb_stderr_log, "w") as lb_stderr_file,
             ):
-                process = subprocess.Popen(
-                    cmd,
-                    env=process_env,
-                    stdout=stdout_file,
-                    stderr=stderr_file,
+                # Generate backend URLs for the load balancer
+                backend_urls = [
+                    f"http://127.0.0.1:{base_port + i}" for i in range(len(processes))
+                ]
+
+                lb_cmd = [
+                    "python",
+                    "-m",
+                    "modeling.val.cli",
+                    "lb",
+                    "serve",
+                    "--port",
+                    str(load_balancer_port),
+                ]
+                # Add each backend URL as a separate --backend argument
+                for url in backend_urls:
+                    lb_cmd.extend(["--backend", url])
+
+                lb_process = subprocess.Popen(
+                    lb_cmd,
+                    env=env,
+                    stdout=lb_stdout_file,
+                    stderr=lb_stderr_file,
                     text=True,
                 )
-                processes.append(process)
-                logger.info(f"Started process {process.pid} for GPU {gpu}")
-                logger.info(f"  stdout: {stdout_log}")
-                logger.info(f"  stderr: {stderr_log}")
+                processes.append(lb_process)
+                logger.info(f"Started load balancer process {lb_process.pid}")
+                logger.info(f"  stdout: {lb_stdout_log}")
+                logger.info(f"  stderr: {lb_stderr_log}")
 
-                # Small delay to prevent overwhelming the system
                 await asyncio.sleep(0.1)
 
         except Exception as e:
-            logger.error(f"Failed to start vLLM server for GPU {gpu}: {e}")
-            continue
+            logger.error(f"Failed to start load balancer: {e}")
 
-    logger.info(f"Started {len(processes)} vLLM servers")
-    logger.info(
-        f"Servers running on ports: {[base_port + i for i in range(len(processes))]}, waiting for them to be ready..."
-    )
+        # Wait for load balancer to be ready
+        lb_url = f"http://127.0.0.1:{load_balancer_port}"
+        logger.info(f"Waiting for load balancer at {lb_url} to be ready...")
 
-    # Wait for all servers to be ready
-    with elapsed_timer("vllm_servers_startup") as startup_timer:
-        await wait_for_servers_ready(processes, base_port, num_gpus)
+        with elapsed_timer("load_balancer_startup") as lb_timer:
+            await max_timeout(
+                wait_for_servers_ready([lb_url]),
+                timedelta(minutes=2),
+                "Timeout waiting for load balancer to be ready",
+            )
 
-    logger.info(
-        f"All {len(processes)} vLLM servers are ready! Startup took {startup_timer.elapsed:.2f} seconds"
-    )
-
-    try:
-        # Wait for all processes to complete
-        await asyncio.gather(
-            *[asyncio.to_thread(process.wait) for process in processes]
+        logger.info(
+            f"Load balancer is ready! Setup took {lb_timer.elapsed:.2f} seconds"
         )
 
-    except KeyboardInterrupt:
-        logger.info("\nShutting down servers...")
-        # Terminate all processes
-        for i, process in enumerate(processes):
-            if process.poll() is None:  # Process is still running
-                logger.info(f"Terminating process {process.pid} (GPU {i})")
-                process.terminate()
+        # Wait for shutdown signal
+        await shutdown_event.wait()
 
-        # Wait a bit for graceful shutdown
-        await asyncio.sleep(2)
+    except Exception as e:
+        logger.error(f"Unexpected error: {e}")
+    finally:
+        if processes:
+            logger.info("Shutting down servers...")
+            # Terminate all processes
+            for i, process in enumerate(processes):
+                if process.poll() is None:  # Process is still running
+                    logger.info(
+                        f"Terminating process {process.pid} (GPU {i if i < len(processes) - 1 else 'load balancer'})"
+                    )
+                    try:
+                        process.terminate()
+                    except Exception as e:
+                        logger.warning(
+                            f"Failed to terminate process {process.pid}: {e}"
+                        )
 
-        # Force kill if still running
-        for i, process in enumerate(processes):
-            if process.poll() is None:
-                logger.warning(f"Force killing process {process.pid} (GPU {i})")
-                process.kill()
+            # Wait a bit for graceful shutdown
+            try:
+                await asyncio.wait_for(asyncio.sleep(2), timeout=3.0)
+            except TimeoutError:
+                logger.warning("Timeout during graceful shutdown wait")
 
-        logger.info("All servers shut down")
+            # Force kill if still running
+            for i, process in enumerate(processes):
+                if process.poll() is None:
+                    logger.warning(
+                        f"Force killing process {process.pid} (GPU {i if i < len(processes) - 1 else 'load balancer'})"
+                    )
+                    try:
+                        process.kill()
+                    except Exception as e:
+                        logger.warning(f"Failed to kill process {process.pid}: {e}")
 
+            logger.info("All servers shut down")
 
-async def wait_for_servers_ready(
-    processes: list[subprocess.Popen], base_port: int, num_gpus: int
-):
-    """Wait for all vLLM servers to be ready by polling their health endpoints."""
-    import aiohttp
-
-    async def check_server_ready(port: int, gpu: int) -> bool:
-        """Check if a single vLLM server is ready."""
-        try:
-            async with (
-                aiohttp.ClientSession() as session,
-                session.get(
-                    f"http://localhost:{port}/health",
-                    timeout=aiohttp.ClientTimeout(total=2),
-                ) as response,
-            ):
-                if response.status == 200:
-                    logger.info(f"GPU {gpu} server (port {port}) is ready")
-                    return True
-        except Exception:
-            # Server not ready yet, continue polling
-            pass
-        return False
-
-    ready_servers = set()
-    max_attempts = 300  # 5 minutes with 1 second intervals
-    attempt = 0
-
-    while len(ready_servers) < len(processes) and attempt < max_attempts:
-        attempt += 1
-
-        # Check all servers that aren't ready yet
-        for i, process in enumerate(processes):
-            if i in ready_servers:
-                continue
-
-            # Check if process is still running
-            if process.poll() is not None:
-                logger.error(
-                    f"GPU {i} process (PID {process.pid}) has terminated unexpectedly"
-                )
-                continue
-
-            port = base_port + i
-            if await check_server_ready(port, i):
-                ready_servers.add(i)
-
-        if len(ready_servers) < len(processes):
-            await asyncio.sleep(1)
-
-    if len(ready_servers) < len(processes):
-        not_ready = set(range(len(processes))) - ready_servers
-        logger.warning(
-            f"Timeout waiting for servers on GPUs {list(not_ready)} to be ready"
-        )
-
-    return len(ready_servers) == len(processes)
+        # Restore default signal handlers to prevent hanging
+        signal.signal(signal.SIGINT, signal.SIG_DFL)
+        signal.signal(signal.SIGTERM, signal.SIG_DFL)
 
 
 # uv run python -m modeling.val.vllm_server start --help
 if __name__ == "__main__":
     app()
+
+"""
+curl -X POST http://localhost:8080/v1/chat/completions \
+    -H "Content-Type: application/json" \
+    -d '{
+      "model": "ByteDance-Seed/UI-TARS-1.5-7B",
+      "messages": [
+        {
+          "role": "user", 
+          "content": [
+            {
+              "type": "text",
+              "text": "Hello, how are you today?"
+            }
+          ]
+        }
+      ],
+      "max_tokens": 100,
+      "temperature": 0.7
+    }' | jq
+"""
