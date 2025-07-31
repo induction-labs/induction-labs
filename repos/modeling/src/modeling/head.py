@@ -228,7 +228,8 @@ class ExperimentManager:
                 validation_metrics["validation/head_time"] = validation_timer.elapsed
                 self.wandb_log(validation_metrics, step=step)
             with elapsed_timer("training_step") as training_timer:
-                batch = next(train_iter)
+                with elapsed_timer("wait_train_data") as train_data_timer:
+                    batch = next(train_iter)
                 assert isinstance(batch, list), f"{batch=}"
                 assert len(batch) == len(self.state.actors), (
                     f"{len(batch)=} != {len(self.state.actors)=}"
@@ -248,6 +249,7 @@ class ExperimentManager:
 
                 train_metrics = module_cls.training_wandb_metrics(all_train_metrics)
             train_metrics["train/head_time"] = training_timer.elapsed
+            train_metrics["train/data_time"] = train_data_timer.elapsed
             self.wandb_log(train_metrics, step=step)
             # logger.info(train_metrics)
             loss = train_metrics.get("train/loss")
@@ -437,10 +439,17 @@ class ExperimentManager:
         finally:
             # Shutdown all actors
             logger.debug("Shutting down all actors...")
+
+            # Wrap this in a try-except with a timeout to ensure we don't hang forever
             shutdown_promises = [
                 actor.shutdown.remote() for per_node in actors for actor in per_node
             ]
-            await asyncio.gather(*shutdown_promises)
+            await max_timeout(
+                asyncio.gather(*shutdown_promises),
+                timeout=timedelta(seconds=60),
+                err_msg="Timed out while shutting down actors",
+            )
+
             logger.debug("All actors have been shut down.")
 
     @staticmethod
