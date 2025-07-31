@@ -216,6 +216,13 @@ class BaseLITModule(ABC, Generic[MODEL_TYPE, DATA_TYPE, CONFIG_TYPE]):
         Returns FSDPModule
         """
 
+    def patch_model(self) -> MODEL_TYPE:
+        """
+        Patch the model with Liger Kernel if applicable.
+        This method is called during the model configuration phase.
+        """
+        return self.model
+
     @final
     def configure_model(self, device_mesh: DeviceMesh, weights_dir: Path) -> None:
         # We need to ensure that all models are fsdp because that is we use by default
@@ -227,6 +234,7 @@ class BaseLITModule(ABC, Generic[MODEL_TYPE, DATA_TYPE, CONFIG_TYPE]):
             )
         # TODO: We should probably shard the model first and load sharded weights
         self.model = self.load_weights(weights_dir)
+        self.model = self.patch_model()
 
         # Very specific order here:
         # 1. Enable activation checkpointing if configured

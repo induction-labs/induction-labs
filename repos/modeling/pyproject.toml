@@ -28,6 +28,7 @@ dependencies = [
   "qwen-vl-utils>=0.0.11",
   "fsspec[gcs]>=2025.3.0",
   "google-cloud-storage>=3.2.0",
+  "liger-kernel>=0.6.1",
 ]
 [project.scripts]
 mdl = "modeling.main:app"
