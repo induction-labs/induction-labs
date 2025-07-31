@@ -206,8 +206,8 @@ def submit(
     )
 
     # Update the command args to use the provided config_path
-    container["args"] = [f"mdl run {config_path} -rhw"]
-    # container["args"] = ["sleep inf"]  # For debugging purposes
+    container["args"] = ["mdl", "run", config_path, "-rhw"]
+    # container["args"] = ["sleep", "inf"]  # For debugging purposes
     logger.debug(f"Updated command args to use config: {config_path}")
 
     # Save the modified k8s yaml config beside the original config toml
