@@ -8,7 +8,7 @@ variable "REGISTRY" {
 
 target "local" {
     context = "../../"
-    dockerfile = "repos/modeling/Dockerfile"
+    dockerfile = "repos/modeling/docker/Dockerfile"
     tags = [
         "modeling:latest",
         "modeling:${COMMIT_SHA}",
