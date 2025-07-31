@@ -20,4 +20,4 @@ spec:
         - name: gpu-flavor
           resources:
             - name: nvidia.com/gpu
-              nominalQuota: 24
+              nominalQuota: 8
