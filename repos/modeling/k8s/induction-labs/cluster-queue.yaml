@@ -12,7 +12,7 @@ spec:
             - name: cpu
               nominalQuota: 416 # 208 per node
             - name: memory
-              nominalQuota: 3000Gi
+              nominalQuota: 5600Gi # 2854.5Gi per node
     - coveredResources: ["nvidia.com/gpu"]
       flavors:
         - name: gpu-flavor

@@ -87,5 +87,8 @@ RUN --mount=type=cache,target=/root/.cache/uv --mount=type=ssh \
 # COPY ../../ ../../
 # For now don't sync vllm :/
 
+COPY repos/modeling/docker-entrypoint.sh /workspace/repos/modeling/docker-entrypoint.sh
+RUN chmod +x /workspace/repos/modeling/docker-entrypoint.sh
+
 # Use --offline to prevent devenv from trying to refresh the environment
-ENTRYPOINT [ "devenv", "shell", "--offline" ]
+ENTRYPOINT [ "/workspace/repos/modeling/docker-entrypoint.sh" ]

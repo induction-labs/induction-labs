@@ -89,8 +89,8 @@ torchaudio = [{ index = "torch_12.8", marker = "sys_platform == 'linux'" }]
 synapse = { workspace = true }
 tomli-w = { git = "https://github.com/induction-labs/tomli-w-none.git" }
 tomli = { git = "https://github.com/induction-labs/tomli-none.git" }
-transformers = { git = "https://github.com/induction-labs/transformers.git", branch = "main" }
-# This is so troll - we need to use local path package instead of workspace because we need to rewrite 
+transformers = { git = "https://github.com/induction-labs/transformers.git", branch = "fix-explicit-none-check-flashattention" }
+# This is so troll - we need to use local path package instead of workspace because we need to rewuv syrite 
 # `flash_attn` -> `flash_attn_local` https://github.com/pfmoore/editables/issues/20
 flash-attn-local = { path = "../flash-attention-local", editable = false }
 
