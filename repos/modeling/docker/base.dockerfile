@@ -22,11 +22,12 @@ WORKDIR /workspace/repos/modeling
 
 RUN devenv shell
 
-COPY repos/modeling/docker-entrypoint.sh /workspace/repos/modeling/docker-entrypoint.sh
-RUN chmod +x /workspace/repos/modeling/docker-entrypoint.sh
-ENTRYPOINT [ "/workspace/repos/modeling/docker-entrypoint.sh" ]
-# Set the shell to use devenv
+COPY repos/modeling/docker-entrypoint.sh /docker-entrypoint.sh
+RUN chmod +x /docker-entrypoint.sh
+ENTRYPOINT [ "/docker-entrypoint.sh" ]
+
 SHELL ["devenv", "shell", "--", "/bin/bash", "-c"]
+# Set the shell to use devenv
 
 # We need the parents path otherwise it will overwrite at root level.
 COPY --parents ./repos/*/pyproject.toml /workspace/
