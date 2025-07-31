@@ -55,9 +55,6 @@ dev = [
 ]
 ssh-required = [
   # Split deps that require ssh github auth because they require always rebuilding in docker
-  # "transformers>=4.52.4",
-  # "tomli",
-  # "tomli-w>=1.2.0",
 ]
 # TODO: Validate that this is always correct version of torch + other deps
 flash-attn = [

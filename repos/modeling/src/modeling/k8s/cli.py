@@ -47,7 +47,7 @@ def bake(
 
         # Run depot bake --save command
         process = subprocess.Popen(
-            ["depot", "bake", "--save"],
+            ["depot", "bake", "mdl", "--save"],
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
