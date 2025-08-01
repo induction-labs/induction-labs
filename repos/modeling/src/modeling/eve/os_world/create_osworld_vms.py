@@ -1,9 +1,10 @@
 import asyncio
-from google.cloud import compute_v1
-import uuid
 import time
-from typing import List, Dict, Optional
+import uuid
+from venv import logger
+
 import dotenv
+from google.cloud import compute_v1
 
 # load google application credentials from .env file
 dotenv.load_dotenv()
@@ -87,23 +88,27 @@ def create_new_vm_sync():
     print(f"Creating VM: {name}")
 
     # Create the VM
-    operation = create_vm_from_template(
-        project_id=PROJECT_ID,
-        zone=SERVER_REGION,
-        instance_name=name,
-        template_name=SERVER_TEMPLATE_NAME,
-    )
+    try:
+        operation = create_vm_from_template(
+            project_id=PROJECT_ID,
+            zone=SERVER_REGION,
+            instance_name=name,
+            template_name=SERVER_TEMPLATE_NAME,
+        )
+        print("Waiting for VM creation to complete...")
+        wait_for_operation(
+            project_id=PROJECT_ID, zone=SERVER_REGION, operation_name=operation.name
+        )
+
+        # Get the internal IP
+        internal_ip = get_instance_internal_ip(
+            project_id=PROJECT_ID, zone=SERVER_REGION, instance_name=name
+        )
+    except Exception as e:
+        print(f"Error creating VM {name}: {e}")
+        raise e
 
     # Wait for the operation to complete
-    print("Waiting for VM creation to complete...")
-    wait_for_operation(
-        project_id=PROJECT_ID, zone=SERVER_REGION, operation_name=operation.name
-    )
-
-    # Get the internal IP
-    internal_ip = get_instance_internal_ip(
-        project_id=PROJECT_ID, zone=SERVER_REGION, instance_name=name
-    )
 
     print(f"VM '{name}' created successfully!")
     print(f"Internal IP: {internal_ip}")
@@ -119,35 +124,35 @@ def create_new_vm_sync():
 def check_vm_status_sync(project_id, zone, instance_name):
     """Check if a VM is preempted or terminated"""
     instances_client = compute_v1.InstancesClient()
-    
+
     try:
         request = compute_v1.GetInstanceRequest(
             project=project_id, zone=zone, instance=instance_name
         )
-        
+
         instance = instances_client.get(request=request)
-        
+
         # Check if instance is preempted or terminated
         status = instance.status
-        
+
         # PREEMPTED is when the instance was preempted by GCP
         # TERMINATED is when the instance is stopped/terminated
         is_preempted = status != compute_v1.Instance.Status.RUNNING.name
         print(is_preempted, status, instance_name)
-        
+
         return {
             "is_preempted": is_preempted,
             "status": status,
-            "instance_name": instance_name
+            "instance_name": instance_name,
         }
-        
+
     except Exception as e:
         print(f"Error checking VM status for {instance_name}: {e}")
         # If we can't check the status, assume it's preempted
         return {
             "is_preempted": True,
             "status": "UNKNOWN",
-            "instance_name": instance_name
+            "instance_name": instance_name,
         }
 
 
@@ -169,7 +174,9 @@ def delete_vm_sync(project_id, zone, instance_name):
 
         # Wait for the operation to complete
         print("Waiting for VM deletion to complete...")
-        wait_for_operation(project_id=project_id, zone=zone, operation_name=operation.name)
+        wait_for_operation(
+            project_id=project_id, zone=zone, operation_name=operation.name
+        )
 
         print(f"VM '{instance_name}' deleted successfully!")
 
@@ -186,31 +193,31 @@ def delete_vm_sync(project_id, zone, instance_name):
             "zone": zone,
             "project_id": project_id,
             "status": "error",
-            "error": str(e)
+            "error": str(e),
         }
 
 
 class AsyncVMRoundRobin:
     def __init__(self):
-        self._vms: List[Dict] = []
+        self._vms: list[dict] = []
         self._i = 0
         self._lock = asyncio.Lock()
-    
+
     async def initialize(self, num_vms: int):
         """Create initial VMs"""
         tasks = [asyncio.to_thread(create_new_vm_sync) for _ in range(num_vms)]
         results = await asyncio.gather(*tasks, return_exceptions=True)
-        
+
         for result in results:
             if not isinstance(result, Exception):
                 self._vms.append(result)
-    
-    async def _is_vm_preempted(self, vm_info: Dict) -> bool:
+
+    async def _is_vm_preempted(self, vm_info: dict) -> bool:
         """Check if a VM is preempted"""
         status_info = await asyncio.to_thread(
-            check_vm_status_sync, PROJECT_ID, SERVER_REGION, vm_info['instance_name']
+            check_vm_status_sync, PROJECT_ID, SERVER_REGION, vm_info["instance_name"]
         )
-        return status_info['is_preempted']
+        return status_info["is_preempted"]
 
     async def _add_replacement_vm(self):
         """Add a replacement VM asynchronously"""
@@ -218,47 +225,54 @@ class AsyncVMRoundRobin:
             new_vm = await asyncio.to_thread(create_new_vm_sync)
             async with self._lock:
                 self._vms.append(new_vm)
-        except:
-            pass
-    
-    async def next(self) -> Dict:
+        except Exception as e:
+            logger.error(f"Failed to create replacement VM: {e}")
+
+    async def next(self) -> dict:
         """Get the next available VM, skipping preempted ones"""
         async with self._lock:
             if not self._vms:
                 raise Exception("No VMs available")
-            
+
             for _ in range(len(self._vms)):
                 if self._i >= len(self._vms):
                     self._i = 0
-                
+
                 vm = self._vms[self._i]
-                
+
                 if await self._is_vm_preempted(vm):
                     # Remove preempted VM and create replacement
                     removed_vm = self._vms.pop(self._i)
                     if self._i >= len(self._vms) and self._vms:
                         self._i = 0
-                    
+
                     # Create replacement VM
-                    asyncio.create_task(self._add_replacement_vm())
-                    
+                    asyncio.create_task(self._add_replacement_vm())  # noqa: RUF006
+
                     # Delete preempted VM (fire and forget)
-                    asyncio.create_task(asyncio.to_thread(
-                        delete_vm_sync, PROJECT_ID, SERVER_REGION, removed_vm['instance_name']
-                    ))
+                    asyncio.create_task(  # noqa: RUF006
+                        asyncio.to_thread(
+                            delete_vm_sync,
+                            PROJECT_ID,
+                            SERVER_REGION,
+                            removed_vm["instance_name"],
+                        )
+                    )
                     continue
-                
+
                 # VM is good, return it
                 self._i = (self._i + 1) % len(self._vms)
                 return vm
-            
+
             raise Exception("All VMs are preempted")
-    
+
     async def cleanup(self):
         """Delete all VMs"""
         async with self._lock:
             tasks = [
-                asyncio.to_thread(delete_vm_sync, PROJECT_ID, SERVER_REGION, vm['instance_name'])
+                asyncio.to_thread(
+                    delete_vm_sync, PROJECT_ID, SERVER_REGION, vm["instance_name"]
+                )
                 for vm in self._vms
             ]
             if tasks:
@@ -276,14 +290,15 @@ async def create_vm_pool(num_vms: int) -> AsyncVMRoundRobin:
 # Example usage:
 async def main():
     vms = await create_vm_pool(num_vms=3)
-    
+
     try:
-        for i in range(20):
+        for _ in range(20):
             vm = await vms.next()
             await asyncio.sleep(5)
             print(f"Using VM: {vm['instance_name']} {vm['internal_ip']}")
     finally:
         await vms.cleanup()
+
 
 if __name__ == "__main__":
     asyncio.run(main())

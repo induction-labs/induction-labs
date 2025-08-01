@@ -7,6 +7,8 @@ FROM base_image as eval
 RUN --mount=type=cache,target=/root/.cache/uv \
   uv sync --locked --no-install-workspace --group evals --no-group ssh-required
 # New we add secrets
+
+RUN mkdir -p /secrets
 # TODO: Don't bake these into the image, mount them as secrets at runtime.
 RUN --mount=type=secret,id=wandb_key \
   wandb login $(cat /run/secrets/wandb_key)
@@ -14,15 +16,14 @@ RUN --mount=type=secret,id=wandb_key \
 RUN --mount=type=secret,id=huggingface_key \
   huggingface-cli login --token $(cat /run/secrets/huggingface_key)
 
-RUN --mount=type=secret,id=gcp_service_account_key \
-  gcloud auth activate-service-account --key-file=/run/secrets/gcp_service_account_key
+RUN --mount=type=secret,id=eval_gcp_secret_key \
+  gcloud auth activate-service-account --key-file=/run/secrets/eval_gcp_secret_key
 
-RUN --mount=type=secret,id=gcp_service_account_key \
+RUN --mount=type=secret,id=eval_gcp_secret_key \
   gcloud config set project "induction-labs"
 
-RUN mkdir -p /secrets
-RUN --mount=type=secret,id=gcp_service_account_key \
-  cp /run/secrets/gcp_service_account_key /secrets/gcp-service-account.json
+RUN --mount=type=secret,id=eval_gcp_secret_key \
+  cp /run/secrets/eval_gcp_secret_key /secrets/gcp-service-account.json
 ENV GOOGLE_APPLICATION_CREDENTIALS=/secrets/gcp-service-account.json
 
 
@@ -40,5 +41,7 @@ RUN mkdir -p -m 0600 ~/.ssh && ssh-keyscan github.com >> ~/.ssh/known_hosts
 # Now we sync *with* ssh required deps, which will always require a rebuild.
 RUN --mount=type=cache,target=/root/.cache/uv --mount=type=ssh \
   uv sync --locked --group evals --group ssh-required
+
+ENTRYPOINT [ "/docker-entrypoint.sh" ]
 
 CMD ["eve", "--help"]

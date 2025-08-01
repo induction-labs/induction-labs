@@ -1,19 +1,33 @@
+from __future__ import annotations
+
 import asyncio
 import contextlib
 import json
 import logging
 import os
+import tempfile
 import uuid
 from dataclasses import dataclass
-from typing import Literal
+from datetime import timedelta
+from enum import Enum
+from pathlib import Path
+from typing import Annotated
 
 import aiohttp
+import typer
+from smart_open import open as smart_open
+from synapse.utils.async_typer import AsyncTyper
 from tqdm.asyncio import tqdm_asyncio
 from tqdm.contrib.logging import logging_redirect_tqdm
 
+from modeling.checkpoints.save import upload_to_gcs
 from modeling.environments.agents.uitars15 import UITarsAgent
-from modeling.environments.create_osworld_vms import AsyncVMRoundRobin, create_vm_pool
-from modeling.environments.osworld_endpoints import (
+from modeling.eve.vllm_utils import wait_for_servers_ready
+from modeling.utils.cloud_path import CloudPath
+from modeling.utils.max_timeout import max_timeout
+
+from .create_osworld_vms import AsyncVMRoundRobin, create_vm_pool
+from .osworld_endpoints import (
     end_action_record,
     evaluate,
     reset,
@@ -30,21 +44,44 @@ from modeling.environments.osworld_endpoints import (
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 logging.getLogger("aiohttp").setLevel(logging.DEBUG)
-USE_VLLM = True
 
+# Connect with Tailscale
+META_ENDPOINT = "http://100.110.93.44"
 
-META_ENDPOINT = "http://34.136.17.148"
+app = AsyncTyper()
 
 
 def create_endpoint(internal_ip: str, port: int = 8000) -> str:
     return f"{META_ENDPOINT}/{internal_ip}/{port}"
 
 
-MODEL_ENDPOINT = (
-    "http://localhost:8080/generate"
-    if not USE_VLLM
-    else "http://localhost:8080/v1/chat/completions"
-)
+def load_tasks_file(tasks_file: str) -> list:
+    """Load tasks from a local file or gs:// URL using smart_open."""
+    with smart_open(tasks_file, "r") as f:
+        return json.load(f)
+
+
+def setup_output_folder(output_folder: str) -> tuple[str, CloudPath | None]:
+    """
+    Setup output folder handling for local or cloud paths.
+
+    Returns:
+        tuple: (local_output_path, cloud_path_or_none)
+    """
+    cloud_path = CloudPath.from_str(output_folder)
+
+    if cloud_path.cloud != CloudPath.Cloud.FILE:
+        if cloud_path.cloud == CloudPath.Cloud.S3:
+            raise NotImplementedError("S3 paths not supported yet")
+
+        # Create a temporary directory for cloud outputs
+        temp_dir = tempfile.mkdtemp(prefix="osworld_eval_")
+        return temp_dir, cloud_path
+    else:
+        # Use local path directly
+        if not os.path.exists(output_folder):
+            os.makedirs(output_folder)
+        return output_folder, None
 
 
 class AsyncRoundRobinLegacy:
@@ -60,12 +97,16 @@ class AsyncRoundRobinLegacy:
             return item
 
 
+class Language(str, Enum):
+    ZH = "zh"
+    EN = "en"
+
+
 @dataclass
 class EvalOptions:
-    model_name: str = "ByteDance-Seed/UI-TARS-1.5-7B"
     use_thinking: bool = True
-    language: Literal["zh", "en"] = "zh"
-    temperature: float = 0.2
+    language: Language = Language.ZH
+    temperature: float = 0.3
     top_p: float = 0.9
     max_trajectory_length: int = 50
 
@@ -191,15 +232,16 @@ async def eval_task_with_semaphore(
     vms: AsyncVMRoundRobin,
     task: dict,
     task_index: int = 0,
+    model_endpoint: str = "http://localhost:8080/v1/chat/completions",
 ):
     await asyncio.sleep(task_index * 0.01)
     async with semaphore:
         agent = UITarsAgent(
-            model_endpoint=MODEL_ENDPOINT,
-            language=eval_options.language,
+            model_endpoint=model_endpoint,
+            language=eval_options.language.value,
             use_thinking=True,
-            use_vllm=USE_VLLM,
             temperature=eval_options.temperature,
+            use_vllm=True,
         )
         attempt_id = uuid.uuid4().hex
         dump_folder = recording_output_folder + "/" + attempt_id
@@ -246,30 +288,11 @@ async def evaluate_tasks_parallel(
     recording_output_folder: str,
     max_concurrent: int,
     num_vms: int,
+    model_endpoint: str = "http://localhost:8080/v1/chat/completions",
 ):
-    if not USE_VLLM:
-        async with (
-            aiohttp.ClientSession() as session,
-            session.post(
-                "http://localhost:8000/change_model",
-                json={
-                    "model_name": eval_options.model_name,
-                    "temperature": eval_options.temperature,
-                    "top_p": eval_options.top_p,
-                },
-            ) as response,
-        ):
-            if response.status != 200:
-                logger.error(f"Failed to change model: {response.status}")
-            else:
-                logger.info("Model changed successfully")
-
     vms = await create_vm_pool(
         num_vms=num_vms,
     )
-
-    if not os.path.exists(output_folder):
-        os.makedirs(output_folder)
 
     print(f"got {num_vms} servers, waiting for them to be ready...")
     await asyncio.sleep(10)
@@ -288,6 +311,7 @@ async def evaluate_tasks_parallel(
                 vms,
                 task,
                 task_index=i,
+                model_endpoint=model_endpoint,
             )
             for i, task in enumerate(tasks)
         ]
@@ -317,43 +341,113 @@ async def cancel_all_tasks():
         await asyncio.gather(*tasks, return_exceptions=True)
 
 
-if __name__ == "__main__":
+@app.async_command(name="run")
+async def run_evaluation(
+    tasks_file: Annotated[
+        str, typer.Argument(help="Path to tasks JSON file")
+    ] = "gs://induction-labs/jonathan/osworld/osworld_subset_solved_by_annotators.json",
+    model_endpoint: Annotated[
+        str, typer.Option("--endpoint", help="Model endpoint URL")
+    ] = "http://localhost:8080/v1/chat/completions",
+    language: Annotated[
+        Language, typer.Option("--lang", help="Language for responses")
+    ] = Language.EN,
+    temperature: Annotated[
+        float, typer.Option("--temperature", help="Temperature for generation")
+    ] = 0.3,
+    top_p: Annotated[float, typer.Option("--top-p", help="Top-p for generation")] = 0.9,
+    max_trajectory_length: Annotated[
+        int, typer.Option("--max-steps", help="Maximum steps per task")
+    ] = 100,
+    gpu_count: Annotated[
+        int, typer.Option("--gpus", help="Number of GPUs available")
+    ] = 8,
+    parallel_requests_per_gpu: Annotated[
+        int, typer.Option("--requests-per-gpu", help="Parallel requests per GPU")
+    ] = 12,
+    parallel_vms: Annotated[
+        int, typer.Option("--parallel-vms", help="Parallel VMs per request group")
+    ] = 3,
+    task_repeats: Annotated[
+        int, typer.Option("--repeats", help="Number of times to repeat each task")
+    ] = 10,
+    output_folder: Annotated[
+        str, typer.Option("--output", help="Output folder for results")
+    ] = "gs://induction-labs/evals/osworld-evals-testing/",
+    max_tasks: Annotated[
+        int | None,
+        typer.Option("--max-tasks", help="Maximum number of unique tasks to evaluate"),
+    ] = None,
+):
+    """Run OSWorld evaluation with specified parameters."""
     import datetime
 
     date = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
-    with open("/home/ubuntu/induction-labs/repos/modeling/solveable_tasks.json") as f:
-        tasks = json.load(f)
-        tasks = tasks * 10  # run each task 5 times
+
+    tasks = load_tasks_file(tasks_file)
+    if max_tasks is not None:
+        tasks = tasks[:max_tasks]
+    tasks = tasks * task_repeats  # repeat each task
 
     with logging_redirect_tqdm():
-        gpu_count = 8
-        parallel_requests_per_gpu = 12
-        parallel_vms = 3
-        # gpu_count = 1
-        # parallel_requests_per_gpu = 1
-        # parallel_vms = 1
-
         concurrent_requests = gpu_count * parallel_requests_per_gpu
         number_of_osworld_vms = gpu_count * parallel_requests_per_gpu // parallel_vms
         print(
             f"starting evaluation with {concurrent_requests} concurrent requests and {number_of_osworld_vms} vms"
         )
 
-        asyncio.run(
-            evaluate_tasks_parallel(
+        # Wait for vLLM server to be ready
+        print(f"Waiting for vLLM server at {model_endpoint} to be ready...")
+
+        await max_timeout(
+            wait_for_servers_ready(
+                [model_endpoint.replace("/v1/chat/completions", "")]
+            ),
+            timedelta(minutes=10),
+            "Timeout waiting for vLLM server to be ready",
+        )
+
+        # Setup output folder handling
+        local_output_folder, cloud_output_path = setup_output_folder(output_folder)
+
+        try:
+            await evaluate_tasks_parallel(
                 tasks=tasks,
                 eval_options=EvalOptions(
-                    model_name="ByteDance-Seed/UI-TARS-1.5-7B",
                     use_thinking=True,
-                    language="en",
-                    temperature=0.2,
-                    top_p=0.9,
-                    max_trajectory_length=100,
+                    language=language,
+                    temperature=temperature,
+                    top_p=top_p,
+                    max_trajectory_length=max_trajectory_length,
                 ),
-                output_folder="osworld_uitars_testing",
+                output_folder=local_output_folder,
                 recording_output_folder=f"testing-task-{date}",
-                # 4 requests per gpu - i think we can do more
                 max_concurrent=concurrent_requests,
                 num_vms=number_of_osworld_vms,
+                model_endpoint=model_endpoint,
             )
-        )
+
+            # Upload to GCS if needed
+            if cloud_output_path:
+                print(f"Uploading results to {cloud_output_path.to_str()}...")
+                bucket_name, gcs_path = cloud_output_path.bucket_and_path
+                await asyncio.to_thread(
+                    upload_to_gcs,
+                    local_dir=Path(local_output_folder),
+                    gcs_bucket=bucket_name,
+                    gcs_prefix=gcs_path,
+                )
+                print("Upload completed!")
+
+        finally:
+            # Clean up temporary directory if used
+            if cloud_output_path and os.path.exists(local_output_folder):
+                import shutil
+
+                shutil.rmtree(local_output_folder)
+
+
+# eve osworld run --output gs://induction-labs/evals/osworld-evals-testing/ --gpus 1 --requests-per-gpu 12 --parallel-vms 3 --repeats 1 --max-tasks 20
+
+if __name__ == "__main__":
+    app()

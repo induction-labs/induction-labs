@@ -14,7 +14,7 @@ spec:
   ttlSecondsAfterFinished: 172800 # 2 days
   template:
     spec:
-      restartPolicy: Never # TODO: Set to never - use jobs
+      restartPolicy: Never
       runtimeClassName: nvidia
       tolerations:
         - key: "nvidia.com/gpu"
@@ -26,34 +26,36 @@ spec:
       containers:
         - name: vllm-server
           # image: <PLACEHOLDER>
-          image: registry.depot.dev/v2tbx2d1w1:959l8d0891-eve
-          imagePullPolicy: IfNotPresent
+          image: registry.depot.dev/v2tbx2d1w1:bxsz6qv59s-eve
+          imagePullPolicy: Always
           # Don't specify command, use default command in Dockerfile
           env:
             - name: LD_PRELOAD
               value: /usr/lib/x86_64-linux-gnu/libcuda.so:/usr/lib/x86_64-linux-gnu/libnvidia-ml.so.1:/lib/x86_64-linux-gnu/libnvidia-ptxjitcompiler.so.1
             - name: LD_LIBRARY_PATH
               value: /usr/local/cuda/lib64
-          args:
-            [
-              "eve",
-              "vllm",
-              "start",
-              "gs://induction-labs/checkpoints/uitars_sft_7b_yehaw_good_nice/2025-07-31T05-18-29.nTtAsFOt/step_-1",
-              "--num-gpus=8",
+          args: [
+              "sleep",
+              "inf",
+              # "eve",
+              # "run-procs",
+              # "start",
+              # "['eve', 'vllm', 'start', 'gs://induction-labs/checkpoints/uitars_sft_7b_yehaw_good_nice/2025-07-31T21-46-31.9xPQKPdh/step_310/', '--num-gpus=8']",
+              # "['eve', 'osworld', 'run', '--output', 'gs://induction-labs/evals/2025-07-31T21-46-31.9xPQKPdh/step_310/', '--gpus=8', '--repeats=5']",
             ]
           resources:
             limits:
-              memory: "128Gi"
-              cpu: "32"
+              memory: "252Gi"
+              cpu: "90"
               nvidia.com/gpu: "8"
             requests:
-              memory: "128Gi"
-              cpu: "32"
+              memory: "252Gi"
+              cpu: "90"
               nvidia.com/gpu: "8"
           volumeMounts:
             - name: dev-shm
               mountPath: /dev/shm
+
       volumes:
         - name: dev-shm
           emptyDir:

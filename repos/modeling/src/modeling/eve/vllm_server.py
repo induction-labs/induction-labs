@@ -8,7 +8,6 @@ import subprocess
 import tempfile
 from datetime import datetime, timedelta
 from pathlib import Path
-from time import sleep
 from typing import Annotated
 
 import typer
@@ -17,6 +16,7 @@ from synapse.utils.async_typer import AsyncTyper
 from synapse.utils.logging import configure_logging, logging
 
 from modeling.checkpoints.load import download_cloud_dir
+from modeling.eve.run_procs import cleanup_processes
 from modeling.eve.vllm_utils import wait_for_servers_ready
 from modeling.utils.cloud_path import CloudPath
 from modeling.utils.max_timeout import max_timeout
@@ -25,41 +25,7 @@ logger = configure_logging(__name__, level=logging.INFO)
 app = AsyncTyper()
 
 
-def cleanup_process_and_tmp(
-    processes: list[subprocess.Popen], model_tmpdir: Path | None
-):
-    if processes:
-        logger.info(f"Shutting down {len(processes)} servers...")
-        # Terminate all processes
-        for i, process in enumerate(processes):
-            if process.poll() is None:  # Process is still running
-                logger.info(
-                    f"Terminating process {process.pid} (GPU {i if i < len(processes) - 1 else 'load balancer'})"
-                )
-                try:
-                    process.terminate()
-                except Exception as e:
-                    logger.warning(f"Failed to terminate process {process.pid}: {e}")
-
-        # Wait a bit for graceful shutdown
-        try:
-            sleep(5)  # Wait for 5 seconds
-        except TimeoutError:
-            logger.warning("Timeout during graceful shutdown wait")
-
-        # Force kill if still running
-        for i, process in enumerate(processes):
-            if process.poll() is None:
-                logger.warning(
-                    f"Force killing process {process.pid} (GPU {i if i < len(processes) - 1 else 'load balancer'})"
-                )
-                try:
-                    process.kill()
-                except Exception as e:
-                    logger.warning(f"Failed to kill process {process.pid}: {e}")
-
-        logger.info("All servers shut down")
-        # Clean up model tmpdir if it was created
+def delete_model_tmpdir(model_tmpdir: Path | None):
     if model_tmpdir and model_tmpdir.exists():
         logger.info(f"Cleaning up model tmpdir: {model_tmpdir}")
         try:
@@ -110,7 +76,8 @@ async def start_vllm_servers(
             os._exit(1)
         logger.info(f"\nReceived signal {signum}, shutting down servers...")
         shutting_down = True
-        cleanup_process_and_tmp(processes, model_tmpdir)
+        cleanup_processes(processes)
+        delete_model_tmpdir(model_tmpdir)
         os._exit(signum)
 
     # Register signal handlers
@@ -287,7 +254,8 @@ async def start_vllm_servers(
     except Exception as e:
         logger.error(f"Unexpected error: {e}")
     finally:
-        cleanup_process_and_tmp(processes, model_tmpdir)
+        cleanup_processes(processes)
+        delete_model_tmpdir(model_tmpdir)
         # Restore default signal handlers to prevent hanging
         signal.signal(signal.SIGINT, signal.SIG_DFL)
         signal.signal(signal.SIGTERM, signal.SIG_DFL)

@@ -44,11 +44,11 @@ target "eve" {
   secret = [
     "id=wandb_key,src=./secrets/wandb_key",
     "id=huggingface_key,src=./secrets/huggingface_key",
-    "id=gcp_service_account_key,src=./secrets/gcp_service_account_key.json"
+    "id=eval_gcp_secret_key,src=./secrets/eval_gcp_key.json"
   ]
   ssh = ["default"] # Add this line
 }
 
-group "default" {
-  targets = ["mdl"]
-}
+# group "default" {
+#   targets = ["mdl"]
+# }
