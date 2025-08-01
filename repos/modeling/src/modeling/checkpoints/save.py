@@ -1,11 +1,11 @@
 import logging
 import os
 import shutil
+import subprocess
 from pathlib import Path
 
 from google.cloud import storage
 from synapse.utils.logging import configure_logging
-from tqdm import tqdm
 from transformers.modeling_utils import PreTrainedModel
 
 logger = configure_logging(__name__, level=logging.INFO)
@@ -19,38 +19,56 @@ def save_checkpoint_to_tmpdir(model: PreTrainedModel, local_dir: Path) -> None:
     model.save_pretrained(local_dir)
 
 
+logger = logging.getLogger(__name__)
+
+
 def upload_to_gcs(local_dir: Path, gcs_bucket: str, gcs_prefix: Path) -> None:
-    """
-    Uploads the contents of a local directory to a Google Cloud Storage bucket.
-
-    Args:
-        local_dir: Path to the local directory containing files to upload.
-        gcs_bucket: Name of the GCS bucket to upload files to.
-        gcs_prefix: Path prefix within the bucket where files will be uploaded.
-    """
-    client = storage.Client()
-    bucket = client.bucket(gcs_bucket)
-    all_files = [
-        (root, fname) for root, _, files in os.walk(local_dir) for fname in files
+    dest = f"gs://{gcs_bucket}/{gcs_prefix.as_posix().rstrip('/')}/"
+    logger.info(f"Uploading {local_dir} to {dest} via gcloud storage cp -r")
+    cmd = [
+        "gcloud",
+        "storage",
+        "cp",
+        "-r",
+        str(local_dir) + "/",  # ensure trailing slash to copy contents
+        dest,
     ]
-    total_files = len(all_files)
-
-    logger.info(
-        f"Uploading {total_files} files from {local_dir} to gs://{gcs_bucket}/{gcs_prefix}"
-    )
-    for root, fname in tqdm(
-        all_files,
-        total=total_files,
-        desc="Uploading",
-    ):
-        local_path = os.path.join(root, fname)
-        # compute the destination path in the bucket
-        rel_path = os.path.relpath(local_path, local_dir)
-        gcs_path = (gcs_prefix / rel_path).as_posix()
-        blob = bucket.blob(gcs_path)
-        blob.upload_from_filename(local_path)
-    # Empty the local directory after upload
+    subprocess.run(cmd, check=True)
     shutil.rmtree(local_dir, ignore_errors=True)
+
+
+# def upload_to_gcs(local_dir: Path, gcs_bucket: str, gcs_prefix: Path) -> None:
+#     """
+#     Uploads the contents of a local directory to a Google Cloud Storage bucket.
+
+#     Args:
+#         local_dir: Path to the local directory containing files to upload.
+#         gcs_bucket: Name of the GCS bucket to upload files to.
+#         gcs_prefix: Path prefix within the bucket where files will be uploaded.
+#     """
+#     client = storage.Client()
+#     bucket = client.bucket(gcs_bucket)
+#     all_files = [
+#         (root, fname) for root, _, files in os.walk(local_dir) for fname in files
+#     ]
+#     total_files = len(all_files)
+
+#     logger.info(
+#         f"Uploading {total_files} files from {local_dir} to gs://{gcs_bucket}/{gcs_prefix}"
+#     )
+#     for root, fname in tqdm(
+#         all_files,
+#         total=total_files,
+#         desc="Uploading",
+#     ):
+#         local_path = os.path.join(root, fname)
+#         # compute the destination path in the bucket
+#         rel_path = os.path.relpath(local_path, local_dir)
+#         gcs_path = (gcs_prefix / rel_path).as_posix()
+#         blob = bucket.blob(gcs_path)
+#         blob.upload_from_filename(local_path)
+#     # Empty the local directory after upload
+#     shutil.rmtree(local_dir, ignore_errors=True)
 
 
 # def save_checkpoint_to_gcs(

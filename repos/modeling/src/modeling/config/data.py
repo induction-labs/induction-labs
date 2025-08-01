@@ -61,16 +61,26 @@ class BaseDataSample(BaseModel, ABC):
 DataSample = TypeVar("DataSample", bound=BaseDataSample, covariant=True)
 
 
-# class DatasetArgs(BaseModel):
-#     pass
-
-
 DatasetArgs = TypeVar("DatasetArgs", bound=BaseModel)
+
+
+class SampleWithMetadata[SampleType: BaseDataSample](BaseModel):
+    """
+    Sample with metadata.
+    This is used to store additional information about a data sample.
+    """
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    sample: SampleType
+    indices: list[int]
 
 
 # We inherit BaseModel to ensure that all of the properties of the dataset stateless.
 # The dataset object will be passed to other processes by the dataloader so it should not have any state.
-class BaseDataset(Dataset[DataSample], BaseModel, Generic[DataSample, DatasetArgs]):
+class BaseDataset(
+    Dataset[SampleWithMetadata[DataSample]], BaseModel, Generic[DataSample, DatasetArgs]
+):
     length: int
     args: DatasetArgs
 
@@ -95,14 +105,23 @@ class BaseDataset(Dataset[DataSample], BaseModel, Generic[DataSample, DatasetArg
         device_batch_size = batch_size // world_size
         data_cls = cast(type[DataSample], cls.data_cls())
 
-        def _collate(batch: list[DataSample]) -> list[DataSample]:
+        def _collate(
+            batch: list[SampleWithMetadata[DataSample]],
+        ) -> list[SampleWithMetadata[DataSample]]:
             # Return list of len `world_size` of data sample batched at `device_batch_size`
             assert len(batch) == batch_size, (
                 f"Batch size {len(batch)=} does not match expected size {batch_size}."
             )
             per_device_batches = list(batched(batch, device_batch_size))
             per_device_batches = [
-                data_cls.combine_batch(device_batch)
+                SampleWithMetadata(
+                    sample=data_cls.combine_batch(
+                        [sample.sample for sample in device_batch]
+                    ),
+                    indices=[
+                        index for sample in device_batch for index in sample.indices
+                    ],
+                )
                 for device_batch in per_device_batches
             ]
 
@@ -123,14 +142,26 @@ class BaseDataset(Dataset[DataSample], BaseModel, Generic[DataSample, DatasetArg
         """
 
     @final
-    def __getitem__(self, idx: int) -> DataSample:
+    def __getitem__(self, idx: int) -> SampleWithMetadata[DataSample]:
         """
         Get an item from the dataset.
         This method should be overridden to return a specific data sample.
         """
         import asyncio
 
-        return asyncio.run(self.get_item(idx))
+        return asyncio.run(self.get_item_async(idx))
+
+    @final
+    async def get_item_async(self, idx: int) -> SampleWithMetadata[DataSample]:
+        """
+        Asynchronous method to get an item from the dataset.
+        This allows for any necessary asynchronous operations to retrieve the data sample.
+        """
+        sample = await self.get_item(idx)
+        return SampleWithMetadata(
+            sample=sample,
+            indices=[idx],
+        )
 
     @abstractmethod
     async def get_item(self, idx: int) -> DataSample:

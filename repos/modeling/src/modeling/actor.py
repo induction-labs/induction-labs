@@ -1,4 +1,3 @@
-import os
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from pathlib import Path
@@ -17,7 +16,6 @@ from modeling.config.data import BaseDataSample
 from modeling.config.distributed import InstanceConfig
 from modeling.distributed.distributed import TorchUrl, init_distributed
 from modeling.modules.base_module import BaseModuleConfig
-from modeling.utils.check_nans import check_nans
 from modeling.utils.fix_rng import fix_rng
 from modeling.utils.flash_attention_utils import (
     configure_flash_attention,
@@ -173,7 +171,7 @@ class ExperimentActor(BaseActor[ActorArgs]):
         Return the directory where model weights are stored.
         This is typically used for saving and loading model checkpoints.
         """
-        return self.experiment_config.runtime_config.tmp_dir / "model_weights"
+        return self.experiment_config.runtime_config.model_weights_dir
 
     @property
     def tmp_ckpt_path(self) -> Path:
@@ -184,19 +182,6 @@ class ExperimentActor(BaseActor[ActorArgs]):
         return self.experiment_config.runtime_config.tmp_dir / "checkpoints"
 
     @remote_method
-    def download_weights(self) -> None:
-        """
-        Download the model weights for the module.
-        This method should be called after the actor has been initialized.
-        This should only be called on global_rank 0
-        """
-        assert hasattr(self, "state"), (
-            "This method should not be called before the actor has been initialized."
-        )
-        os.makedirs(self.model_weights_dir, exist_ok=True)
-        self.state.module.download_weights(self.model_weights_dir)
-
-    @remote_method
     def configure_model(self) -> None:
         """
         Configure the model for the actor.
@@ -204,7 +189,10 @@ class ExperimentActor(BaseActor[ActorArgs]):
         assert hasattr(self, "state"), (
             "This method should not be called before the actor has been initialized."
         )
-        os.makedirs(self.model_weights_dir, exist_ok=True)
+        logger.info("Configuring model ")
+        assert self.model_weights_dir.exists(), (
+            f"Model weights directory {self.model_weights_dir} does not exist."
+        )
         self.state.module.configure_model(
             device_mesh=self.mesh, weights_dir=self.model_weights_dir
         )
@@ -235,8 +223,8 @@ class ExperimentActor(BaseActor[ActorArgs]):
         Run a health check on the experiment.
         """
         # Implement the logic to run the experiment here
-        for name, param in self.state.module.model.named_parameters():
-            check_nans(param, f"{name}")
+        # for name, param in self.state.module.model.named_parameters():
+        #     check_nans(param, f"{name}")
         x = torch.rand(1, generator=self.g, device=self.device).item()
         return x
 
@@ -257,10 +245,12 @@ class ExperimentActor(BaseActor[ActorArgs]):
             self.module.model.train()
             self.state.optimizer.zero_grad(set_to_none=True)
             loss, metrics = self.module.training_step(sample)
+            # logger.info(f"finished forward pass loss: {loss.item()}")
 
             # Backward pass
             # with torch.profiler.record_function("backward"):
             loss.backward()
+            # logger.info("finished backward pass")
             clip_norm_og = torch.nn.utils.clip_grad_norm_(
                 self.state.module.model.parameters(),
                 self.experiment_config.run.grad_clip or float("inf"),

@@ -23,7 +23,7 @@ from modeling.config import DatapackConfig, ExperimentConfig, ModuleConfig
 from modeling.config.data import BaseDataSample, BaseDataset
 
 # from modeling.modules.vl_sft.qwen_25vl import VlSftLITConfig
-from modeling.environments.agents.uitars15 import COMPUTER_USE_15, THOUGHT_LONG
+from modeling.eve.os_world.agents.uitars15 import COMPUTER_USE_15, THOUGHT_LONG
 
 if TYPE_CHECKING:
     from modeling.modules.vl_sft.qwen_25vl import VlSftLITConfig
@@ -87,6 +87,11 @@ class VlDataSample(BaseDataSample):
         image_grid_thw = torch.concat(
             [sample.image_grid_thw for sample in batch], dim=0
         )
+        assert input_ids.dtype == torch.long
+        assert labels.dtype == torch.long
+        assert attention_mask.dtype == torch.long
+        assert pixel_values.dtype == torch.float32
+        assert image_grid_thw.dtype == torch.long
 
         return VlDataSample(
             input_ids=input_ids,
@@ -297,11 +302,14 @@ class VlDataset(BaseDataset[VlDataSample, VlDatasetArgs]):
             # initialize batch to 0, and the loss to 0
             inputs = {
                 # fill input_ids with tokenzer.pad_token_id
-                "input_ids": torch.zeros((1, self.seq_len), dtype=torch.long)
-                + self.processor.tokenizer.pad_token_id,
+                "input_ids": torch.full(
+                    (1, self.seq_len),
+                    self.processor.tokenizer.pad_token_id,
+                    dtype=torch.long,
+                ),
                 "attention_mask": torch.zeros((1, self.seq_len), dtype=torch.long),
-                "pixel_values": torch.Tensor(),
-                "image_grid_thw": torch.Tensor(),
+                "pixel_values": torch.empty(0, 1176, dtype=torch.float32),
+                "image_grid_thw": torch.empty(0, 3, dtype=torch.long),
             }
 
         input_ids = inputs["input_ids"][0]

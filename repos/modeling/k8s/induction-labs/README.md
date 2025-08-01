@@ -40,6 +40,10 @@ kubectl cluster-info
 
 # Container Registry Setup
 ```sh
+
+
+# https://depot.dev/orgs/xzsqsmmrvp/projects/v2tbx2d1w1/settings
+
 set DEPOT_KEY "depot_project_..."
 kubectl create secret docker-registry depot-registry-secret \
     --namespace induction-labs \
@@ -76,7 +80,27 @@ kubectl apply -f flavours/cpu.yaml
 ```
 
 
+https://tailscale.com/kb/1236/kubernetes-operator#helm
+# Tailscale Setup
+[tailscale oauth](https://login.tailscale.com/admin/settings/oauth)
+Need auth_keys WRITE, devices:core WRITE, set tag to `tag:k8s-operator`
 
+```sh
+helm repo add tailscale https://pkgs.tailscale.com/helmcharts
+helm repo update
+
+set OAUTH_CLIENT_ID "<OAuth client ID>"
+set OAUTH_CLIENT_SECRET "<OAuth client secret>"
+helm upgrade \
+  --install \
+  tailscale-operator \
+  tailscale/tailscale-operator \
+  --namespace=tailscale \
+  --create-namespace \
+  --set-string oauth.clientId="$OAUTH_CLIENT_ID" \
+  --set-string oauth.clientSecret="$OAUTH_CLIENT_SECRET" \
+  --wait
+```
 
 # Job submission
 ```sh
@@ -119,68 +143,4 @@ kubectl get workloads
 
 # View Job
 kubectl describe workload job-modeling-dw6sw-eed43 
-```
-
-
-
-
-
-
-
-
-
-# OLD: 
-```sh
-kubectl config set-context --current --namespace=induction-labs
-kubectl logs -f induction-labs/mdl.yaml
-```
-
-# GCR Artifact Registry Setup
-
-## Create service account
-gcloud iam service-accounts create k8s-artifact-reader \
-    --display-name "Kubernetes Artifact Registry Reader"
-
-## Grant Artifact Registry Reader role
-gcloud projects add-iam-policy-binding PROJECT_ID \
-    --member="serviceAccount:k8s-artifact-reader@PROJECT_ID.iam.gserviceaccount.com" \
-    --role="roles/artifactregistry.reader"
-
-## Create and download key
-gcloud iam service-accounts keys create key.json \
-    --iam-account=k8s-artifact-reader@PROJECT_ID.iam.gserviceaccount.com
-
-
-
-## Create docker registry secret
-```
-kubectl create secret docker-registry gcr-artifact-secret \
-    --docker-server=us-central1-docker.pkg.dev \
-    --docker-username=_json_key \
-    --docker-password="$(cat key.json)" \
-    --docker-email=jeffrey@inductionlabs.com \
-    --namespace=induction-labs
-```
-
-
-# GCR Docker Secret
-
-```sh
-set PROJECT_ID "induction-labs"
-
-set BUCKET_NAME "induction-labs"
-
-set SERVICE_ACCOUNT_NAME "k8s-bucket-access-sa"
-
-gcloud iam service-accounts create $SERVICE_ACCOUNT_NAME \
-            --description="Service account for k8s bucket access" \
-            --display-name="K8s Bucket Access Service Account"
-
-
-gcloud iam service-accounts keys create ./secrets/gcp_service_account_key.json \
-            --iam-account=$SERVICE_ACCOUNT_NAME@$PROJECT_ID.iam.gserviceaccount.com
-
-gsutil iam ch serviceAccount:$SERVICE_ACCOUNT_NAME@$PROJECT_ID.iam.gserviceaccount.com:objectAdmin gs://$BUCKET_NAME
-
-gsutil iam ch serviceAccount:$SERVICE_ACCOUNT_NAME@$PROJECT_ID.iam.gserviceaccount.com:storageObjectViewer gs://$BUCKET_NAME
 ```

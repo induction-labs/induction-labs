@@ -2,9 +2,15 @@ from __future__ import annotations
 
 from typing import TypeVar
 
+from liger_kernel.transformers import (
+    apply_liger_kernel_to_qwen2_5_vl,
+)
 from synapse.utils.logging import configure_logging, logging
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.fsdp import MixedPrecisionPolicy, fully_shard
+from transformers.models.qwen2_5_vl.configuration_qwen2_5_vl import (
+    Qwen2_5_VLConfig,
+)
 from transformers.models.qwen2_5_vl.modeling_qwen2_5_vl import (
     Qwen2_5_VLCausalLMOutputWithPast,
     Qwen2_5_VLForConditionalGeneration,
@@ -38,6 +44,12 @@ class Qwen25VLActionLIT(BaseVlSft[MODEL_TYPE, "VlSftLITConfig"]):
     def model_cls(cls) -> type[MODEL_TYPE]:
         return MODEL_TYPE
 
+    def patch_model(self) -> Qwen2_5_VLForConditionalGeneration:
+        if self.module_config.use_liger_kernel:
+            logger.debug("Applying Liger Kernel to Qwen2.5 VL model")
+            apply_liger_kernel_to_qwen2_5_vl(model=self.model)
+        return super().patch_model()
+
     def call_model(self, inputs: VlDataSample) -> Qwen2_5_VLCausalLMOutputWithPast:
         """Call the model with the given inputs.
         This method should be implemented by subclasses.
@@ -58,10 +70,13 @@ class Qwen25VLActionLIT(BaseVlSft[MODEL_TYPE, "VlSftLITConfig"]):
     def init_model_meta(
         self,
     ):
-        model = MODEL_TYPE.from_pretrained(
-            self.module_config.model_name,
-            trust_remote_code=True,
+        module_config = self.module_config
+        config = Qwen2_5_VLConfig.from_pretrained(
+            module_config.model_name,
+            freeze_vision=module_config.freeze_vision,
         )
+
+        model = MODEL_TYPE(config)
         for param in model.model.visual.parameters():
             param.requires_grad = not self.module_config.freeze_vision
 
@@ -113,6 +128,7 @@ class Qwen25VLActionLIT(BaseVlSft[MODEL_TYPE, "VlSftLITConfig"]):
 class VlSftLITConfig(VlSftActionLITConfig):
     config_path: str = "modeling.modules.vl_sft.qwen_25vl.VlSftLITConfig"
     tokenizer_name: str = "Qwen/Qwen2.5-Omni-3B"
+    use_liger_kernel: bool = True
 
     freeze_vision: bool = False
 

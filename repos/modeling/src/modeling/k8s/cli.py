@@ -22,11 +22,11 @@ logger = configure_logging(
 def load_k8s_template() -> dict:
     import yaml
 
-    assert K8S_TEMPLATE_PATH.exists(), f"Template file not found: {K8S_TEMPLATE_PATH}"
+    assert MDL_TEMPLATE_PATH.exists(), f"Template file not found: {MDL_TEMPLATE_PATH}"
 
-    with open(K8S_TEMPLATE_PATH) as f:
+    with open(MDL_TEMPLATE_PATH) as f:
         job_template = yaml.safe_load(f)
-    logger.debug(f"Loaded job template from: {K8S_TEMPLATE_PATH}")
+    logger.debug(f"Loaded job template from: {MDL_TEMPLATE_PATH}")
     return job_template
 
 
@@ -38,6 +38,9 @@ def bake(
     quiet: Annotated[
         bool, typer.Option("--quiet", "-q", help="Hide depot build output")
     ] = False,
+    target: Annotated[
+        str, typer.Option("--target", help="Target to build, defaults to 'mdl'")
+    ] = "mdl",
 ):
     """
     Build Docker image using depot and extract image reference.
@@ -47,7 +50,7 @@ def bake(
 
         # Run depot bake --save command
         process = subprocess.Popen(
-            ["depot", "bake", "--save"],
+            ["depot", "bake", target, "--save"],
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
@@ -65,7 +68,7 @@ def bake(
         process.wait()
         if process.returncode != 0:
             raise subprocess.CalledProcessError(
-                process.returncode, ["depot", "bake", "--save"]
+                process.returncode, ["depot", "bake", target, "--save"]
             )
 
         output = "".join(output_lines)
@@ -96,9 +99,11 @@ def bake(
         raise typer.Exit(1) from e
 
 
-K8S_TEMPLATE_PATH = (
-    Path(__file__).parent.parent.parent.parent / "k8s" / "induction-labs" / "mdl.yaml"
-)
+MODELING_BASE_PATH = Path(__file__).parent.parent.parent.parent
+
+MDL_TEMPLATE_PATH = MODELING_BASE_PATH / "k8s" / "jobs" / "mdl.yaml"
+
+EVE_TEMPLATE_PATH = MODELING_BASE_PATH / "k8s" / "jobs" / "eve.yaml"
 
 
 @k8s_app.command()
@@ -169,10 +174,17 @@ def submit(
 
     # Resource calculation: 16GB memory per GPU + 4 CPUs per GPU + 16 CPUs for head node
     # max is 3TB on lambda
-    memory_gb = (num_gpus * 128) + 64
-    # Max is 208
+    # max is 2000Gi on AWS
+    # max is 1870.2Gi on Azure
+
+    memory_gb = (num_gpus * 256) + 64
+    memory_gb = min(memory_gb, 1600)  # Limit to 2000Gi
+    # Max is 208 on lambda
+    # Max is 96 on Azure
+    # Max is 192 on AWS
     # At max this uses 24 * 8 = 192 CPUs
     cpu_count = (num_gpus * 8) + 16
+    cpu_count = min(cpu_count, 192)  # Limit to 192 CPUs
 
     logger.info(
         f"Calculated resources: {num_gpus} GPUs, {memory_gb}Gi memory, {cpu_count} CPUs"
@@ -199,8 +211,8 @@ def submit(
     )
 
     # Update the command args to use the provided config_path
-    container["args"] = [f"mdl run {config_path} -rhw"]
-    # container["args"] = ["sleep inf"]  # For debugging purposes
+    container["args"] = ["mdl", "run", config_path, "-rhw"]
+    # container["args"] = ["sleep", "inf"]  # For debugging purposes
     logger.debug(f"Updated command args to use config: {config_path}")
 
     # Save the modified k8s yaml config beside the original config toml
@@ -316,3 +328,149 @@ def sweep(
             if not quiet:
                 print(f"Error submitting {config_path}: {e}")
             continue
+
+
+def load_eve_template() -> dict:
+    """Load the eve k8s job template."""
+    assert EVE_TEMPLATE_PATH.exists(), f"Template file not found: {EVE_TEMPLATE_PATH}"
+
+    with open(EVE_TEMPLATE_PATH) as f:
+        job_template = yaml.safe_load(f)
+    logger.debug(f"Loaded eve job template from: {EVE_TEMPLATE_PATH}")
+    return job_template
+
+
+@k8s_app.command()
+def eve(
+    checkpoint_dirs: Annotated[
+        list[str], typer.Argument(help="Eve checkpoint directories (gs:// paths)")
+    ],
+    num_repeats: Annotated[
+        int,
+        typer.Option("--num-repeats", "-r", help="Number of repeats for osworld run"),
+    ] = 5,
+    image: Annotated[
+        str | None,
+        typer.Option(
+            "--image",
+            help="Docker image to use. If not provided, will run bake with target 'eve'",
+        ),
+    ] = None,
+    quiet: Annotated[
+        bool, typer.Option("--quiet", "-q", help="Hide output from the command")
+    ] = False,
+    context: Annotated[
+        str | None,
+        typer.Option(
+            "--context",
+            help="Kubernetes context to use. If not provided, uses current context",
+        ),
+    ] = None,
+    dry_run: Annotated[
+        bool,
+        typer.Option(
+            "--dry-run",
+            help="Perform a dry run without actually submitting the job",
+        ),
+    ] = False,
+):
+    """
+    Submit eve jobs to kubernetes with checkpoint directories and number of repeats.
+    """
+    # Get the image - either from parameter or by running bake with target 'eve'
+    if image is None:
+        logger.info("No image provided, running bake with target 'eve'...")
+        image = bake(quiet=quiet, target="eve")
+    else:
+        logger.info(f"Using provided image: {image}")
+
+    logger.info(
+        f"Submitting {len(checkpoint_dirs)} eve jobs with repeats: {num_repeats}, image: {image}"
+    )
+
+    from kubernetes import client
+
+    from modeling.k8s.context import load_kubernetes_config
+
+    load_kubernetes_config(context=context)
+
+    # Create batch API client
+    batch_v1 = client.BatchV1Api()
+
+    from datetime import datetime
+
+    # Submit a job for each checkpoint directory
+    for checkpoint_dir in checkpoint_dirs:
+        logger.info(f"Processing checkpoint: {checkpoint_dir}")
+
+        # Load the eve YAML template (fresh copy for each job)
+        job_template = load_eve_template()
+
+        # Modify the job template
+        container = job_template["spec"]["template"]["spec"]["containers"][0]
+
+        # Update image
+        container["image"] = image
+        logger.debug(f"Updated container image to: {image}")
+
+        # Generate output path based on checkpoint directory and current timestamp
+        # Extract the last two path components (e.g., "2025-08-01T00-14-01.H34n4wHd/step_367")
+        path_parts = checkpoint_dir.rstrip("/").split("/")
+        checkpoint_name = "/".join(path_parts[-2:])
+        current_timestamp = datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
+        output_path = (
+            f"gs://induction-labs/evals/{checkpoint_name}/{current_timestamp}/"
+        )
+
+        # Update the args with the checkpoint directory and number of repeats
+        container["args"] = [
+            "eve",
+            "run-procs",
+            "start",
+            f"['eve', 'vllm', 'start', '{checkpoint_dir}', '--num-gpus=8']",
+            f"['eve', 'osworld', 'run', '--output', '{output_path}', '--gpus=8', '--repeats={num_repeats}']",
+        ]
+
+        logger.debug(f"Updated command args: {container['args']}")
+
+        # Save the modified k8s yaml config
+        output_dir = MODELING_BASE_PATH / "eve-outputs" / checkpoint_name
+        output_dir.mkdir(parents=True, exist_ok=True)
+        yaml_config_path = output_dir / f"{current_timestamp}.yaml"
+
+        try:
+            with open(yaml_config_path, "w") as f:
+                yaml.dump(job_template, f, default_flow_style=False)
+            logger.info(f"Saved k8s config to: {yaml_config_path}")
+        except Exception as e:
+            logger.error(f"Failed to save k8s config: {e}")
+            continue
+
+        # Get namespace from the job template
+        namespace = job_template["metadata"]["namespace"]
+
+        try:
+            # Submit the job
+            if dry_run:
+                response = batch_v1.create_namespaced_job(
+                    namespace=namespace, body=job_template, dry_run="All"
+                )
+                logger.info(
+                    f"Dry run successful - job would be created for {checkpoint_name}"
+                )
+            else:
+                response = batch_v1.create_namespaced_job(
+                    namespace=namespace, body=job_template
+                )
+                job_name = response.metadata.name  # type: ignore[attr-defined]
+                logger.info(
+                    f"Successfully submitted eve job: {job_name} for {checkpoint_name}"
+                )
+
+        except Exception as e:
+            logger.error(
+                f"Failed to submit eve job for {checkpoint_name} to Kubernetes: {e}"
+            )
+            continue
+
+    logger.info(f"Finished processing {len(checkpoint_dirs)} checkpoint directories")

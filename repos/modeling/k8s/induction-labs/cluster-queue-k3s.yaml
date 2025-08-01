@@ -5,14 +5,16 @@ metadata:
 spec:
   namespaceSelector: {}
   resourceGroups:
-    - coveredResources: ["cpu", "memory"]
+    - coveredResources: ["cpu", "memory", "ephemeral-storage"]
       flavors:
         - name: cpu-flavor
           resources:
             - name: cpu
-              nominalQuota: 416 # 208 per node
+              nominalQuota: 384
             - name: memory
-              nominalQuota: 5600Gi # 2854.5Gi per node
+              nominalQuota: 5740Gi
+            - name: ephemeral-storage
+              nominalQuota: 472Gi
     - coveredResources: ["nvidia.com/gpu"]
       flavors:
         - name: gpu-flavor

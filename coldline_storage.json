@@ -1,0 +1,18 @@
+{
+  "rule": [
+    {
+      "action": {
+        "type": "SetStorageClass",
+        "storageClass": "COLDLINE"
+      },
+      "condition": {
+        "matchesPrefix": [
+          "youtube-output-2/",
+          "youtube-output/",
+          "youtube/"
+        ],
+        "age": 0
+      }
+    }
+  ]
+}
