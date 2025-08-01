@@ -23,7 +23,7 @@ from modeling.config import DatapackConfig, ExperimentConfig, ModuleConfig
 from modeling.config.data import BaseDataSample, BaseDataset
 
 # from modeling.modules.vl_sft.qwen_25vl import VlSftLITConfig
-from modeling.environments.agents.uitars15 import COMPUTER_USE_15, THOUGHT_LONG
+from modeling.eve.os_world.agents.uitars15 import COMPUTER_USE_15, THOUGHT_LONG
 
 if TYPE_CHECKING:
     from modeling.modules.vl_sft.qwen_25vl import VlSftLITConfig

@@ -21,7 +21,7 @@ from tqdm.asyncio import tqdm_asyncio
 from tqdm.contrib.logging import logging_redirect_tqdm
 
 from modeling.checkpoints.save import upload_to_gcs
-from modeling.environments.agents.uitars15 import UITarsAgent
+from modeling.eve.os_world.agents.uitars15 import UITarsAgent
 from modeling.eve.vllm_utils import wait_for_servers_ready
 from modeling.utils.cloud_path import CloudPath
 from modeling.utils.max_timeout import max_timeout
