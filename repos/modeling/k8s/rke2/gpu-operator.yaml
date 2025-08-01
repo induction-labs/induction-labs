@@ -9,7 +9,14 @@ spec:
   targetNamespace: gpu-operator
   createNamespace: true
   valuesContent: |-
+    dcgmExporter:
+      enabled: true
+      serviceMonitor:
+        enabled: true         # create the ServiceMonitor CR
+        additionalLabels:     # <-- uncomment if your Prometheus
+          release: kp-stack   #     looks for this label
+    grafana.enabled: true
     toolkit:
       env:
-      - name: CONTAINERD_SOCKET
-        value: /run/k3s/containerd/containerd.sock
+        - name: CONTAINERD_SOCKET
+          value: /run/k3s/containerd/containerd.sock
