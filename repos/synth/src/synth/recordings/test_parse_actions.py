@@ -12,7 +12,7 @@ from synth.recordings.action_models import (
     ScrollAction,
     TypeAction,
 )
-from synth.recordings.parse_actions import parse_actions
+from synth.recordings.parse_actions import SpecialKeys, parse_actions
 
 
 # ---------- tiny helpers to build events -----------------------------------
@@ -598,3 +598,56 @@ def test_multiple_scrolls_more_than_5():
 def test_ignore_mouse_moves():
     ev = [mv(10, 10, 0.0), mv(20, 20, 0.1)]
     assert parse_actions(ev) == []
+
+
+# 9 ───── Toggle keys (capslock, numlock) handling ──────────────────────────
+def test_capslock_handling():
+    """Test that capslock toggles case for subsequent letters"""
+    ev = [
+        key(SpecialKeys.CAPSLOCK, True, 0.0),
+        key(SpecialKeys.CAPSLOCK, False, 0.05),
+        key("a", True, 0.1),
+        key("a", False, 0.15),
+        key("b", True, 0.2),
+        key("b", False, 0.25),
+    ]
+    expected = [
+        action_model(TypeAction(content="AB"), 0.1, end_t=0.25),
+    ]
+    assert parse_actions(ev) == expected
+
+
+def test_numlock_handling():
+    """Test that numlock key presses don't generate typing content but don't break typing flow"""
+    ev = [
+        key("x", True, 0.0),
+        key("x", False, 0.05),
+        key(SpecialKeys.NUMLOCK, True, 0.1),
+        key(SpecialKeys.NUMLOCK, False, 0.15),
+        key("y", True, 0.2),
+        key("y", False, 0.25),
+    ]
+    expected = [
+        action_model(TypeAction(content="xy"), 0.0, end_t=0.25),
+    ]
+    assert parse_actions(ev) == expected
+
+
+def test_capslock_double_toggle():
+    """Test capslock toggled twice returns to original state"""
+    ev = [
+        key("a", True, 0.0),
+        key("a", False, 0.05),
+        key(SpecialKeys.CAPSLOCK, True, 0.1),
+        key("b", True, 0.15),
+        key("b", False, 0.2),
+        key(SpecialKeys.CAPSLOCK, False, 0.25),
+        key(SpecialKeys.CAPSLOCK, True, 0.3),
+        key(SpecialKeys.CAPSLOCK, False, 0.35),
+        key("c", True, 0.4),
+        key("c", False, 0.45),
+    ]
+    expected = [
+        action_model(TypeAction(content="aBc"), 0.0, end_t=0.45),
+    ]
+    assert parse_actions(ev) == expected

@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import math
+from enum import Enum
+from typing import cast
 
+from pydantic import BaseModel
 from synth.recordings.action_models import (
     Action,
     ClickAction,
@@ -13,6 +16,26 @@ from synth.recordings.action_models import (
     ScrollAction,
     TypeAction,
 )
+
+
+class SpecialKeys(str, Enum):
+    CAPSLOCK = "caps_lock"
+    NUMLOCK = "num_lock"
+    SCROLLLOCK = "scroll_lock"
+
+
+# State for Capslock, Numlock, Scrolllock
+class LockState(BaseModel):
+    state: int = 0  # 4-state: 0=off up, 1=on down, 2=off down, 3=on up
+
+    def press(self, is_down: bool):
+        # Check that if we are up, we must be going down, and vice versa
+        assert self.state % 2 == (0 if is_down else 1), "Invalid lock state transition"
+        return LockState(state=(self.state + 1) % 4)
+
+    def is_active(self) -> bool:
+        return self.state in (1, 2)
+
 
 SHIFT_MAP = {
     # Numbers row
@@ -66,6 +89,9 @@ SHIFT_MAP = {
     "y": "Y",
     "z": "Z",
 }
+
+CAPSLOCKS_KEYS = set("abcdefghijklmnopqrstuvwxyz")
+NUMLOCK_KEYS = set("0123456789")
 
 
 def normalize_key_to_physical(key):
@@ -188,7 +214,25 @@ def parse_scroll(
     return out
 
 
-def parse_actions(raw_actions) -> list[Action]:
+def convert_key_for_lock_state(
+    original_key: str,
+    lock_keys: dict[SpecialKeys, LockState],
+    modifier_keys: dict[str, bool],
+) -> str:
+    physical_key = normalize_key_to_physical(original_key)
+    assert isinstance(physical_key, str)
+    # Capslocks overrides shift. We just return uppercase if capslock is on and the key is a letter
+    if lock_keys[SpecialKeys.CAPSLOCK].is_active() and physical_key in CAPSLOCKS_KEYS:
+        return SHIFT_MAP[physical_key]
+
+    # TODO: Handle numlock behavior
+    shift_held = modifier_keys.get("shift", False)
+    if shift_held:
+        return SHIFT_MAP.get(physical_key, physical_key)
+    return physical_key
+
+
+def parse_actions(raw_actions: list[dict]) -> list[Action]:
     # Sort by timestamp to ensure chronological order
     actions = sorted(raw_actions, key=lambda x: x["timestamp"])
 
@@ -204,6 +248,12 @@ def parse_actions(raw_actions) -> list[Action]:
     mouse_activity_since_typing = False
 
     modifier_keys = {"ctrl": False, "alt": False, "shift": False}
+    lock_keys = {
+        SpecialKeys.CAPSLOCK: LockState(),
+        SpecialKeys.NUMLOCK: LockState(),
+        SpecialKeys.SCROLLLOCK: LockState(),
+    }
+
     typing_buffer = []
     typing_start_time = None
     modifier_start_time = None
@@ -231,8 +281,7 @@ def parse_actions(raw_actions) -> list[Action]:
 
     scroll_events = []
 
-    i = 0
-    while i < len(actions):
+    for i, action in enumerate(actions):
         action = actions[i]["action"]
         timestamp = actions[i]["timestamp"]
 
@@ -336,6 +385,7 @@ def parse_actions(raw_actions) -> list[Action]:
         # Handle keyboard events
         elif action["action"] == "key_button":
             key = action["key"].lower()
+
             if key == "shift_r":
                 key = "shift"
 
@@ -360,18 +410,142 @@ def parse_actions(raw_actions) -> list[Action]:
 
                 if key == "shift" and not action["is_down"]:
                     last_key_time_cosmetic = timestamp
-            else:
-                if action["is_down"]:
-                    # Set typing start time if needed
-                    if typing_start_time is None:
+                continue
+            # Check for lock keys
+            if key in lock_keys:
+                key = cast(SpecialKeys, key)
+                lock_keys[key] = lock_keys[key].press(action["is_down"])
+
+                continue
+
+            if action["is_down"]:
+                # Set typing start time if needed
+                if typing_start_time is None:
+                    typing_start_time = timestamp
+
+                # Check for hotkeys (but exclude shift-only combinations)
+                non_shift_modifiers = [
+                    k for k, v in modifier_keys.items() if v and k != "shift"
+                ]
+                if non_shift_modifiers:
+                    # It's a hotkey - flush any typing buffer first
+                    if typing_buffer:
+                        content = "".join(typing_buffer)
+                        type_action = TypeAction(content=content)
+                        add_parsed_action(
+                            type_action, key_timestamp(), last_key_time_cosmetic
+                        )
+                        typing_buffer = []
+                        typing_start_time = None
+
+                    all_modifiers = [k for k, v in modifier_keys.items() if v]
+                    hotkey_combo = [*all_modifiers, key]
+                    hotkey_action = HotkeyAction(key=hotkey_combo)
+                    lookahead_modifier_keys_future = []
+                    lookahead_i = i
+                    while (
+                        lookahead_i + 1 < len(actions)
+                        and actions[lookahead_i + 1]["action"]["action"] == "key_button"
+                        and not actions[lookahead_i + 1]["action"]["is_down"]
+                    ):
+                        lookahead_i += 1
+                        next_key = actions[lookahead_i]["action"]["key"].lower()
+                        if modifier_keys.get(next_key):
+                            lookahead_modifier_keys_future.append(
+                                actions[lookahead_i]["timestamp"]
+                            )
+                        else:
+                            if lookahead_i != i + 1:
+                                break
+                    add_parsed_action(
+                        hotkey_action,
+                        modifier_start_time,
+                        max(lookahead_modifier_keys_future),
+                    )
+                    modifier_start_time = None
+                    mouse_activity_since_typing = False
+                    typing_start_time = None
+                else:
+                    # Regular key pressed - process immediately on DOWN event
+                    # Flush typing buffer if interrupted or too much time passed
+                    if typing_buffer and (
+                        last_key_time is None
+                        or timestamp - last_key_time > 2.0
+                        or mouse_activity_since_typing
+                    ):
+                        content = "".join(typing_buffer)
+                        type_action = TypeAction(content=content)
+                        ts = key_timestamp()
+                        add_parsed_action(type_action, ts, last_key_time_cosmetic)
+                        typing_buffer = []
                         typing_start_time = timestamp
 
-                    # Check for hotkeys (but exclude shift-only combinations)
-                    non_shift_modifiers = [
-                        k for k, v in modifier_keys.items() if v and k != "shift"
-                    ]
-                    if non_shift_modifiers:
-                        # It's a hotkey - flush any typing buffer first
+                    # Determine character based on CURRENT shift state
+                    original_key = action["key"]
+                    assert isinstance(original_key, str)
+                    final_char = convert_key_for_lock_state(
+                        original_key, lock_keys, modifier_keys
+                    )
+                    physical_key = normalize_key_to_physical(action["key"])
+                    keys_currently_pressed[physical_key] = True
+
+                    # Handle special keys
+                    if final_char.lower() == "backspace":
+                        if (
+                            typing_buffer
+                            and last_key_time
+                            and timestamp - last_key_time <= 2.0
+                            and not mouse_activity_since_typing
+                        ):
+                            last_char = typing_buffer.pop()
+                            if last_char == "</shift>":
+                                shift = last_char
+                                poped_other_shift = False
+                                if typing_buffer:
+                                    typing_buffer.pop()
+                                    if typing_buffer:
+                                        keep_next = typing_buffer[-1]
+                                        if keep_next == "<shift>":
+                                            typing_buffer.pop()
+                                            poped_other_shift = True
+
+                                if not poped_other_shift:
+                                    typing_buffer.append(shift)
+                        else:
+                            # Standalone backspace
+                            if typing_buffer:
+                                content = "".join(typing_buffer)
+                                type_action = TypeAction(content=content)
+                                add_parsed_action(
+                                    type_action,
+                                    key_timestamp(),
+                                    last_key_time_cosmetic,
+                                )
+                                typing_buffer = []
+                                typing_start_time = None
+
+                            backspace_action = TypeAction(content="<Backspace>")
+                            add_parsed_action(backspace_action, timestamp, timestamp)
+                    elif final_char.lower() == "space":
+                        typing_buffer.append(" ")
+                        mouse_activity_since_typing = False
+                    elif final_char.lower() == "tab":
+                        typing_buffer.append("\\t")
+                        mouse_activity_since_typing = False
+                    elif final_char.lower() == "enter":
+                        if not enter_pressed_before_shift_up and modifier_keys.get(
+                            "shift", False
+                        ):
+                            typing_buffer.append("<shift>")
+                            enter_pressed_before_shift_up = True
+
+                        typing_buffer.append("\\n")
+                        mouse_activity_since_typing = False
+                    elif len(final_char) == 1:  # Single character
+                        typing_buffer.append(final_char)
+                        mouse_activity_since_typing = False
+                    else:
+                        # Other special keys - flush typing buffer
                         if typing_buffer:
                             content = "".join(typing_buffer)
                             type_action = TypeAction(content=content)
@@ -380,146 +554,19 @@ def parse_actions(raw_actions) -> list[Action]:
                             )
                             typing_buffer = []
                             typing_start_time = None
-
-                        all_modifiers = [k for k, v in modifier_keys.items() if v]
-                        hotkey_combo = [*all_modifiers, key]
-                        hotkey_action = HotkeyAction(key=hotkey_combo)
-                        lookahead_modifier_keys_future = []
-                        lookahead_i = i
-                        while (
-                            lookahead_i + 1 < len(actions)
-                            and actions[lookahead_i + 1]["action"]["action"]
-                            == "key_button"
-                            and not actions[lookahead_i + 1]["action"]["is_down"]
-                        ):
-                            lookahead_i += 1
-                            next_key = actions[lookahead_i]["action"]["key"].lower()
-                            if modifier_keys.get(next_key):
-                                lookahead_modifier_keys_future.append(
-                                    actions[lookahead_i]["timestamp"]
-                                )
-                            else:
-                                if lookahead_i != i + 1:
-                                    break
-                        add_parsed_action(
-                            hotkey_action,
-                            modifier_start_time,
-                            max(lookahead_modifier_keys_future),
-                        )
-                        modifier_start_time = None
                         mouse_activity_since_typing = False
-                        typing_start_time = None
-                    else:
-                        # Regular key pressed - process immediately on DOWN event
-                        # Flush typing buffer if interrupted or too much time passed
-                        if typing_buffer and (
-                            last_key_time is None
-                            or timestamp - last_key_time > 2.0
-                            or mouse_activity_since_typing
-                        ):
-                            content = "".join(typing_buffer)
-                            type_action = TypeAction(content=content)
-                            ts = key_timestamp()
-                            add_parsed_action(type_action, ts, last_key_time_cosmetic)
-                            typing_buffer = []
-                            typing_start_time = timestamp
 
-                        # Determine character based on CURRENT shift state
-                        physical_key = normalize_key_to_physical(action["key"])
-                        shift_is_held = modifier_keys.get("shift", False)
-
-                        # Track this key as currently pressed for cleanup
-                        keys_currently_pressed[physical_key] = True
-
-                        # Determine final character
-                        original_key = action["key"]
-                        if shift_is_held:
-                            final_char = SHIFT_MAP.get(physical_key, original_key)
-                        else:
-                            final_char = physical_key
-
-                        # Handle special keys
-                        if final_char.lower() == "backspace":
-                            if (
-                                typing_buffer
-                                and last_key_time
-                                and timestamp - last_key_time <= 2.0
-                                and not mouse_activity_since_typing
-                            ):
-                                last_char = typing_buffer.pop()
-                                if last_char == "</shift>":
-                                    shift = last_char
-                                    poped_other_shift = False
-                                    if typing_buffer:
-                                        typing_buffer.pop()
-                                        if typing_buffer:
-                                            keep_next = typing_buffer[-1]
-                                            if keep_next == "<shift>":
-                                                typing_buffer.pop()
-                                                poped_other_shift = True
-
-                                    if not poped_other_shift:
-                                        typing_buffer.append(shift)
-                            else:
-                                # Standalone backspace
-                                if typing_buffer:
-                                    content = "".join(typing_buffer)
-                                    type_action = TypeAction(content=content)
-                                    add_parsed_action(
-                                        type_action,
-                                        key_timestamp(),
-                                        last_key_time_cosmetic,
-                                    )
-                                    typing_buffer = []
-                                    typing_start_time = None
-
-                                backspace_action = TypeAction(content="<Backspace>")
-                                add_parsed_action(
-                                    backspace_action, timestamp, timestamp
-                                )
-                        elif final_char.lower() == "space":
-                            typing_buffer.append(" ")
-                            mouse_activity_since_typing = False
-                        elif final_char.lower() == "tab":
-                            typing_buffer.append("\\t")
-                            mouse_activity_since_typing = False
-                        elif final_char.lower() == "enter":
-                            if not enter_pressed_before_shift_up and modifier_keys.get(
-                                "shift", False
-                            ):
-                                typing_buffer.append("<shift>")
-                                enter_pressed_before_shift_up = True
-
-                            typing_buffer.append("\\n")
-                            mouse_activity_since_typing = False
-                        elif len(final_char) == 1:  # Single character
-                            typing_buffer.append(final_char)
-                            mouse_activity_since_typing = False
-                        else:
-                            # Other special keys - flush typing buffer
-                            if typing_buffer:
-                                content = "".join(typing_buffer)
-                                type_action = TypeAction(content=content)
-                                add_parsed_action(
-                                    type_action, key_timestamp(), last_key_time_cosmetic
-                                )
-                                typing_buffer = []
-                                typing_start_time = None
-                            mouse_activity_since_typing = False
-
-                        last_key_time = timestamp
-                else:
-                    # Key released - just cleanup
-                    physical_key = normalize_key_to_physical(action["key"])
-                    # Remove from tracking dict if it exists
-                    keys_currently_pressed.pop(physical_key, None)
-                    last_key_time_cosmetic = timestamp
+                    last_key_time = timestamp
+            else:
+                # Key released - just cleanup
+                physical_key = normalize_key_to_physical(action["key"])
+                # Remove from tracking dict if it exists
+                keys_currently_pressed.pop(physical_key, None)
+                last_key_time_cosmetic = timestamp
 
         # Handle scroll events
         elif action["action"] == "scroll":
             scroll_events.append(actions[i])
-
-        i += 1
 
     # Flush any remaining typing buffer
     if typing_buffer:
