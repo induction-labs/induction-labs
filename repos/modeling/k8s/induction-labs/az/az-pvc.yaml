@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: azure-pvc
+spec:
+  storageClassName: local-storage # must match the PV’s storageClassName
+  accessModes:
+    - ReadWriteOnce # must be ≤ one of the PV’s accessModes
+  resources:
+    requests:
+      storage: 100Gi # ≤ the PV’s capacity
+  # optional: bind specifically to your PV by name
+  volumeName: azure-pv
