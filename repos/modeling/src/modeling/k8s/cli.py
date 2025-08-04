@@ -340,11 +340,19 @@ def load_eve_template() -> dict:
     return job_template
 
 
+# http://100.110.93.44 -> tailscale head ip
+# http://34.136.17.148 -> GCP head ip
+
+
 @k8s_app.command()
 def eve(
     checkpoint_dirs: Annotated[
         list[str], typer.Argument(help="Eve checkpoint directories (gs:// paths)")
     ],
+    meta_endpoint: Annotated[
+        str,
+        typer.Option("--meta-endpoint", help="Meta endpoint for VM management"),
+    ] = "http://100.110.93.44",
     num_repeats: Annotated[
         int,
         typer.Option("--num-repeats", "-r", help="Number of repeats for osworld run"),
@@ -440,7 +448,7 @@ def eve(
             "run-procs",
             "start",
             f"['eve', 'vllm', 'start', '{checkpoint_dir}', '--num-gpus=8']",
-            f"['eve', 'osworld', 'run', {tasks_file_annotate}'--output', '{output_path}', '--gpus=8', '--repeats={num_repeats}', '--max-steps={num_steps}']",
+            f"['eve', 'osworld', 'run', {tasks_file_annotate}'--output', '{output_path}', '--gpus=8', '--repeats={num_repeats}', '--max-steps={num_steps}', '--meta-endpoint={meta_endpoint}']",
         ]
         print(container["args"][-1])
 

@@ -46,13 +46,12 @@ logging.basicConfig(level=logging.INFO)
 logging.getLogger("aiohttp").setLevel(logging.DEBUG)
 
 # Connect with Tailscale
-META_ENDPOINT = "http://100.110.93.44"
 
 app = AsyncTyper()
 
 
-def create_endpoint(internal_ip: str, port: int = 8000) -> str:
-    return f"{META_ENDPOINT}/{internal_ip}/{port}"
+def create_endpoint(meta_endpoint: str, internal_ip: str, port: int = 8000) -> str:
+    return f"{meta_endpoint}/{internal_ip}/{port}"
 
 
 def load_tasks_file(tasks_file: str) -> list:
@@ -231,6 +230,7 @@ async def eval_task_with_semaphore(
     file_lock: asyncio.Lock,
     vms: AsyncVMRoundRobin,
     task: dict,
+    meta_endpoint: str,
     task_index: int = 0,
     model_endpoint: str = "http://localhost:8080/v1/chat/completions",
 ):
@@ -245,7 +245,7 @@ async def eval_task_with_semaphore(
         )
         attempt_id = uuid.uuid4().hex
         dump_folder = recording_output_folder + "/" + attempt_id
-        base_url = create_endpoint((await vms.next())["internal_ip"])
+        base_url = create_endpoint(meta_endpoint, (await vms.next())["internal_ip"])
         timeout = aiohttp.ClientTimeout(total=60 * 5)
         async with aiohttp.ClientSession(timeout=timeout) as session:
             reward, metadata = await evaluate_task(
@@ -287,6 +287,7 @@ async def evaluate_tasks_parallel(
     recording_output_folder: str,
     max_concurrent: int,
     num_vms: int,
+    meta_endpoint: str,
     model_endpoint: str = "http://localhost:8080/v1/chat/completions",
 ):
     vms = await create_vm_pool(
@@ -310,6 +311,7 @@ async def evaluate_tasks_parallel(
                 vms,
                 task,
                 task_index=i,
+                meta_endpoint=meta_endpoint,
                 model_endpoint=model_endpoint,
             )
             for i, task in enumerate(tasks)
@@ -342,6 +344,9 @@ async def cancel_all_tasks():
 
 @app.async_command(name="run")
 async def run_evaluation(
+    meta_endpoint: Annotated[
+        str, typer.Option("--meta-endpoint", help="Meta endpoint for VM management")
+    ],
     tasks_file: Annotated[
         str, typer.Argument(help="Path to tasks JSON file")
     ] = "gs://induction-labs/jonathan/osworld/osworld_subset_solved_by_annotators.json",
@@ -423,6 +428,7 @@ async def run_evaluation(
                 recording_output_folder=f"testing-task-{date}",
                 max_concurrent=concurrent_requests,
                 num_vms=number_of_osworld_vms,
+                meta_endpoint=meta_endpoint,
                 model_endpoint=model_endpoint,
             )
 

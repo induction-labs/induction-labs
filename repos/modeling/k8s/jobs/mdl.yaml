@@ -39,8 +39,8 @@ spec:
             # - name: NCCL_DEBUG
             #   value: INFO
           args:
-            - |
-              mdl run exp_configs/action_instruct/qwen_25o/Qwen25OActionExperimentConfig_GPU/20250718_211225.toml -rhw # single gpu
+            ["sleep", "inf"]
+            # mdl run exp_configs/action_instruct/qwen_25o/Qwen25OActionExperimentConfig_GPU/20250718_211225.toml -rhw # single gpu
             # mdl run exp_configs/action_instruct/qwen_25o/Qwen25OActionExperimentConfig_GPU/20250719_045722.toml -rhw # single node multi-gpu test
           resources:
             limits:
