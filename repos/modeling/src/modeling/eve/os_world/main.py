@@ -256,6 +256,7 @@ async def eval_task_with_semaphore(
                 session,
                 eval_options.max_trajectory_length,
             )
+        await agent.aiohttp_client.close()
 
         eval_output_row = {
             "eval_task_id": task["id"],
@@ -267,18 +268,16 @@ async def eval_task_with_semaphore(
             "trajectory_length": len(metadata),
         }
 
-        async with file_lock:
-            with open(output_folder + "/samples.jsonl", "a") as f:
-                f.write(json.dumps(eval_output_row))
-                f.write("\n")
+    async with file_lock:
+        with open(output_folder + "/samples.jsonl", "a") as f:
+            f.write(json.dumps(eval_output_row))
+            f.write("\n")
 
-        if not os.path.exists(f"{output_folder}/metadata"):
-            os.makedirs(f"{output_folder}/metadata")
+    if not os.path.exists(f"{output_folder}/metadata"):
+        os.makedirs(f"{output_folder}/metadata")
 
-        with open(f"{output_folder}/metadata/{attempt_id}.json", "w") as f:
-            json.dump(metadata, f)
-
-        await agent.aiohttp_client.close()
+    with open(f"{output_folder}/metadata/{attempt_id}.json", "w") as f:
+        json.dump(metadata, f)
 
 
 async def evaluate_tasks_parallel(
