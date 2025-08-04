@@ -76,6 +76,118 @@ def normalize_key_to_physical(key):
     return reverse_map.get(key_lower, key_lower)
 
 
+def parse_scroll(
+    events: list[dict],
+    /,
+    page_delta: int = 5,
+    point_threshold: int = 50,
+    time_threshold: float = 4.0,
+) -> list[Action]:
+    """
+    Collapse raw wheel events into high-level “page scroll” actions.
+
+    Works for both vertical (dy) and horizontal (dx) motion.
+    A page is emitted whenever |ΣΔ| ≥ page_delta, or when the group
+    is broken by     • pointer jump > point_threshold
+                     • time gap     > time_threshold
+                     • change of direction or axis.
+
+    Any residual motion < page_delta is still flushed as one page
+    when a group closes or the stream ends.
+    """
+    out: list[Action] = []
+
+    # running-group state ---------------------------------------------------
+    origin: tuple[int, int] | None = None  # pointer at group start
+    axis: str | None = None  # "x" (horizontal) or "y" (vertical)
+    direction: str | None = None  # "up"|"down"|"left"|"right"
+    acc: int = 0  # |ΣΔ| accumulated so far
+    start_t: float | None = None  # first timestamp contributing
+    last_t: float | None = None  # previous event time
+
+    def flush():
+        """Emit one residual page, if any, for the current group."""
+        nonlocal acc, start_t, last_t, origin, axis, direction
+        if acc and start_t is not None and last_t is not None:
+            out.append(
+                Action(
+                    action=ScrollAction(
+                        point=Point(x=origin[0], y=origin[1]), direction=direction
+                    ),
+                    timestamp=start_t,
+                    end_timestamp=last_t,
+                )
+            )
+        # reset group state (origin/axis/direction stay - they are set on next use)
+        acc = 0
+        start_t = None
+
+    # ----------------------------------------------------------------------
+    for ev in events:
+        dx = ev["action"]["delta_x"]
+        dy = ev["action"]["delta_y"]
+        if dx == 0 and dy == 0:  # ignore “no-op” wheel events
+            continue
+
+        # Pick the *dominant* axis for this event.  (Best-effort: we assume
+        # most mice send either dx OR dy ≠ 0 - if both are non-zero we use
+        # whichever has the larger magnitude.)
+        if abs(dy) > 0:
+            delta = dy
+            axis_now = "y"
+            dir_now = "up" if delta > 0 else "down"
+        else:
+            delta = dx
+            axis_now = "x"
+            dir_now = "right" if delta > 0 else "left"
+
+        x = ev["action"]["x"]
+        y = ev["action"]["y"]
+        t = ev["timestamp"]
+
+        # initialise group on the first scroll event ever
+        if origin is None:
+            origin = (x, y)
+            axis = axis_now
+            direction = dir_now
+
+        # does this event *break* the current group?
+        if (
+            axis_now != axis
+            or dir_now != direction
+            or abs(x - origin[0]) > point_threshold
+            or abs(y - origin[1]) > point_threshold
+            or (last_t is not None and t - last_t > time_threshold)
+        ):
+            flush()
+            origin = (x, y)
+            axis = axis_now
+            direction = dir_now
+
+        if start_t is None:  # first contribution to (possibly new) page
+            start_t = t
+
+        acc += abs(delta)
+        last_t = t
+
+        # spit out complete pages immediately
+        while acc >= page_delta:
+            out.append(
+                Action(
+                    action=ScrollAction(
+                        point=Point(x=origin[0], y=origin[1]), direction=direction
+                    ),
+                    timestamp=start_t,
+                    end_timestamp=t,
+                )
+            )
+            acc -= page_delta
+            start_t = t if acc else None  # leftovers start “now”
+
+    flush()  # residue at end of stream
+    return out
+
+
 def parse_actions(raw_actions) -> list[Action]:
     # Sort by timestamp to ensure chronological order
     actions = sorted(raw_actions, key=lambda x: x["timestamp"])
@@ -98,8 +210,8 @@ def parse_actions(raw_actions) -> list[Action]:
     last_key_time = None
 
     # Scroll grouping
-    last_scroll_time = None
-    last_scroll_pos = None
+    # last_scroll_time = None
+    # last_scroll_pos = None
 
     enter_pressed_before_shift_up = False
 
@@ -117,10 +229,22 @@ def parse_actions(raw_actions) -> list[Action]:
 
     last_key_time_cosmetic = None
 
+    scroll_events = []
+
     i = 0
     while i < len(actions):
         action = actions[i]["action"]
         timestamp = actions[i]["timestamp"]
+
+        if (
+            action["action"] != "scroll"
+            and action["action"] != "mouse_move"
+            and scroll_events
+        ):
+            # flush scroll events if any
+            scroll_actions = parse_scroll(scroll_events)
+            parsed_actions.extend(scroll_actions)
+            scroll_events = []
 
         # Handle mouse button events
         if action["action"] == "mouse_button":
@@ -228,6 +352,7 @@ def parse_actions(raw_actions) -> list[Action]:
                 ):
                     typing_buffer.append("</shift>")
                     enter_pressed_before_shift_up = False
+                    modifier_start_time = None
 
                 if key == "shift" and action["is_down"] and typing_start_time is None:
                     # Record shift press time
@@ -392,38 +517,7 @@ def parse_actions(raw_actions) -> list[Action]:
 
         # Handle scroll events
         elif action["action"] == "scroll":
-            scroll_pos = (action["x"], action["y"])
-
-            # Check if this scroll is close to the previous one (within 1 second and 50 pixels)
-            if (
-                last_scroll_time
-                and last_scroll_pos
-                and timestamp - last_scroll_time <= 1.0
-                and math.sqrt(
-                    (scroll_pos[0] - last_scroll_pos[0]) ** 2
-                    + (scroll_pos[1] - last_scroll_pos[1]) ** 2
-                )
-                <= 50
-            ):
-                # Skip this scroll as it's too close to the previous one
-                pass
-            else:
-                # Add new scroll action
-                if action["delta_y"] != 0:
-                    direction = "down" if action["delta_y"] < 0 else "up"
-                else:
-                    direction = "left" if action["delta_x"] < 0 else "right"
-
-                scroll_action = ScrollAction(
-                    point=Point(x=action["x"], y=action["y"]), direction=direction
-                )
-                add_parsed_action(
-                    scroll_action,
-                    last_scroll_time if last_scroll_time else timestamp,
-                    timestamp,
-                )
-                last_scroll_time = timestamp
-                last_scroll_pos = scroll_pos
+            scroll_events.append(actions[i])
 
         i += 1
 
@@ -433,4 +527,9 @@ def parse_actions(raw_actions) -> list[Action]:
         type_action = TypeAction(content=content)
         add_parsed_action(type_action, key_timestamp(), last_key_time_cosmetic)
 
-    return parsed_actions
+    if scroll_events:
+        # Flush any remaining scroll events
+        scroll_actions = parse_scroll(scroll_events)
+        parsed_actions.extend(scroll_actions)
+
+    return sorted(parsed_actions, key=lambda x: x.timestamp)

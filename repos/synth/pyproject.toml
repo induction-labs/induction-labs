@@ -11,7 +11,9 @@ dependencies = [
     "gcsfs>=2025.3.0",
     "jsonlines>=4.0.0",
     "numpy",
+    "openai>=1.90.0",
     "pillow>=11.2.1",
+    "python-dotenv>=1.1.1",
     "synapse",
     "tqdm>=4.67.1",
 ]

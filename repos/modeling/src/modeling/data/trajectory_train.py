@@ -230,6 +230,7 @@ class VlDataset(BaseDataset[VlDataSample, VlDatasetArgs]):
         """
         sample = self.examples.iloc[idx]
         instruction = sample["instruction"]
+        print(instruction)
         data_path = f"{self.dataset_folder}/metadata/{sample['attempt_id']}.json"
         # !!!XXX: you must do .to_thread bc otherwise ray will hang
         turns = await asyncio.to_thread(load_turns_gcs, data_path)

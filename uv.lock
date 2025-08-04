@@ -56,7 +56,7 @@ source = { editable = "repos/actioncollector" }
 dependencies = [
     { name = "av" },
     { name = "gcsfs" },
-    { name = "gooey" },
+    { name = "gooey", marker = "sys_platform != 'linux'" },
     { name = "google-cloud-storage" },
     { name = "ipykernel" },
     { name = "matplotlib" },
@@ -81,7 +81,7 @@ dev = [
 requires-dist = [
     { name = "av", specifier = ">=14.4.0" },
     { name = "gcsfs", specifier = ">=2025.3.0" },
-    { name = "gooey", git = "ssh://git@github.com/induction-labs/gooey.git?branch=pypi_release_2" },
+    { name = "gooey", marker = "sys_platform != 'linux'", git = "ssh://git@github.com/induction-labs/gooey.git?branch=pypi_release_2" },
     { name = "google-cloud-storage", specifier = ">=3.1.0" },
     { name = "ipykernel", specifier = ">=6.29.5" },
     { name = "matplotlib", specifier = ">=3.10.3" },
@@ -1581,11 +1581,11 @@ name = "gooey"
 version = "1.0.8.1"
 source = { git = "ssh://git@github.com/induction-labs/gooey.git?branch=pypi_release_2#870758a8439dcb79f7ab5591d3058d84afcedf79" }
 dependencies = [
-    { name = "colored" },
-    { name = "pillow" },
-    { name = "psutil" },
-    { name = "pygtrie" },
-    { name = "wxpython" },
+    { name = "colored", marker = "sys_platform != 'linux'" },
+    { name = "pillow", marker = "sys_platform != 'linux'" },
+    { name = "psutil", marker = "sys_platform != 'linux'" },
+    { name = "pygtrie", marker = "sys_platform != 'linux'" },
+    { name = "wxpython", marker = "sys_platform != 'linux'" },
 ]
 
 [[package]]
@@ -5800,7 +5800,9 @@ dependencies = [
     { name = "gcsfs" },
     { name = "jsonlines" },
     { name = "numpy" },
+    { name = "openai" },
     { name = "pillow" },
+    { name = "python-dotenv" },
     { name = "synapse" },
     { name = "tqdm" },
 ]
@@ -5817,7 +5819,9 @@ requires-dist = [
     { name = "gcsfs", specifier = ">=2025.3.0" },
     { name = "jsonlines", specifier = ">=4.0.0" },
     { name = "numpy" },
+    { name = "openai", specifier = ">=1.90.0" },
     { name = "pillow", specifier = ">=11.2.1" },
+    { name = "python-dotenv", specifier = ">=1.1.1" },
     { name = "synapse", editable = "repos/synapse" },
     { name = "tqdm", specifier = ">=4.67.1" },
 ]

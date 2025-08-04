@@ -25,7 +25,7 @@ from modeling.utils.cloud_path import CloudPath
 model_name = "ByteDance-Seed/UI-TARS-1.5-7B"
 # model_name = "Qwen/Qwen2.5-VL-3B-Instruct"
 processor_config = VideoProcessorConfig.Qwen25VL(model_name)
-run_name = "uitars_sft_7b_yehaw_good_nice"
+run_name = "uitars_sft_7b_yehaw_two_epoch"
 num_devices = 8
 UITarsActionExperimentConfig_GPU = ExperimentConfig(
     metadata=ExperimentMetadata(
@@ -44,7 +44,8 @@ UITarsActionExperimentConfig_GPU = ExperimentConfig(
     ),
     module=VlSftLITConfig(
         # checkpoint_path=CloudPath.from_str(
-        #     "gs://induction-labs/checkpoints/UITars_7B_uninitialized/2025-07-17T23-05-38/step_100"
+        #     # "gs://induction-labs/checkpoints/uitars_sft_7b_yehaw_good_nice/2025-07-31T05-18-29.nTtAsFOt/step_1170/"
+        #     "gs://induction-labs/checkpoints/uitars_sft_7b_yehaw_good_nice/2025-07-31T21-46-31.9xPQKPdh/step_620"
         # ),
         model_name=model_name,
         tokenizer_name=model_name,
@@ -82,7 +83,7 @@ UITarsActionExperimentConfig_GPU = ExperimentConfig(
         attn_impl=AttentionImplementation.FLASH_ATTENTION_2,
         accelerator=Accelerator.CUDA,
         precision=DType.bf16,
-        seed=718734,
+        seed=8492,
     ),
 )
 
@@ -99,7 +100,7 @@ UITarsActionExperimentConfig_CPU = UITarsActionExperimentConfig_GPU.model_copy(
 UITarsActionSweep = (
     Sweep(UITarsActionExperimentConfig_GPU)
     .sweep(
-        [1024 * 22],  # 2048*10, ],#8192 * 3, 8192 * 4],
+        [2048 * 11],  # 8192*3],  # 2048*10, ],#8192 * 3, 8192 * 4],
         lambda sq, exp: (
             exp.run.__setattr__("sequence_length", sq),
             exp,
@@ -107,23 +108,123 @@ UITarsActionSweep = (
     )
     .sweep(
         [
+            # (
+            #     "gs://induction-labs/jonathan/halluminate_v1_synth/all_samples_correct_trajectories_expanded_under_50_train.jsonl",
+            #     "gs://induction-labs/jonathan/halluminate_v1_synth/all_samples_correct_trajectories_expanded_under_50_test.jsonl",
+            #     435*3,
+            #     5e-5,
+            #     True,
+            #     12839,
+            # ),
+            # (
+            #     "gs://induction-labs/jonathan/halluminate_v1_synth/all_samples_correct_trajectories_expanded_under_50_train.jsonl",
+            #     "gs://induction-labs/jonathan/halluminate_v1_synth/all_samples_correct_trajectories_expanded_under_50_test.jsonl",
+            #     435*3,
+            #     1e-4,
+            #     True,
+            #     128399,
+            # ),
+            # (
+            #     "gs://induction-labs/jonathan/halluminate_v1_synth/only_osworld_samples_correct_trajectories_expanded_under_50_train.jsonl",
+            #     "gs://induction-labs/jonathan/halluminate_v1_synth/only_osworld_samples_correct_trajectories_expanded_under_50_test.jsonl",
+            #     70*3,
+            #     5e-5,
+            #     True,
+            #     128392,
+            # ),
+            # (
+            #     "gs://induction-labs/jonathan/halluminate_v1_synth/only_osworld_samples_correct_trajectories_expanded_under_50_train.jsonl",
+            #     "gs://induction-labs/jonathan/halluminate_v1_synth/only_osworld_samples_correct_trajectories_expanded_under_50_test.jsonl",
+            #     70*3,
+            #     1e-5,
+            #     True,
+            #     1829238,
+            # ),
+            # (
+            #     "gs://induction-labs/jonathan/halluminate_v1_synth/only_osworld_samples_correct_trajectories_expanded_under_50_train.jsonl",
+            #     "gs://induction-labs/jonathan/halluminate_v1_synth/only_osworld_samples_correct_trajectories_expanded_under_50_test.jsonl",
+            #     70*3,
+            #     1e-4,
+            #     True,
+            #     128390,
+            # ),
+            # (
+            #     "gs://induction-labs/jonathan/halluminate_v1_synth/only_osworld_samples_correct_trajectories_expanded_under_50_train.jsonl",
+            #     "gs://induction-labs/jonathan/halluminate_v1_synth/only_osworld_samples_correct_trajectories_expanded_under_50_test.jsonl",
+            #     70*3,
+            #     5e-6,
+            #     True,
+            #     18938,
+            # ),
+            # --------------------
+            #
+            # (
+            #     "gs://induction-labs/jonathan/halluminate_v1_synth/all_samples_correct_trajectories_expanded_under_50_train.jsonl",
+            #     "gs://induction-labs/jonathan/halluminate_v1_synth/all_samples_correct_trajectories_expanded_under_50_test.jsonl",
+            #     # 620 * 2,
+            #     430 * 2,
+            #     1e-4,
+            #     True,
+            # ),
+            # (
+            #     "gs://induction-labs/jonathan/sampled_trajectories/all_trajectories/together__samples_correct_trajectories_expanded_under_50_train_3x.jsonl",
+            #     "gs://induction-labs/jonathan/sampled_trajectories/all_trajectories/together__samples_correct_trajectories_expanded_under_50_test.jsonl",
+            #     620*3,
+            #     5e-5,
+            #     True,
+            #     12839,
+            # ),
+            # (
+            #     "gs://induction-labs/jonathan/sampled_trajectories/all_trajectories/together__samples_correct_trajectories_expanded_under_50_train.jsonl",
+            #     "gs://induction-labs/jonathan/sampled_trajectories/all_trajectories/together__samples_correct_trajectories_expanded_under_50_test.jsonl",
+            #     620*3,
+            #     1e-4,
+            #     True,
+            #     43920,
+            # ),
+            # (
+            #     "gs://induction-labs/jonathan/sampled_trajectories/all_trajectories/together_no_special_weighting_samples_correct_trajectories_expanded_under_50_train.jsonl",
+            #     "gs://induction-labs/jonathan/sampled_trajectories/all_trajectories/together_no_special_weighting_samples_correct_trajectories_expanded_under_50_test.jsonl",
+            #     735 * 2,
+            #     1e-5,
+            #     True,
+            # ),
+            # (
+            #     "gs://induction-labs/jonathan/sampled_trajectories/all_trajectories/min_3_samples_correct_trajectories_expanded_under_50_train_4x.jsonl",
+            #     "gs://induction-labs/jonathan/sampled_trajectories/all_trajectories/min_3_samples_correct_trajectories_expanded_under_50_test.jsonl",
+            #     320,
+            #     1e-4,
+            #     True,
+            # ),
+            # (
+            #     "gs://induction-labs/jonathan/sampled_trajectories/all_trajectories/min_3_samples_correct_trajectories_expanded_under_50_train_4x.jsonl",
+            #     "gs://induction-labs/jonathan/sampled_trajectories/all_trajectories/min_3_samples_correct_trajectories_expanded_under_50_test.jsonl",
+            #     320,
+            #     1e-4,
+            #     False,
+            # ),
             (
-                "gs://induction-labs/jonathan/sampled_trajectories/all_trajectories/all_data_samples_correct_trajectories_expanded_under_50_train_3x.jsonl",
-                "gs://induction-labs/jonathan/sampled_trajectories/all_trajectories/all_data_samples_correct_trajectories_expanded_under_50_test.jsonl",
-                1755,
+                "gs://induction-labs/jonathan/halluminate_v1_synth/hard_samples_correct_trajectories_expanded_under_50_train.jsonl",
+                "gs://induction-labs/jonathan/halluminate_v1_synth/hard_samples_correct_trajectories_expanded_under_50_test.jsonl",
+                46 * 3,
                 5e-5,
+                True,
+                18392,
             ),
             (
-                "gs://induction-labs/jonathan/sampled_trajectories/all_trajectories/min_3_samples_correct_trajectories_expanded_under_50_train_4x.jsonl",
-                "gs://induction-labs/jonathan/sampled_trajectories/all_trajectories/min_3_samples_correct_trajectories_expanded_under_50_test.jsonl",
-                320,
-                5e-5,
+                "gs://induction-labs/jonathan/halluminate_v1_synth/hard_samples_correct_trajectories_expanded_under_50_train.jsonl",
+                "gs://induction-labs/jonathan/halluminate_v1_synth/hard_samples_correct_trajectories_expanded_under_50_test.jsonl",
+                46 * 3,
+                1e-4,
+                True,
+                40302,
             ),
         ],
         lambda values, exp: (
             exp.train_datapack.__setattr__("dataset_path", values[0]),
             exp.validation_datapack.__setattr__("dataset_path", values[1]),
             exp.run.__setattr__("num_steps", values[2]),
+            exp.module.__setattr__("freeze_vision", values[4]),
             exp.metadata.__setattr__(
                 "checkpoint",
                 GCSCheckpointConfig(
@@ -138,10 +239,11 @@ UITarsActionSweep = (
                 LinearLRSchedule(
                     peak_lr=values[3],
                     end_lr=values[3] * 0.5,
-                    warmup_steps=10,
+                    warmup_steps=3,
                     end_step=values[2],
                 ),
             ),
+            exp.run.__setattr__("seed", values[5]),
             exp,
         )[-1],
     )
