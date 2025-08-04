@@ -12,7 +12,6 @@ from typing import Never, cast
 
 import torch
 import tqdm
-import wandb
 from ray.util.placement_group import (
     PlacementGroup,
     placement_group,
@@ -21,8 +20,8 @@ from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 from synapse.elapsed_timer import elapsed_timer
 from synapse.utils.logging import LOCAL_RANK, NODE_RANK, configure_logging
 from torch.utils.data import DataLoader
-from wandb.sdk.wandb_run import Run
 
+import wandb
 from modeling.actor import ActorArgs, ExperimentActor
 from modeling.checkpoints.save import upload_to_gcs
 from modeling.config import (
@@ -45,6 +44,7 @@ from modeling.utils.gen_id import gen_id
 from modeling.utils.max_timeout import max_timeout
 from modeling.utils.tmpdir import TmpDirContext
 from modeling.utils.typed_remote import RemoteArgs
+from wandb.sdk.wandb_run import Run
 
 logger = configure_logging(__name__, level=logging.DEBUG)
 
@@ -132,6 +132,11 @@ class ManagerState:
     train_iter: Iterator[list[SampleWithMetadata[BaseDataSample]]]
     validation_iter: Iterator[list[SampleWithMetadata[BaseDataSample]]]
     wandb: Run | None
+
+
+def cycle(iterable):
+    while True:
+        yield from iterable
 
 
 @dataclass
@@ -327,7 +332,7 @@ class ExperimentManager:
             dataset,
             batch_size=full_config.run.batch_size,
             shuffle=True,
-            drop_last=False,
+            drop_last=True,
             generator=generator,
             # TODO: Figure out optimal prefetch factor + num_workers
             prefetch_factor=full_config.run.dataloader_prefetch_factor,
@@ -371,7 +376,8 @@ class ExperimentManager:
         # not when the DataLoader is created.
 
         iterator = cast(
-            Iterator[list[SampleWithMetadata[DataSample]]], iter(typed_data_loader)
+            Iterator[list[SampleWithMetadata[DataSample]]],
+            iter(cycle(typed_data_loader)),
         )
 
         return iterator, config

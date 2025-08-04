@@ -178,7 +178,7 @@ def submit(
     # max is 1870.2Gi on Azure
 
     memory_gb = (num_gpus * 256) + 64
-    memory_gb = min(memory_gb, 1600)  # Limit to 2000Gi
+    memory_gb = min(memory_gb, 1800)  # Limit to 2000Gi
     # Max is 208 on lambda
     # Max is 96 on Azure
     # Max is 192 on AWS
@@ -349,6 +349,17 @@ def eve(
         int,
         typer.Option("--num-repeats", "-r", help="Number of repeats for osworld run"),
     ] = 5,
+    num_steps: Annotated[
+        int,
+        typer.Option(
+            "--max-steps",
+            "-n",
+            help="Number of steps the model is allowed to use for osworld run",
+        ),
+    ] = 100,
+    tasks_file: Annotated[
+        str, typer.Option("--tasks", "-t", help="Path to tasks JSON file")
+    ] = "gs://induction-labs/jonathan/osworld/osworld_subset_solved_by_annotators.json",
     image: Annotated[
         str | None,
         typer.Option(
@@ -423,13 +434,15 @@ def eve(
         )
 
         # Update the args with the checkpoint directory and number of repeats
+        tasks_file_annotate = "" if not tasks_file else f"'{tasks_file}', "
         container["args"] = [
             "eve",
             "run-procs",
             "start",
             f"['eve', 'vllm', 'start', '{checkpoint_dir}', '--num-gpus=8']",
-            f"['eve', 'osworld', 'run', '--output', '{output_path}', '--gpus=8', '--repeats={num_repeats}']",
+            f"['eve', 'osworld', 'run', {tasks_file_annotate}'--output', '{output_path}', '--gpus=8', '--repeats={num_repeats}', '--max-steps={num_steps}']",
         ]
+        print(container["args"][-1])
 
         logger.debug(f"Updated command args: {container['args']}")
 

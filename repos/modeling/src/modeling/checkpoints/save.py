@@ -23,18 +23,82 @@ logger = logging.getLogger(__name__)
 
 
 def upload_to_gcs(local_dir: Path, gcs_bucket: str, gcs_prefix: Path) -> None:
+    # dest = f"gs://{gcs_bucket}/{gcs_prefix.as_posix().rstrip('/')}/"
+    # logger.info(f"Uploading {local_dir} to {dest} via gcloud storage cp -r")
+    # cmd = [
+    #     "gcloud",
+    #     "storage",
+    #     "cp",
+    #     "-r",
+    #     str(local_dir) + "/",  # ensure trailing slash to copy contents
+    #     dest,
+    # ]
+    # subprocess.run(cmd, check=True)
+    # shutil.rmtree(local_dir, ignore_errors=True)
+
+    # ----------
+
+    # dest = f"gs://{gcs_bucket}/{gcs_prefix.as_posix().rstrip('/')}/"
+    # logger.info("Uploading %s to %s via gcloud storage cp -r", local_dir, dest)
+
+    # result = subprocess.run(
+    #     [
+    #         "gcloud", "storage", "cp", "-r",
+    #         f"{local_dir}/",   # copy contents
+    #         dest,
+    #     ],
+    #     check=True,
+    #     capture_output=True,   # capture both stdout and stderr
+    #     text=True,             # decode to str instead of bytes
+    # )
+
+    # # Everything the command wrote goes into result.stdout / result.stderr
+    # logger.info(result.stdout)
+    # if result.stderr:                       # in case gcloud wrote warnings
+    #     logger.warning(result.stderr)
+
+    # shutil.rmtree(local_dir, ignore_errors=True)
+
+    # ----------
+
     dest = f"gs://{gcs_bucket}/{gcs_prefix.as_posix().rstrip('/')}/"
-    logger.info(f"Uploading {local_dir} to {dest} via gcloud storage cp -r")
-    cmd = [
-        "gcloud",
-        "storage",
-        "cp",
-        "-r",
-        str(local_dir) + "/",  # ensure trailing slash to copy contents
-        dest,
-    ]
-    subprocess.run(cmd, check=True)
-    shutil.rmtree(local_dir, ignore_errors=True)
+    logger.info("Uploading %s → %s (gcloud storage cp -r)", local_dir, dest)
+
+    try:
+        result = subprocess.run(
+            [
+                "gcloud",
+                "storage",
+                "cp",
+                "-r",
+                f"{local_dir}/",
+                dest,
+            ],
+            capture_output=True,  # grab both streams
+            text=True,  # str not bytes
+            check=True,  # raise if non-zero
+        )
+
+        # Success ─ log everything that gcloud printed
+        if result.stdout:
+            logger.info(result.stdout.rstrip())
+        if result.stderr:  # gcloud progress / warnings
+            logger.warning(result.stderr.rstrip())
+
+    except subprocess.CalledProcessError as e:
+        # Command failed ─ dump its output *before* re-raising
+        logger.error("gcloud exited with status %s", e.returncode)
+
+        # e.stdout / e.stderr contain the captured streams
+        if e.stdout:
+            logger.error("stdout:\n%s", e.stdout.rstrip())
+        if e.stderr:
+            logger.error("stderr:\n%s", e.stderr.rstrip())
+
+        raise  # keep the original stack trace
+
+    finally:
+        shutil.rmtree(local_dir, ignore_errors=True)
 
 
 # def upload_to_gcs(local_dir: Path, gcs_bucket: str, gcs_prefix: Path) -> None:
