@@ -69,6 +69,7 @@ class ExperimentActor(BaseActor[ActorArgs]):
 
     state: InstanceState
     distributed_context: AbstractContextManager
+    next_sample: BaseDataSample | None = None
 
     @property
     def instance_config(self) -> InstanceConfig:
@@ -229,7 +230,23 @@ class ExperimentActor(BaseActor[ActorArgs]):
         return x
 
     @remote_method
-    def train_step(self, sample: "BaseDataSample") -> dict[str, float]:
+    def set_next_sample(self, sample: BaseDataSample) -> None:
+        """
+        Set the next sample for the actor.
+        This method should be called to set the sample that will be used for training or validation.
+        """
+        assert hasattr(self, "state"), (
+            "This method should not be called before the actor has been initialized."
+        )
+        assert self.next_sample is None, (
+            "This method should not be called when the next sample is already set."
+        )
+
+        self.next_sample = sample
+        # logger.debug(f"Next sample set for {self.instance_config=}: {sample}")
+
+    @remote_method
+    def train_step(self) -> dict[str, float]:
         """
         Perform a training step for the actor.
         This method should be called to train the model.
@@ -237,6 +254,11 @@ class ExperimentActor(BaseActor[ActorArgs]):
         assert hasattr(self, "state"), (
             "This method should not be called before the actor has been initialized."
         )
+        assert self.next_sample is not None, (
+            "This method should not be called before the next sample has been set."
+        )
+        sample = self.next_sample
+        self.next_sample = None
 
         # Forward pass
         # with torch.profiler.record_function("training_step"):

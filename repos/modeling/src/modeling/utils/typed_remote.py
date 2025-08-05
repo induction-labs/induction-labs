@@ -128,9 +128,7 @@ class BaseActor(Generic[ActorArgs], ABC):
                 os.environ[key] = value
 
     @classmethod
-    async def create(
-        cls, *, args: ActorArgs, remote_args: RemoteArgs | None = None
-    ) -> Self:
+    def create(cls, *, args: ActorArgs, remote_args: RemoteArgs | None = None) -> Self:
         """
         A no-op method that allows the class to be used with `ray.remote`.
         It does not change the type of the class.
@@ -172,6 +170,7 @@ class RemoteArgs(BaseModel):
     resources: dict[str, float] | None = None
     runtime_env: dict[str, Any] | None = None
     label_selector: dict[str, str] | None = None
+    max_concurrency: int | None = None
     scheduling_strategy: (
         Literal["DEFAULT", "SPREAD"] | PlacementGroupSchedulingStrategy | None
     ) = None
@@ -207,7 +206,7 @@ if __name__ == "__main__":
 
     async def test():
         # g = Greeter(BaseModel())
-        g = await Greeter.create(args=BaseModel())
+        g = Greeter.create(args=BaseModel())
         # g.greet("Alice")  # → Hello, Alice!
         await g.greet.remote("Bob")  # → ⚡ custom path
         await g.greet_async.remote("Bob")

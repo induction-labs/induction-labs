@@ -12,6 +12,7 @@ from typing import Never, cast
 
 import torch
 import tqdm
+import wandb
 from ray.util.placement_group import (
     PlacementGroup,
     placement_group,
@@ -20,8 +21,8 @@ from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 from synapse.elapsed_timer import elapsed_timer
 from synapse.utils.logging import LOCAL_RANK, NODE_RANK, configure_logging
 from torch.utils.data import DataLoader
+from wandb.sdk.wandb_run import Run
 
-import wandb
 from modeling.actor import ActorArgs, ExperimentActor
 from modeling.checkpoints.save import upload_to_gcs
 from modeling.config import (
@@ -44,7 +45,6 @@ from modeling.utils.gen_id import gen_id
 from modeling.utils.max_timeout import max_timeout
 from modeling.utils.tmpdir import TmpDirContext
 from modeling.utils.typed_remote import RemoteArgs
-from wandb.sdk.wandb_run import Run
 
 logger = configure_logging(__name__, level=logging.DEBUG)
 
@@ -207,6 +207,21 @@ class ExperimentManager:
 
         logger.info(f"Starting training: {num_steps} steps, ")
         pbar = tqdm.tqdm(range(num_steps), desc="Training", total=num_steps)
+
+        with elapsed_timer("Experiment.PlaceFirstSample") as first_sample_timer:
+            with elapsed_timer("wait_train_data") as train_data_timer:
+                batch = next(train_iter)
+            with elapsed_timer("train_step"):
+                train_promises = await asyncio.gather(
+                    *[
+                        actor.set_next_sample.remote(data.sample)
+                        for actor, data in zip(
+                            self.state.actors.all_actors, batch, strict=True
+                        )
+                    ]
+                )
+        first_sample_timer.print_timing_tree(logger)
+
         for step in pbar:
             if (
                 val_steps := self.exp_config.run.validation_every_n_steps
@@ -233,28 +248,42 @@ class ExperimentManager:
                 validation_metrics["validation/head_time"] = validation_timer.elapsed
                 self.wandb_log(validation_metrics, step=step)
             with elapsed_timer("training_step") as training_timer:
+                with elapsed_timer("train_step") as call_train_step_remote_timer:
+                    train_promises = [
+                        actor.train_step.remote()
+                        for actor in self.state.actors.all_actors
+                    ]
                 with elapsed_timer("wait_train_data") as train_data_timer:
                     batch = next(train_iter)
+                # Wait for all actors to finish training
                 assert isinstance(batch, list), f"{batch=}"
                 assert len(batch) == len(self.state.actors), (
                     f"{len(batch)=} != {len(self.state.actors)=}"
                 )
                 indices = [data.indices for data in batch]
                 # logger.info(f"Training step {step}: {indices=} indices")
-
-                all_train_metrics = await asyncio.gather(
-                    *[
-                        actor.train_step.remote(data.sample)
-                        for actor, data in zip(
-                            self.state.actors.all_actors, batch, strict=True
-                        )
-                    ]
-                )
+                with elapsed_timer("place_data") as place_data_timer:
+                    # Place the next sample for each actor
+                    await asyncio.gather(
+                        *[
+                            actor.set_next_sample.remote(data.sample)
+                            for actor, data in zip(
+                                self.state.actors.all_actors, batch, strict=True
+                            )
+                        ]
+                    )
+                with elapsed_timer("train_wandb_metrics") as wait_train_step:
+                    all_train_metrics = await asyncio.gather(*train_promises)
                 # Reduce metrics to get mean
-
                 train_metrics = module_cls.training_wandb_metrics(all_train_metrics)
             train_metrics["train/head_time"] = training_timer.elapsed
-            train_metrics["train/data_time"] = train_data_timer.elapsed
+            train_metrics["train/step_time/call_train_step"] = (
+                call_train_step_remote_timer.elapsed
+            )
+            train_metrics["train/step_time/wait_train_step"] = wait_train_step.elapsed
+            train_metrics["train/step_time/place_data"] = place_data_timer.elapsed
+            train_metrics["train/step_time/wait_train_data"] = train_data_timer.elapsed
+
             self.wandb_log(train_metrics, step=step)
             # logger.info(train_metrics)
             loss = train_metrics.get("train/loss")
@@ -413,6 +442,7 @@ class ExperimentManager:
                     RemoteArgs(
                         num_cpus=NUM_ACTOR_CPUS,
                         num_gpus=1.0,
+                        max_concurrency=4,
                         scheduling_strategy=PlacementGroupSchedulingStrategy(
                             placement_group=pg,
                         ),
@@ -430,16 +460,13 @@ class ExperimentManager:
             ]
             for node_rank in range(distributed_config.num_nodes)
         ]
-        actor_promises = [
+        actors = [
             [
                 ExperimentActor.create(args=actor_args, remote_args=remote_args)
                 for (remote_args, actor_args) in per_node
             ]
             for per_node in actor_args
         ]
-        actors = await asyncio.gather(
-            *[asyncio.gather(*per_node) for per_node in actor_promises]
-        )
         try:
             yield RayActors(actors=actors)
         finally:

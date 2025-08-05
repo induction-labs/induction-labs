@@ -58,6 +58,7 @@ def initialize_ray_head(resources: dict[str, float] | None = None):
                 # Also, capture the stdout of the `ray_cli.start` command and put those in seperate logs so we can
                 # always enable RAY_LOG_TO_STDERR
                 # "RAY_LOG_TO_STDERR": "1",
+                "RAY_allow_out_of_band_object_ref_serialization": "0",
                 # Set CUDA_VISIBLE_DEVICES to empty string to avoid ray trying to use GPUs on the head node.
                 # "CUDA_VISIBLE_DEVICES": "",
             }
