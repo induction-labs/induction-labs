@@ -71,7 +71,7 @@ def upload_to_gcs(local_dir: Path, gcs_bucket: str, gcs_prefix: Path) -> None:
                 "storage",
                 "cp",
                 "-r",
-                f"{local_dir}/",
+                f"{local_dir}/.",
                 dest,
             ],
             capture_output=True,  # grab both streams

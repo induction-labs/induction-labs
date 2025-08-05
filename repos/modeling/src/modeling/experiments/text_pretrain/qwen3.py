@@ -6,6 +6,7 @@ from modeling.config import (
     DistributedConfig,
     ExperimentConfig,
     ExperimentMetadata,
+    GCSCheckpointConfig,
     LinearLRSchedule,
     RunConfig,
     WandbConfig,
@@ -14,14 +15,22 @@ from modeling.data.text_train import TextPretrainDatapackConfig
 from modeling.modules.base_module import CompileConfig
 from modeling.modules.text_pretrain.qwen3 import Qwen3LITConfig
 from modeling.types import Accelerator, AttentionImplementation
+from modeling.utils.cloud_path import CloudPath
 
 # from modeling.config.distributed import DistributedConfig, ShardingConfig
-
+run_name = "qwen3_4B_text_pretrain"
 Qwen3PretrainExperimentConfig = ExperimentConfig(
     metadata=ExperimentMetadata(
-        wandb=WandbConfig(project="testing", name="qwen3_4B_text_pretrain"),
+        wandb=WandbConfig(project="testing", name=run_name),
         output_dir=Path("./output/qwen3_text_pretrain"),
-        checkpoint=None,
+        checkpoint=GCSCheckpointConfig(
+            checkpoint_prefix=CloudPath.from_str(
+                f"gs://induction-labs/checkpoints/{run_name}",
+            ),
+            checkpoint_frequency=0,  # Save every 10 steps
+            checkpoint_first_step=True,  # Save the first step
+            checkpoint_last_step=True,  # Save the last step
+        ),
     ),
     module=Qwen3LITConfig(
         model_name="Qwen/Qwen3-4B",
