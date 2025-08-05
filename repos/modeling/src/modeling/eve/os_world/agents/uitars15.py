@@ -435,6 +435,13 @@ def parsing_response_to_pyautogui_code(
                     pyautogui_code += "\ntime.sleep(0.5)\n"
                     if content.endswith(("\n", "\\n")):
                         pyautogui_code += "\npyautogui.press('enter')"
+
+                elif "<Backspace>" in stripped_content:
+                    assert stripped_content == "<Backspace>", (
+                        f"Only support <Backspace> action, {stripped_content=}"
+                    )
+                    pyautogui_code += "\npyautogui.press('backspace')\n"
+
                 else:
                     pyautogui_code += (
                         f"\npyautogui.write('{stripped_content}', interval=0.1)"
