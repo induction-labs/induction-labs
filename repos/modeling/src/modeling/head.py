@@ -27,6 +27,7 @@ from modeling.actor import ActorArgs, ExperimentActor
 from modeling.checkpoints.save import upload_to_gcs
 from modeling.config import (
     ExperimentConfig,
+    K8sMetadata,
     RuntimeConfig,
     UnifiedExperimentConfig,
 )
@@ -327,6 +328,30 @@ class ExperimentManager:
             await self.save_checkpoint(suffix="step_-1")
 
     @staticmethod
+    def get_k8s_metadata() -> K8sMetadata | None:
+        """
+        Get the Kubernetes metadata for the experiment.
+        This method is used to retrieve the Kubernetes metadata for the experiment.
+        """
+        # Retrieving fields K8S_POD_NAME K8S_NODE_NAME K8S_IMAGE_NAME
+        pod_name = os.environ.get("K8S_POD_NAME", None)
+        node_name = os.environ.get("K8S_NODE_NAME", None)
+        image_name = os.environ.get("K8S_IMAGE_NAME", None)
+        if pod_name is None:
+            assert node_name is None and image_name is None, (
+                f"{pod_name=}, {node_name=}, {image_name=} are not set in the environment."
+            )
+            return None
+        assert node_name is not None and image_name is not None, (
+            f"{pod_name=}, {node_name=}, {image_name=} are not set in the environment."
+        )
+        return K8sMetadata(
+            pod_name=pod_name,
+            node_name=node_name,
+            image_name=image_name,
+        )
+
+    @staticmethod
     def create_runtime_config(tmp_dir: Path) -> RuntimeConfig:
         """
         Initialize a WandbLogger instance with the configuration.
@@ -336,6 +361,7 @@ class ExperimentManager:
             id=id,
             start_time=datetime.now(tz=UTC),
             tmp_dir=tmp_dir,
+            k8s=ExperimentManager.get_k8s_metadata(),
         )
 
     @staticmethod

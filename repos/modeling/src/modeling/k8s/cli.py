@@ -212,6 +212,7 @@ def submit(
 
     # Update the command args to use the provided config_path
     container["args"] = ["mdl", "run", config_path, "-rhw"]
+    job_template["metadata"]["annotations"]["container-image"] = image
     # container["args"] = ["sleep", "inf"]  # For debugging purposes
     logger.debug(f"Updated command args to use config: {config_path}")
 
@@ -450,6 +451,8 @@ def eve(
             f"['eve', 'vllm', 'start', '{checkpoint_dir}', '--num-gpus=8']",
             f"['eve', 'osworld', 'run', {tasks_file_annotate}'--output', '{output_path}', '--gpus=8', '--repeats={num_repeats}', '--max-steps={num_steps}', '--meta-endpoint={meta_endpoint}']",
         ]
+        job_template["metadata"]["annotations"]["container-image"] = image
+
         print(container["args"][-1])
 
         logger.debug(f"Updated command args: {container['args']}")

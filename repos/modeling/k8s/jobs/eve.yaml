@@ -7,6 +7,8 @@ metadata:
   namespace: induction-labs
   labels:
     kueue.x-k8s.io/queue-name: local-queue # Assign to queue
+  annotations:
+    container-image: TODO
 
 spec:
   suspend: true # Important: Start suspended, Kueue will unsuspend
@@ -34,6 +36,19 @@ spec:
               value: /usr/lib/x86_64-linux-gnu/libcuda.so:/usr/lib/x86_64-linux-gnu/libnvidia-ml.so.1:/lib/x86_64-linux-gnu/libnvidia-ptxjitcompiler.so.1
             - name: LD_LIBRARY_PATH
               value: /usr/local/cuda/lib64
+            - name: K8S_POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: K8S_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: K8S_IMAGE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.annotations['container-image']
+
           args: [
               "sleep",
               "inf",

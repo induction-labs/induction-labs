@@ -41,10 +41,22 @@ logger = configure_logging(__name__, logging.DEBUG)
 DataSample = TypeVar("DataSample", bound="BaseDataSample")
 
 
+class K8sMetadata(BaseModel):
+    """
+    Metadata for Kubernetes deployment.
+    This class is used to store metadata related to the Kubernetes deployment of an experiment.
+    """
+
+    pod_name: str
+    node_name: str
+    image_name: str
+
+
 class RuntimeConfig(BaseModel):
     id: str
     start_time: datetime
     tmp_dir: Path
+    k8s: K8sMetadata | None
 
     @property
     def model_weights_dir(self) -> Path:
