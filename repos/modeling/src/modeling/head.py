@@ -183,7 +183,18 @@ class ExperimentManager:
             gcs_prefix=self.exp_config.checkpoint_path.bucket_and_path[1] / suffix,
         )
 
-    # # TODO: Make this async
+    async def place_train_data(self, batch: list[SampleWithMetadata[BaseDataSample]]):
+        with elapsed_timer("train/place_data") as place_data_timer:
+            await asyncio.gather(
+                *[
+                    actor.set_next_sample.remote(data.sample)
+                    for actor, data in zip(
+                        self.state.actors.all_actors, batch, strict=True
+                    )
+                ]
+            )
+        return place_data_timer
+
     async def run(self):
         """
         Run the experiment instance.
@@ -211,15 +222,8 @@ class ExperimentManager:
         with elapsed_timer("Experiment.PlaceFirstSample") as first_sample_timer:
             with elapsed_timer("wait_train_data") as train_data_timer:
                 batch = next(train_iter)
-            with elapsed_timer("train_step"):
-                train_promises = await asyncio.gather(
-                    *[
-                        actor.set_next_sample.remote(data.sample)
-                        for actor, data in zip(
-                            self.state.actors.all_actors, batch, strict=True
-                        )
-                    ]
-                )
+            await self.place_train_data(batch)
+
         first_sample_timer.print_timing_tree(logger)
 
         for step in pbar:
@@ -247,6 +251,7 @@ class ExperimentManager:
                     )
                 validation_metrics["validation/head_time"] = validation_timer.elapsed
                 self.wandb_log(validation_metrics, step=step)
+
             with elapsed_timer("training_step") as training_timer:
                 with elapsed_timer("train_step") as call_train_step_remote_timer:
                     train_promises = [
@@ -262,16 +267,7 @@ class ExperimentManager:
                 )
                 indices = [data.indices for data in batch]
                 # logger.info(f"Training step {step}: {indices=} indices")
-                with elapsed_timer("place_data") as place_data_timer:
-                    # Place the next sample for each actor
-                    await asyncio.gather(
-                        *[
-                            actor.set_next_sample.remote(data.sample)
-                            for actor, data in zip(
-                                self.state.actors.all_actors, batch, strict=True
-                            )
-                        ]
-                    )
+                place_data_timer = await self.place_train_data(batch)
                 with elapsed_timer("train_wandb_metrics") as wait_train_step:
                     all_train_metrics = await asyncio.gather(*train_promises)
                 # Reduce metrics to get mean
@@ -353,8 +349,10 @@ class ExperimentManager:
         This method is used to create a DataLoader for the training dataset with the specified batch size and collate function.
         Returns a tuple of (dataloader, config_dict).
         """
-        # seed = full_config.run.seed
-        # generator = torch.Generator(device="cpu").manual_seed(seed)
+        seed = full_config.run.seed
+        generator = torch.Generator(device="cpu").manual_seed(seed)
+        cloned_generator = generator.clone_state()
+        first_rng = torch.rand(1, generator=cloned_generator, device="cpu").item()
 
         # see https://github.com/pytorch/pytorch/issues/13246#issuecomment-905703662
         data_loader = DataLoader(
@@ -398,6 +396,7 @@ class ExperimentManager:
             "shuffle": sampler_name,
             "drop_last": data_loader.drop_last,
             "num_workers": data_loader.num_workers,
+            "first_rng": first_rng,
         }
 
         # Note that we return the ITERATOR of the dataloader not just the dataloader itself
