@@ -72,7 +72,6 @@ function calculateCIs(data: { eval_task_id: string, reward: number }[], top_k: n
   );
   const ciLower = samples[Math.floor(0.025 * samples.length)]!;
   const ciUpper = samples[Math.floor(0.975 * samples.length)]!;
-  console.log({ samples })
 
   return { mean: meanAll, std: stdAll, ciLower, ciUpper };
 }
@@ -241,11 +240,11 @@ export default function StatsPage() {
     const lengths = records.map(r => r.trajectory_length);
     const minLength = Math.min(...lengths);
     const maxLength = Math.max(...lengths);
-    
+
     // Create 10 bins
     const numBins = 10;
     const binSize = (maxLength - minLength) / numBins;
-    
+
     const bins = Array.from({ length: numBins }, (_, i) => ({
       name: `${Math.round(minLength + i * binSize)}-${Math.round(minLength + (i + 1) * binSize)}`,
       good: 0, // reward > 0
@@ -262,9 +261,9 @@ export default function StatsPage() {
         Math.floor((length - minLength) / binSize),
         numBins - 1
       );
-      
+
       const isGood = typeof record.reward === 'number' && record.reward > 0;
-      
+
       if (isGood) {
         bins[binIndex]!.good++;
       } else {
@@ -481,7 +480,7 @@ export default function StatsPage() {
                 />
               </div>
             </div>
-            
+
             {/* Histogram */}
             <div className="space-y-2">
               <h4 className="text-sm font-medium">Distribution (10 bins)</h4>
@@ -497,20 +496,20 @@ export default function StatsPage() {
                     }}
                   >
                     <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                    <XAxis 
-                      dataKey="name" 
+                    <XAxis
+                      dataKey="name"
                       className="text-xs fill-muted-foreground"
                       angle={-45}
                       textAnchor="end"
                       height={60}
                     />
                     <YAxis className="text-xs fill-muted-foreground" />
-                    <Legend 
-                      formatter={(value: string) => 
+                    <Legend
+                      formatter={(value: string) =>
                         value === 'good' ? 'Good (reward > 0)' : 'Bad (reward ≤ 0)'
                       }
                     />
-                    <Tooltip 
+                    <Tooltip
                       contentStyle={{
                         backgroundColor: 'hsl(var(--popover))',
                         border: '1px solid hsl(var(--border))',
@@ -518,18 +517,18 @@ export default function StatsPage() {
                       }}
                       labelStyle={{ color: 'hsl(var(--popover-foreground))' }}
                       formatter={(value: number, name: string) => [
-                        value, 
+                        value,
                         name === 'good' ? 'Good (reward > 0)' : 'Bad (reward ≤ 0)'
                       ]}
                     />
-                    <Bar 
-                      dataKey="bad" 
+                    <Bar
+                      dataKey="bad"
                       stackId="a"
                       fill="#ef4444"
                       name="bad"
                     />
-                    <Bar 
-                      dataKey="good" 
+                    <Bar
+                      dataKey="good"
                       stackId="a"
                       fill="#22c55e"
                       radius={[2, 2, 0, 0]}
