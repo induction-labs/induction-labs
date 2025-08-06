@@ -5,7 +5,7 @@ FROM base_image as mdl
 # Here we first sync *without* workspace and ssh required deps, because those always need docker rebuild.
 # NOTE: This stage does not require ssh mount
 RUN --mount=type=cache,target=/root/.cache/uv \
-  uv sync --locked --no-install-workspace --group flash-attn --no-group ssh-required
+  uv sync --frozen --no-install-workspace --group flash-attn --no-group ssh-required
 
 
 # New we add secrets
@@ -46,4 +46,4 @@ RUN mkdir -p -m 0600 ~/.ssh && ssh-keyscan github.com >> ~/.ssh/known_hosts
 
 # Now we sync *with* ssh required deps, which will always require a rebuild.
 RUN --mount=type=cache,target=/root/.cache/uv --mount=type=ssh \
-  uv sync --locked --group flash-attn --group ssh-required
+  uv sync --frozen --group flash-attn --group ssh-required
