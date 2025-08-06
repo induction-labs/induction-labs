@@ -1,5 +1,6 @@
 import { postRouter } from "~/server/api/routers/post";
 import { kueueRouter } from "~/server/api/routers/kueue";
+import { trajectoryRouter } from "~/server/api/routers/trajectory";
 import { createCallerFactory, createTRPCRouter } from "~/server/api/trpc";
 
 /**
@@ -10,6 +11,7 @@ import { createCallerFactory, createTRPCRouter } from "~/server/api/trpc";
 export const appRouter = createTRPCRouter({
   post: postRouter,
   kueue: kueueRouter,
+  trajectory: trajectoryRouter,
 });
 
 // export type definition of API
