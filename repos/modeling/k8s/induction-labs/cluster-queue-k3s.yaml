@@ -12,7 +12,7 @@ spec:
             - name: cpu
               nominalQuota: 1152
             - name: memory
-              nominalQuota: 1200Gi
+              nominalQuota: 12000Gi
     - coveredResources: ["nvidia.com/gpu"]
       flavors:
         - name: gpu-flavor
