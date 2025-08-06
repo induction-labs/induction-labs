@@ -1,28 +1,18 @@
-/* eslint-disable @typescript-eslint/no-unsafe-return */
-/* eslint-disable @typescript-eslint/no-unsafe-call */
-/* eslint-disable @typescript-eslint/no-unsafe-member-access */
-/* eslint-disable @typescript-eslint/no-unsafe-assignment */
 "use client";
 
 import { useState } from "react";
-import { api } from "~/trpc/react";
+import { useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
 import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
 import { Label } from "~/components/ui/label";
-import { TrajectoryDataDisplay } from "./trajectory-data-display";
 import { Alert, AlertDescription } from "~/components/ui/alert";
-import { Loader2, FileText } from "lucide-react";
+import { FileText } from "lucide-react";
 
 export function TrajectoryExplorer() {
+  const router = useRouter();
   const [filePath, setFilePath] = useState("gs://induction-labs/evals/step_620/step_620/2025-08-05T04-58-25/osworld_eval_x1qilhb3/samples.jsonl");
-  const [currentFilePath, setCurrentFilePath] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-
-  const { data: trajectoryData, isLoading, error: queryError } = api.trajectory.getTrajectoryData.useQuery(
-    { filePath: currentFilePath! },
-    { enabled: !!currentFilePath }
-  );
 
   const handleLoadData = async () => {
     if (!filePath.trim()) {
@@ -31,19 +21,17 @@ export function TrajectoryExplorer() {
     }
 
     setError(null);
-    setCurrentFilePath(filePath.trim());
+    const encodedPath = encodeURIComponent(filePath.trim());
+    router.push(`/trajectories/${encodedPath}`);
   };
 
   const handleFilePathChange = (value: string) => {
     setFilePath(value);
-    // Clear previous data and errors when changing file path
+    // Clear previous errors when changing file path
     if (error) {
       setError(null);
     }
   };
-
-  // Use query error if it exists
-  const displayError = error ?? queryError?.message;
 
 
   return (
@@ -72,28 +60,19 @@ export function TrajectoryExplorer() {
 
           <Button
             onClick={handleLoadData}
-            disabled={isLoading ?? !filePath.trim()}
+            disabled={!filePath.trim()}
             className="w-full sm:w-auto"
           >
-            {isLoading ? (
-              <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Loading...
-              </>
-            ) : (
-              "Load Trajectory Data"
-            )}
+            Load Trajectory Data
           </Button>
         </CardContent>
       </Card>
 
-      {displayError && (
+      {error && (
         <Alert variant="destructive">
-          <AlertDescription>{displayError}</AlertDescription>
+          <AlertDescription>{error}</AlertDescription>
         </Alert>
       )}
-
-      {trajectoryData && <TrajectoryDataDisplay trajectoryData={trajectoryData} />}
     </div>
   );
 }

@@ -1,3 +1,4 @@
+"use client";
 import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
 import { Input } from "~/components/ui/input";
@@ -11,16 +12,17 @@ import { useMemo } from "react";
 
 enum SearchField {
   ALL = "all",
-  TASK_ID = "task_id", 
+  TASK_ID = "task_id",
   ATTEMPT_ID = "attempt_id",
   INSTRUCTION = "instruction"
 }
 
 interface TrajectoryDataDisplayProps {
   trajectoryData: TrajectoryData;
+  gsUrl?: string;
 }
 
-export function TrajectoryDataDisplay({ trajectoryData }: TrajectoryDataDisplayProps) {
+export function TrajectoryDataDisplay({ trajectoryData, gsUrl }: TrajectoryDataDisplayProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [searchField, setSearchField] = useState<SearchField>(SearchField.ALL);
 
@@ -153,7 +155,7 @@ export function TrajectoryDataDisplay({ trajectoryData }: TrajectoryDataDisplayP
         </CardContent>
       </Card>
 
-      <TrajectoryTable data={filteredData} />
+      <TrajectoryTable data={filteredData} gsUrl={gsUrl} />
     </>
   );
 }

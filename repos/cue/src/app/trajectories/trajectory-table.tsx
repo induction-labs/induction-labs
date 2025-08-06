@@ -1,4 +1,5 @@
 import { useState, useMemo } from "react";
+import Link from "next/link";
 import {
   Table,
   TableBody,
@@ -25,9 +26,10 @@ type SortDirection = 'asc' | 'desc' | null;
 
 interface TrajectoryTableProps {
   data: TrajectoryRecord[];
+  gsUrl?: string;
 }
 
-export function TrajectoryTable({ data }: TrajectoryTableProps) {
+export function TrajectoryTable({ data, gsUrl }: TrajectoryTableProps) {
   const [sortField, setSortField] = useState<SortField | null>(null);
   const [sortDirection, setSortDirection] = useState<SortDirection>(null);
 
@@ -71,11 +73,11 @@ export function TrajectoryTable({ data }: TrajectoryTableProps) {
         // Handle mixed string/number rewards
         const aIsNumber = typeof aValue === 'number';
         const bIsNumber = typeof bValue === 'number';
-        
+
         // Numbers come before strings in sorting
         if (aIsNumber && !bIsNumber) return sortDirection === 'asc' ? -1 : 1;
         if (!aIsNumber && bIsNumber) return sortDirection === 'asc' ? 1 : -1;
-        
+
         // Both are strings - sort alphabetically
         if (!aIsNumber && !bIsNumber) {
           if (sortDirection === 'asc') {
@@ -84,7 +86,7 @@ export function TrajectoryTable({ data }: TrajectoryTableProps) {
             return String(bValue).localeCompare(String(aValue));
           }
         }
-        
+
         // Both are numbers - sort numerically
         if (sortDirection === 'asc') {
           return Number(aValue) - Number(bValue);
@@ -92,7 +94,7 @@ export function TrajectoryTable({ data }: TrajectoryTableProps) {
           return Number(bValue) - Number(aValue);
         }
       }
-      
+
       // Handle numeric sorting for trajectory_length
       if (sortDirection === 'asc') {
         return Number(aValue) - Number(bValue);
@@ -197,36 +199,43 @@ export function TrajectoryTable({ data }: TrajectoryTableProps) {
                     </TableCell>
                   </TableRow>
                 ) : (
-                  sortedData.map((record, index) => (
-                    <TableRow key={`${record.eval_task_id}-${record.attempt_id}-${index}`}>
-                      <TableCell>
-                        <ClickableId id={record.eval_task_id} />
-                      </TableCell>
-                      <TableCell>
-                        <ClickableId id={record.attempt_id} />
-                      </TableCell>
-                      <TableCell className="max-w-xl">
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <div className="line-clamp-2 cursor-help">
-                              {record.instruction}
-                            </div>
-                          </TooltipTrigger>
-                          <TooltipContent className="max-w-md">
-                            <p className="whitespace-pre-wrap">{record.instruction}</p>
-                          </TooltipContent>
-                        </Tooltip>
-                      </TableCell>
-                      <TableCell className="text-center">
-                        <Badge variant="outline">{record.trajectory_length}</Badge>
-                      </TableCell>
-                      <TableCell className="text-center">
-                        <Badge variant={getRewardColor(record.reward)}>
-                          {formatReward(record.reward)}
-                        </Badge>
-                      </TableCell>
-                    </TableRow>
-                  ))
+                  sortedData.map((record, index) => {
+                    const encodedAttemptId = encodeURIComponent(record.attempt_id);
+                    const trajectoryHref = gsUrl ? `/trajectories/${gsUrl}/attempts/${encodedAttemptId}` : '#';
+                    
+                    return (
+                      <TableRow key={`${record.eval_task_id}-${record.attempt_id}-${index}`}>
+                        <TableCell>
+                          <ClickableId id={record.eval_task_id} />
+                        </TableCell>
+                        <TableCell>
+                          <ClickableId id={record.attempt_id} />
+                        </TableCell>
+                        <TableCell className="max-w-xl">
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Link href={trajectoryHref}>
+                                <div className="line-clamp-2 cursor-pointer hover:text-primary transition-colors">
+                                  {record.instruction}
+                                </div>
+                              </Link>
+                            </TooltipTrigger>
+                            <TooltipContent className="max-w-md">
+                              <p className="whitespace-pre-wrap">{record.instruction}</p>
+                            </TooltipContent>
+                          </Tooltip>
+                        </TableCell>
+                        <TableCell className="text-center">
+                          <Badge variant="outline">{record.trajectory_length}</Badge>
+                        </TableCell>
+                        <TableCell className="text-center">
+                          <Badge variant={getRewardColor(record.reward)}>
+                            {formatReward(record.reward)}
+                          </Badge>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })
                 )}
               </TableBody>
             </Table>
