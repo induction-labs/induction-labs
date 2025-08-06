@@ -19,7 +19,12 @@ class GCSClient {
         throw new Error('Invalid GCS path format. Expected: gs://bucket-name/path/to/file');
       }
 
-      const [, bucketName, fileName] = match;
+      const bucketName = match[1];
+      const fileName = match[2];
+      
+      if (!bucketName || !fileName) {
+        throw new Error('Invalid GCS path format. Expected: gs://bucket-name/path/to/file');
+      }
       
       // Get the file from GCS
       const file = this.storage.bucket(bucketName).file(fileName);
@@ -60,6 +65,46 @@ class GCSClient {
         throw new Error(`Failed to read file from GCS: ${error.message}`);
       }
       throw new Error(`Failed to read file from GCS: ${gcsPath}`);
+    }
+  }
+
+  async readJSONFile(gcsPath: string): Promise<unknown> {
+    try {
+      // Parse the GCS path to extract bucket and file name
+      const match = gcsPath.match(/^gs:\/\/([^\/]+)\/(.+)$/);
+      if (!match) {
+        throw new Error('Invalid GCS path format. Expected: gs://bucket-name/path/to/file');
+      }
+
+      const bucketName = match[1];
+      const fileName = match[2];
+      
+      if (!bucketName || !fileName) {
+        throw new Error('Invalid GCS path format. Expected: gs://bucket-name/path/to/file');
+      }
+      
+      // Get the file from GCS
+      const file = this.storage.bucket(bucketName).file(fileName);
+      
+      // Check if file exists
+      const [exists] = await file.exists();
+      if (!exists) {
+        throw new Error(`File not found: ${gcsPath}`);
+      }
+
+      // Download and read the file content
+      const [content] = await file.download();
+      const fileContent = content.toString('utf-8');
+
+      // Parse JSON
+      const jsonData = JSON.parse(fileContent);
+      return jsonData;
+    } catch (error) {
+      console.error(`Error reading JSON file from GCS: ${gcsPath}`, error);
+      if (error instanceof Error) {
+        throw new Error(`Failed to read JSON file from GCS: ${error.message}`);
+      }
+      throw new Error(`Failed to read JSON file from GCS: ${gcsPath}`);
     }
   }
 

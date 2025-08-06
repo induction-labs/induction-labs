@@ -7,6 +7,8 @@ import Link from "next/link";
 import { Badge } from "~/components/ui/badge";
 import { useTrajectoryContext } from "../../trajectory-context";
 import { useMemo, useState, useEffect } from "react";
+import { api } from "~/trpc/react";
+import { TrajectoryStepViewer } from "./trajectory-step-viewer";
 
 interface TrajectoryViewerPageProps {
   params: Promise<{ gsUrl: string; attemptId: string }>;
@@ -28,6 +30,12 @@ export default function TrajectoryViewerPage({ params }: TrajectoryViewerPagePro
     if (!trajectoryData?.records || !decodedAttemptId) return null;
     return trajectoryData.records.find(record => record.attempt_id === decodedAttemptId);
   }, [trajectoryData, decodedAttemptId]);
+
+  // Fetch trajectory steps data
+  const { data: trajectorySteps, isLoading: stepsLoading, error: stepsError } = api.trajectory.getTrajectorySteps.useQuery(
+    { gsUrl, attemptId: decodedAttemptId },
+    { enabled: !!gsUrl && !!decodedAttemptId }
+  );
 
   if (!attemptId) {
     return <div>Loading...</div>;
@@ -102,21 +110,38 @@ export default function TrajectoryViewerPage({ params }: TrajectoryViewerPagePro
             </CardContent>
           </Card>
 
-          {/* Trajectory Steps Card */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center">
-                <Play className="mr-2 h-5 w-5" />
-                Trajectory Steps
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-center py-8 text-muted-foreground">
-                <p>Trajectory step visualization will be implemented here</p>
-                <p className="text-sm mt-2">This will show the step-by-step progression of the trajectory</p>
-              </div>
-            </CardContent>
-          </Card>
+          {/* Trajectory Steps */}
+          {stepsLoading ? (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center">
+                  <Play className="mr-2 h-5 w-5" />
+                  Trajectory Steps
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-center py-8 text-muted-foreground">
+                  <p>Loading trajectory steps...</p>
+                </div>
+              </CardContent>
+            </Card>
+          ) : stepsError ? (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center">
+                  <Play className="mr-2 h-5 w-5" />
+                  Trajectory Steps
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-center py-8 text-destructive">
+                  <p>Failed to load trajectory steps: {stepsError.message}</p>
+                </div>
+              </CardContent>
+            </Card>
+          ) : trajectorySteps ? (
+            <TrajectoryStepViewer steps={trajectorySteps} />
+          ) : null}
 
           {/* Additional Analysis Card */}
           <Card>
