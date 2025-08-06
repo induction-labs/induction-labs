@@ -7,6 +7,7 @@ import { useTrajectoryContext } from "../../trajectory-context";
 import { useMemo } from "react";
 import type { TrajectoryRecord } from "~/lib/schemas/trajectory";
 import { DataFrame } from "data-forge";
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
 
 /**
  * Draw k samples *with replacement* from arr.
@@ -230,6 +231,51 @@ export default function StatsPage() {
     };
   }, [trajectoryData, attemptsByTask]);
 
+  // Calculate trajectory length distribution for histogram with good/bad breakdown
+  const trajectoryLengthDistribution = useMemo(() => {
+    if (!trajectoryData?.records) {
+      return [];
+    }
+
+    const records = trajectoryData.records;
+    const lengths = records.map(r => r.trajectory_length);
+    const minLength = Math.min(...lengths);
+    const maxLength = Math.max(...lengths);
+    
+    // Create 10 bins
+    const numBins = 10;
+    const binSize = (maxLength - minLength) / numBins;
+    
+    const bins = Array.from({ length: numBins }, (_, i) => ({
+      name: `${Math.round(minLength + i * binSize)}-${Math.round(minLength + (i + 1) * binSize)}`,
+      good: 0, // reward > 0
+      bad: 0,  // reward = 0 or string (failed)
+      total: 0,
+      binStart: minLength + i * binSize,
+      binEnd: minLength + (i + 1) * binSize,
+    }));
+
+    // Assign records to bins and categorize by reward
+    records.forEach(record => {
+      const length = record.trajectory_length;
+      const binIndex = Math.min(
+        Math.floor((length - minLength) / binSize),
+        numBins - 1
+      );
+      
+      const isGood = typeof record.reward === 'number' && record.reward > 0;
+      
+      if (isGood) {
+        bins[binIndex]!.good++;
+      } else {
+        bins[binIndex]!.bad++;
+      }
+      bins[binIndex]!.total++;
+    });
+
+    return bins;
+  }, [trajectoryData]);
+
   return (
     <div className="space-y-6">
       {/* Overview Stats */}
@@ -433,6 +479,64 @@ export default function StatsPage() {
                     width: `${Math.min((stats.avgTrajectoryLength / stats.maxLength) * 100, 100)}%`
                   }}
                 />
+              </div>
+            </div>
+            
+            {/* Histogram */}
+            <div className="space-y-2">
+              <h4 className="text-sm font-medium">Distribution (10 bins)</h4>
+              <div className="h-64 w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart
+                    data={trajectoryLengthDistribution}
+                    margin={{
+                      top: 20,
+                      right: 30,
+                      left: 20,
+                      bottom: 5,
+                    }}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                    <XAxis 
+                      dataKey="name" 
+                      className="text-xs fill-muted-foreground"
+                      angle={-45}
+                      textAnchor="end"
+                      height={60}
+                    />
+                    <YAxis className="text-xs fill-muted-foreground" />
+                    <Legend 
+                      formatter={(value: string) => 
+                        value === 'good' ? 'Good (reward > 0)' : 'Bad (reward ≤ 0)'
+                      }
+                    />
+                    <Tooltip 
+                      contentStyle={{
+                        backgroundColor: 'hsl(var(--popover))',
+                        border: '1px solid hsl(var(--border))',
+                        borderRadius: '6px',
+                      }}
+                      labelStyle={{ color: 'hsl(var(--popover-foreground))' }}
+                      formatter={(value: number, name: string) => [
+                        value, 
+                        name === 'good' ? 'Good (reward > 0)' : 'Bad (reward ≤ 0)'
+                      ]}
+                    />
+                    <Bar 
+                      dataKey="bad" 
+                      stackId="a"
+                      fill="#ef4444"
+                      name="bad"
+                    />
+                    <Bar 
+                      dataKey="good" 
+                      stackId="a"
+                      fill="#22c55e"
+                      radius={[2, 2, 0, 0]}
+                      name="good"
+                    />
+                  </BarChart>
+                </ResponsiveContainer>
               </div>
             </div>
           </CardContent>
