@@ -72,6 +72,7 @@
       enable = true;
     };
     venv.enable = true;
+    package = pkgs.python312;
   };
   # languages.rust.enable = true;
 

@@ -25,5 +25,6 @@
       enable = true;
     };
     venv.enable = true;
+    package = pkgs.python312;
   };
 }

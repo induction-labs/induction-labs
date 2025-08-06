@@ -16,7 +16,7 @@ package = true
 no-build-isolation-package = ["flash-attn"]
 
 [tool.uv.workspace]
-members = ["repos/*"]
+members = ["repos/*", "repos/showdown/clicks"]
 # We need to exclude vllm as a workspace dep because it is dynamically versioned :/
 exclude = [
     "repos/vllm",
@@ -25,6 +25,8 @@ exclude = [
     "k8s/",
     "repos/cue",
     "repos/flash-attention-local",
+    "repos/showdown",
+    "repos/osworld",
 ]
 
 [dependency-groups]

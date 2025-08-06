@@ -18,6 +18,7 @@
   };
 
   languages.python = {
+    package = pkgs.python312;
     libraries = [
     ];
     enable = true;
