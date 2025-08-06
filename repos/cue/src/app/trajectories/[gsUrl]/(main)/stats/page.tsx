@@ -30,12 +30,9 @@ function sampleWithReplacement<T>(arr: T[], k: number): T[] {
 }
 
 // --- demo ---
-const deck = ["A", "2", "3", "4"];
-console.log(sampleWithReplacement(deck, 10));
-// e.g. ["3", "4", "4", "A", "2", "2", "3", "3", "A", "4"]
 
 // Example usage:
-function calculateCIs(data: { eval_task_id: string, reward: number }[], top_k: number, nBootstrap = 10) {
+function calculateCIs(data: { eval_task_id: string, reward: number | string }[], top_k: number, nBootstrap = 10) {
 
   // const dfBinary = df.where(row =>
   //   // eslint-disable-next-line @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-member-access

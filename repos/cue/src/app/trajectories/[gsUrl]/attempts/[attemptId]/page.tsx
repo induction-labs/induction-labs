@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-floating-promises */
 "use client";
 
 import { Button } from "~/components/ui/button";
@@ -17,7 +18,7 @@ interface TrajectoryViewerPageProps {
 export default function TrajectoryViewerPage({ params }: TrajectoryViewerPageProps) {
   const { trajectoryData, gsUrl } = useTrajectoryContext();
   const [attemptId, setAttemptId] = useState<string | null>(null);
-  
+
   useEffect(() => {
     params.then((p) => setAttemptId(p.attemptId));
   }, [params]);
@@ -86,10 +87,10 @@ export default function TrajectoryViewerPage({ params }: TrajectoryViewerPagePro
                 <div className="space-y-2">
                   <p className="text-sm font-medium text-muted-foreground">Final Reward</p>
                   <p className="text-2xl font-bold">
-                    {trajectoryRecord?.reward !== undefined 
-                      ? (typeof trajectoryRecord.reward === "string" 
-                          ? trajectoryRecord.reward 
-                          : trajectoryRecord.reward.toFixed(3))
+                    {trajectoryRecord?.reward !== undefined
+                      ? (typeof trajectoryRecord.reward === "string"
+                        ? trajectoryRecord.reward
+                        : trajectoryRecord.reward.toFixed(3))
                       : "-"
                     }
                   </p>

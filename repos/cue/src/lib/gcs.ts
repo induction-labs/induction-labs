@@ -14,21 +14,21 @@ class GCSClient {
   async readJSONLFile(gcsPath: string): Promise<TrajectoryRecord[]> {
     try {
       // Parse the GCS path to extract bucket and file name
-      const match = gcsPath.match(/^gs:\/\/([^\/]+)\/(.+)$/);
+      const match = /^gs:\/\/([^\/]+)\/(.+)$/.exec(gcsPath);
       if (!match) {
         throw new Error('Invalid GCS path format. Expected: gs://bucket-name/path/to/file');
       }
 
       const bucketName = match[1];
       const fileName = match[2];
-      
+
       if (!bucketName || !fileName) {
         throw new Error('Invalid GCS path format. Expected: gs://bucket-name/path/to/file');
       }
-      
+
       // Get the file from GCS
       const file = this.storage.bucket(bucketName).file(fileName);
-      
+
       // Check if file exists
       const [exists] = await file.exists();
       if (!exists) {
@@ -43,11 +43,12 @@ class GCSClient {
       const lines = fileContent.trim().split('\n');
       const records: TrajectoryRecord[] = [];
 
-      for (let i = 0; i < lines.length; i++) {
+      for (let i = 0;i < lines.length;i++) {
         const line = lines[i]?.trim();
         if (!line) continue; // Skip empty lines
 
         try {
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
           const jsonObject = JSON.parse(line);
           // Validate each record using Zod schema
           const validatedRecord = trajectoryRecordSchema.parse(jsonObject);
@@ -71,21 +72,21 @@ class GCSClient {
   async readJSONFile(gcsPath: string): Promise<unknown> {
     try {
       // Parse the GCS path to extract bucket and file name
-      const match = gcsPath.match(/^gs:\/\/([^\/]+)\/(.+)$/);
+      const match = /^gs:\/\/([^\/]+)\/(.+)$/.exec(gcsPath);
       if (!match) {
         throw new Error('Invalid GCS path format. Expected: gs://bucket-name/path/to/file');
       }
 
       const bucketName = match[1];
       const fileName = match[2];
-      
+
       if (!bucketName || !fileName) {
         throw new Error('Invalid GCS path format. Expected: gs://bucket-name/path/to/file');
       }
-      
+
       // Get the file from GCS
       const file = this.storage.bucket(bucketName).file(fileName);
-      
+
       // Check if file exists
       const [exists] = await file.exists();
       if (!exists) {
@@ -97,6 +98,7 @@ class GCSClient {
       const fileContent = content.toString('utf-8');
 
       // Parse JSON
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
       const jsonData = JSON.parse(fileContent);
       return jsonData;
     } catch (error) {
