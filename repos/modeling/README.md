@@ -25,7 +25,7 @@ docker run --device nvidia.com/gpu=all -e LD_PRELOAD=/usr/local/nvidia/lib64/lib
 
 
 ```sh
-docker run --gpus all -it -e LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libcuda.so:/usr/lib/x86_64-linux-gnu/libnvidia-ml.so.1 us-central1-docker.pkg.dev/induction-labs/induction-docker/modeling:latest /bin/bash
+docker run --shm-size=10g --gpus all -it -e LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libcuda.so:/usr/lib/x86_64-linux-gnu/libnvidia-ml.so.1 registry.depot.dev/v2tbx2d1w1:pn5q09w87k-mdl  --  /bin/bash 
 ```
 
 
@@ -51,3 +51,15 @@ machine wandb.ai
   password <your_wandb_api_key>
 ```
 put `<your_wandb_api_key>` in `induction-labs/repos/modeling/secrets/wandb_key` as plain text.
+
+
+
+
+
+
+### Benchmark import time
+
+
+```sh
+uv run python -X importtime -m modeling.eve.cli &> import_time.txt
+```
