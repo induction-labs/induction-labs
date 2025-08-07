@@ -26,7 +26,7 @@ model_name = "ByteDance-Seed/UI-TARS-1.5-7B"
 # model_name = "Qwen/Qwen2.5-VL-3B-Instruct"
 processor_config = VideoProcessorConfig.Qwen25VL(model_name)
 run_name = "uitars_sft_7b_yehaw_two_epoch"
-num_devices = 1
+num_devices = 8
 UITarsActionExperimentConfig_GPU = ExperimentConfig(
     metadata=ExperimentMetadata(
         wandb=WandbConfig(project="UITars_7B_sft", name=run_name),
