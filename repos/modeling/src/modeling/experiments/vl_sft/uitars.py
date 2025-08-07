@@ -72,7 +72,7 @@ UITarsActionExperimentConfig_GPU = ExperimentConfig(
             end_step=420 * 2,
         ),
         sequence_length=1024 * 22,
-        batch_size=1,
+        batch_size=32,
         num_steps=420 * 2,
         validation_every_n_steps=50,
         distributed=DistributedConfig(
