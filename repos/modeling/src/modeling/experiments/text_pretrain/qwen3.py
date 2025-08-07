@@ -28,7 +28,7 @@ Qwen3PretrainExperimentConfig = ExperimentConfig(
                 f"gs://induction-labs/checkpoints/{run_name}",
             ),
             checkpoint_frequency=0,  # Save every 10 steps
-            checkpoint_first_step=True,  # Save the first step
+            checkpoint_first_step=False,  # Save the first step
             checkpoint_last_step=True,  # Save the last step
         ),
     ),

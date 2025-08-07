@@ -26,7 +26,7 @@ model_name = "ByteDance-Seed/UI-TARS-1.5-7B"
 # model_name = "Qwen/Qwen2.5-VL-3B-Instruct"
 processor_config = VideoProcessorConfig.Qwen25VL(model_name)
 run_name = "uitars_sft_7b_yehaw_two_epoch"
-num_devices = 8
+num_devices = 1
 UITarsActionExperimentConfig_GPU = ExperimentConfig(
     metadata=ExperimentMetadata(
         wandb=WandbConfig(project="UITars_7B_sft", name=run_name),
@@ -38,7 +38,7 @@ UITarsActionExperimentConfig_GPU = ExperimentConfig(
                 f"gs://induction-labs/checkpoints/{run_name}",
             ),
             checkpoint_frequency=0,  # Save every 10 steps
-            checkpoint_first_step=True,  # Save the first step
+            checkpoint_first_step=False,  # Save the first step
             checkpoint_last_step=True,  # Save the last step
         ),
     ),
@@ -51,20 +51,18 @@ UITarsActionExperimentConfig_GPU = ExperimentConfig(
         tokenizer_name=model_name,
         optimizer=OptimizerType.ADAMW,
         compile=CompileConfig(),
+        # compile=None,
         freeze_vision=True,
+        # use_liger_kernel=False,
     ),
     train_datapack=VlDatapackConfig(
-        # dataset_path="gs://induction-labs/jonathan/sampled_trajectories/all_trajectories/all_data_samples_correct_trajectories_expanded_under_20_train.jsonl"
-        # dataset_path="gs://induction-labs/jonathan/sampled_trajectories/osworld_uitars_10x_en_5k/samples_correct_expanded_5_under_20_turns_train.jsonl"
-        # dataset_path="gs://induction-labs/jonathan/sampled_trajectories/all_trajectories/samples_correct_trajectories_expanded_under_20_train_doubled.jsonl"
-        # dataset_path="gs://induction-labs/jonathan/sampled_trajectories/osworld_uitars_10x_en_5k/samples_correct_expanded_5_under_20_turns_train_only_5.jsonl",
-        # dataset_path="gs://induction-labs/jonathan/sampled_trajectories/all_trajectories/samples_correct_trajectories_expanded_under_100.jsonl",
-        dataset_path="<PLACEHOLDER>",
+        dataset_path="gs://induction-labs/jonathan/halluminate_v1_synth/hard_samples_correct_trajectories_expanded_under_50_train.jsonl"
+        # dataset_path="<PLACEHOLDER>",
     ),
     validation_datapack=VlDatapackConfig(
         # dataset_path="gs://induction-labs/jonathan/sampled_trajectories/all_trajectories/samples_correct_trajectories_expanded_under_100.jsonl",
-        # dataset_path="gs://induction-labs/jonathan/sampled_trajectories/all_trajectories/all_data_samples_correct_trajectories_expanded_under_20_test.jsonl"
-        dataset_path="<PLACEHOLDER>",
+        dataset_path="gs://induction-labs/jonathan/halluminate_v1_synth/hard_samples_correct_trajectories_expanded_under_50_test.jsonl"
+        # dataset_path="<PLACEHOLDER>",
     ),
     run=RunConfig(
         lr=LinearLRSchedule(
@@ -74,7 +72,7 @@ UITarsActionExperimentConfig_GPU = ExperimentConfig(
             end_step=420 * 2,
         ),
         sequence_length=1024 * 22,
-        batch_size=32,
+        batch_size=1,
         num_steps=420 * 2,
         validation_every_n_steps=50,
         distributed=DistributedConfig(
@@ -203,14 +201,14 @@ UITarsActionSweep = (
             #     1e-4,
             #     False,
             # ),
-            (
-                "gs://induction-labs/jonathan/halluminate_v1_synth/hard_samples_correct_trajectories_expanded_under_50_train.jsonl",
-                "gs://induction-labs/jonathan/halluminate_v1_synth/hard_samples_correct_trajectories_expanded_under_50_test.jsonl",
-                46 * 3,
-                5e-5,
-                True,
-                18392,
-            ),
+            # (
+            #     "gs://induction-labs/jonathan/halluminate_v1_synth/hard_samples_correct_trajectories_expanded_under_50_train.jsonl",
+            #     "gs://induction-labs/jonathan/halluminate_v1_synth/hard_samples_correct_trajectories_expanded_under_50_test.jsonl",
+            #     46 * 3,
+            #     5e-5,
+            #     True,
+            #     18392,
+            # ),
             (
                 "gs://induction-labs/jonathan/halluminate_v1_synth/hard_samples_correct_trajectories_expanded_under_50_train.jsonl",
                 "gs://induction-labs/jonathan/halluminate_v1_synth/hard_samples_correct_trajectories_expanded_under_50_test.jsonl",
@@ -230,7 +228,7 @@ UITarsActionSweep = (
                 GCSCheckpointConfig(
                     checkpoint_prefix=exp.metadata.checkpoint.checkpoint_prefix,
                     checkpoint_frequency=values[2] // 3,
-                    checkpoint_first_step=True,  # Save the first step
+                    checkpoint_first_step=False,  # Save the first step
                     checkpoint_last_step=True,  # Save the last step
                 ),
             ),

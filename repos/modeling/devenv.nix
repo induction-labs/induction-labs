@@ -16,7 +16,10 @@
 
   # Allow buildx bake by default to access ../../ context
   env.BUILDX_BAKE_ENTITLEMENTS_FS = "0";
-  # env.LD_PRELOAD = "/usr/lib/x86_64-linux-gnu/libcuda.so:/usr/lib/x86_64-linux-gnu/libnvidia-ml.so.1";
+
+  # Need to set up LD_PRELOAD and LD_LIBRARY_PATH on linux machines:
+  # export LD_PRELOAD="/usr/lib/x86_64-linux-gnu/libcuda.so:/usr/lib/x86_64-linux-gnu/libnvidia-ml.so.1:/lib/x86_64-linux-gnu/libnvidia-ptxjitcompiler.so.1"
+  # export LD_LIBRARY_PATH="/usr/local/cuda/lib64"
 
   # https://devenv.sh/packages/
   packages = with pkgs;
@@ -78,7 +81,8 @@
 
   enterShell = ''
     # We need to set this manually otherwise triton tries to call `ldconfig` which is UB in nix.
-    export TRITON_LIBCUDA_PATH="$LD_LIBRARY_PATH";
+    # export TRITON_LIBCUDA_PATH="$LD_LIBRARY_PATH";
+    # Only do this on nixos - see https://www.notion.so/Stupid-LD_LIBRARY_PATH-stuffs-248dd1a72b6a80b5b3dcd9cf5da60188?source=copy_link
   '';
 
   # https://devenv.sh/tests/
