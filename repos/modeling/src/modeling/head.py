@@ -119,6 +119,10 @@ class RayActors:
         return sum(len(node_actors) for node_actors in self.actors)
 
 
+def cast_objectref[T](obj: ray.ObjectRef[T]) -> T:
+    return cast(T, obj)
+
+
 @dataclass
 class ManagerState:
     """
@@ -256,7 +260,7 @@ class ExperimentManager:
             with elapsed_timer("training_step") as training_timer:
                 with elapsed_timer("train_step") as call_train_step_remote_timer:
                     train_promises = [
-                        actor.train_step.remote(item)
+                        actor.train_step.remote(cast_objectref(item))
                         for actor, item in zip(
                             self.state.actors.all_actors, batches_ref, strict=True
                         )

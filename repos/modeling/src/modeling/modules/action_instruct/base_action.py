@@ -7,6 +7,7 @@ from typing import Any, TypeVar
 
 import numpy as np
 import torch
+import wandb
 from synapse.actions.keyboard_tokenizer import Tokenizer
 from synapse.actions.mouse_movements import (
     Cubic,
@@ -18,7 +19,6 @@ from torch import nn
 from transformers.loss.loss_utils import ForCausalLMLoss
 from transformers.modeling_utils import PreTrainedModel
 
-import wandb
 from modeling.config import (
     DatapackConfig,
 )
@@ -34,10 +34,10 @@ logger = configure_logging(__name__, level=logging.DEBUG)
 
 l2_loss = nn.MSELoss(reduce=False)
 
-T = TypeVar("T")
+# T = TypeVar("T")
 
 
-def not_none(value: T | None) -> T:
+def not_none[T](value: T | None) -> T:
     """
     Ensure that the value is not None.
     Raises an AssertionError if the value is None.
