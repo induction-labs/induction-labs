@@ -2472,6 +2472,7 @@ dev = [
     { name = "torch-tb-profiler" },
 ]
 evals = [
+    { name = "clicks" },
     { name = "fastapi", extra = ["standard"] },
     { name = "google-cloud-compute" },
     { name = "qwen-vl-utils" },
@@ -2535,6 +2536,7 @@ dev = [
     { name = "torch-tb-profiler", specifier = ">=0.4.3" },
 ]
 evals = [
+    { name = "clicks", editable = "repos/showdown/clicks" },
     { name = "fastapi", extras = ["standard"], specifier = ">=0.116.1" },
     { name = "google-cloud-compute", specifier = ">=1.33.0" },
     { name = "qwen-vl-utils", specifier = ">=0.0.11" },

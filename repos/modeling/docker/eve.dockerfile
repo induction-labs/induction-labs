@@ -30,6 +30,7 @@ ENV GOOGLE_APPLICATION_CREDENTIALS=/secrets/gcp-service-account.json
 # # TODO: Make this build depend on vllm build, so we dont do this giant copy and have a huge layer.
 COPY repos/modeling/ /workspace/repos/modeling/
 COPY repos/synapse/ /workspace/repos/synapse/
+COPY repos/showdown/ /workspace/repos/showdown/
 
 # Check that ssh is mounted properly
 RUN --mount=type=ssh \

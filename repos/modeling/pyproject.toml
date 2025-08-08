@@ -67,6 +67,7 @@ evals = [
   "fastapi[standard]>=0.116.1",
   "vllm>=0.10.0",
   "google-cloud-compute>=1.33.0",
+  "clicks",
 ]
 head = ["ray[default,client]"]
 [tool.uv]
@@ -89,6 +90,7 @@ synapse = { workspace = true }
 tomli-w = { git = "https://github.com/induction-labs/tomli-w-none.git" }
 tomli = { git = "https://github.com/induction-labs/tomli-none.git" }
 transformers = { git = "https://github.com/induction-labs/transformers.git", branch = "qwen25_compile_break" }
+clicks = { workspace = true }
 # This is so troll - we need to use local path package instead of workspace because we need to rewuv syrite 
 # `flash_attn` -> `flash_attn_local` https://github.com/pfmoore/editables/issues/20
 flash-attn-local = { path = "../flash-attention-local", editable = false }
