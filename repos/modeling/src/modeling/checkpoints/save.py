@@ -47,9 +47,11 @@ def upload_to_gcs(local_dir: Path, gcs_bucket: str, gcs_prefix: Path) -> None:
 
         # Success ─ log everything that gcloud printed
         if result.stdout:
-            logger.info(result.stdout.rstrip())
+            logger.debug(result.stdout.rstrip())
         if result.stderr:  # gcloud progress / warnings
-            logger.warning(result.stderr.rstrip())
+            logger.debug(result.stderr.rstrip())
+        # TODO: print Average throughput:
+        logger.info("Upload completed successfully.")
 
     except subprocess.CalledProcessError as e:
         # Command failed ─ dump its output *before* re-raising

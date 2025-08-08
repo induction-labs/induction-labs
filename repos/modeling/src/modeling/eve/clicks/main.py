@@ -14,11 +14,15 @@ import typer
 from clicks.eval import evaluate_csv
 from clicks.third_party import get_ui_tars_api_client
 from synapse.utils.async_typer import AsyncTyper
+from synapse.utils.logging import configure_logging, logging
 
+from modeling.checkpoints.load import download_gcs_folder
 from modeling.checkpoints.save import upload_to_gcs
 from modeling.eve.vllm_utils import wait_for_servers_ready
 from modeling.utils.cloud_path import CloudPath
 from modeling.utils.max_timeout import max_timeout
+
+logger = configure_logging(__name__, level=logging.INFO)
 
 app = AsyncTyper()
 
@@ -103,6 +107,10 @@ async def run_clicks_evaluation(
     run_output_folder = os.path.join(local_output_folder, run_id)
     os.makedirs(run_output_folder, exist_ok=True)
 
+    # Download the dataset from GCS
+    print("Downloading clicks dataset from GCS...")
+    dataset_tmpdir = tempfile.mkdtemp(prefix="clicks_dataset_")
+
     try:
         # Create API client
         api_client = get_ui_tars_api_client(
@@ -114,15 +122,13 @@ async def run_clicks_evaluation(
             model_name=ui_tars_model,
         )
 
-        # Import necessary modules for dataset loading
-        from huggingface_hub import snapshot_download
-
-        # Download the dataset
-        print("Downloading clicks dataset...")
-        data_dir = snapshot_download(
-            repo_id="generalagents/showdown-clicks",
-            repo_type="dataset",
+        await asyncio.to_thread(
+            download_gcs_folder,
+            bucket_name="induction-labs",
+            prefix="jeffrey/generalagents-showdown-clicks",
+            local_dir=Path(dataset_tmpdir),
         )
+        data_dir = dataset_tmpdir
 
         if dataset == "dev":
             csv_file = os.path.join(data_dir, "showdown-clicks-dev/data.csv")
@@ -209,7 +215,11 @@ async def run_clicks_evaluation(
             print("Upload completed!")
 
     finally:
-        # Clean up temporary directory if used
+        # Clean up dataset temporary directory
+        if os.path.exists(dataset_tmpdir):
+            shutil.rmtree(dataset_tmpdir)
+
+        # Clean up output temporary directory if used
         if cloud_output_path and os.path.exists(local_output_folder):
             shutil.rmtree(local_output_folder)
 

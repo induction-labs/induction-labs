@@ -3,14 +3,12 @@
 
 from pathlib import Path
 
-from google.cloud import storage
 from huggingface_hub import snapshot_download
-from synapse.utils.logging import configure_logging
-from tqdm import tqdm
+from synapse.utils.logging import configure_logging, logging
 
 from modeling.utils.cloud_path import CloudPath
 
-logger = configure_logging(__name__)
+logger = configure_logging(__name__, level=logging.INFO)
 
 
 def download_model_checkpoint(
@@ -29,7 +27,7 @@ def download_model_checkpoint(
 
 def download_gcs_folder(bucket_name: str, prefix: str, local_dir: Path) -> None:
     """
-    Download a folder from Google Cloud Storage with progress bar.
+    Download a folder from Google Cloud Storage using gcloud storage cp.
 
     Args:
         bucket_name: GCS bucket name
@@ -43,62 +41,55 @@ def download_gcs_folder(bucket_name: str, prefix: str, local_dir: Path) -> None:
     # Create the local directory if it doesn't exist
     local_dir.mkdir(parents=True, exist_ok=True)
 
-    # Initialize GCS client
-    client = storage.Client()
-    bucket = client.bucket(bucket_name)
+    # Construct the GCS source path
+    if prefix:
+        source = f"gs://{bucket_name}/{prefix.rstrip('/')}/*"
+    else:
+        source = f"gs://{bucket_name}/*"
 
-    # First pass: collect all blobs to get total count
-    logger.debug("Scanning files to download...")
-    blobs_to_download = []
-    for blob in bucket.list_blobs(prefix=prefix):
-        # Skip directories (blobs ending with '/')
-        if blob.name.endswith("/"):
-            continue
+    dest = str(local_dir).rstrip("/") + "/"
 
-        # Calculate relative path from prefix
-        if prefix:
-            # Remove the prefix from the blob name to get relative path
-            if blob.name.startswith(prefix):
-                relative_path = blob.name[len(prefix) :].lstrip("/")
-            else:
-                # This shouldn't happen with list_blobs(prefix=...), but handle it
-                relative_path = blob.name
-        else:
-            relative_path = blob.name
+    command = [
+        "gcloud",
+        "storage",
+        "cp",
+        "-r",
+        source,
+        dest,
+    ]
 
-        # Skip if relative path is empty (shouldn't happen)
-        if not relative_path:
-            continue
+    logger.info("Downloading %s → %s", source, dest)
+    logger.info("Running command: %s", " ".join(command))
 
-        blobs_to_download.append((blob, relative_path))
+    import subprocess
 
-    if not blobs_to_download:
-        logger.warning(f"No files found in gs://{bucket_name}/{prefix}")
-        return
+    try:
+        result = subprocess.run(
+            command,
+            capture_output=True,  # grab both streams
+            text=True,  # str not bytes
+            check=True,  # raise if non-zero
+        )
 
-    logger.info(f"Found {len(blobs_to_download)} files to download")
+        # Success ─ log everything that gcloud printed
+        if result.stdout:
+            logger.debug(result.stdout.rstrip())
+        if result.stderr:  # gcloud progress / warnings
+            logger.debug(result.stderr.rstrip())
 
-    # Second pass: download with progress bar
-    with tqdm(
-        total=len(blobs_to_download), desc="Downloading files", unit="file"
-    ) as pbar:
-        for blob, relative_path in blobs_to_download:
-            local_file_path = local_dir / relative_path
+    except subprocess.CalledProcessError as e:
+        # Command failed ─ dump its output *before* re-raising
+        logger.error("gcloud exited with status %s", e.returncode)
 
-            # Create parent directories if they don't exist
-            local_file_path.parent.mkdir(parents=True, exist_ok=True)
+        # e.stdout / e.stderr contain the captured streams
+        if e.stdout:
+            logger.error("stdout:\n%s", e.stdout.rstrip())
+        if e.stderr:
+            logger.error("stderr:\n%s", e.stderr.rstrip())
 
-            # Update progress bar description with current file
-            pbar.set_postfix_str(f"Downloading {relative_path}")
-            logger.debug(f"Downloading {blob.name} to {local_file_path}")
+        raise  # keep the original stack trace
 
-            # Download the blob
-            blob.download_to_filename(local_file_path)
-            pbar.update(1)
-
-    logger.info(
-        f"Downloaded {len(blobs_to_download)} files from gs://{bucket_name}/{prefix} to {local_dir}"
-    )
+    logger.info(f"Downloaded files from gs://{bucket_name}/{prefix} to {local_dir}")
 
 
 def download_cloud_dir(cloud_path: CloudPath, local_dir: Path) -> None:
