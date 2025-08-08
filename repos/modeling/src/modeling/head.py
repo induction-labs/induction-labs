@@ -270,6 +270,7 @@ class ExperimentManager:
                 )
                 indices = [data.indices for data in batch]
                 # logger.info(f"Training step {step}: {indices=} indices")
+                # I really hope we aren't randomly leaking memory into ray object storage here :/
                 with elapsed_timer("place_train_data") as place_data_timer:
                     batches_ref: list[ray.ObjectRef[BaseDataSample]] = [
                         ray.put(item.sample) for item in batch

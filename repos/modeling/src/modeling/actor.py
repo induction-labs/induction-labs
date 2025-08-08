@@ -257,6 +257,7 @@ class ExperimentActor(BaseActor[ActorArgs]):
         """
         if self.state.profile_context is not None:
             self.state.profile_context.__exit__(None, None, None)
+        self.state.profile_context = None
 
     @remote_method
     def train_step(self, sample: BaseDataSample) -> dict[str, float]:
