@@ -26,6 +26,16 @@ logger = configure_logging(__name__, level=logging.INFO)
 
 app = AsyncTyper()
 
+# Default values for command options
+DEFAULT_API_URL = "http://127.0.0.1:8080"
+DEFAULT_UI_TARS_MODEL = ""
+DEFAULT_DATASET = "dev"
+DEFAULT_NUM_WORKERS = 1
+DEFAULT_MAX_TOKENS = 128
+DEFAULT_TEMPERATURE = 0.0
+DEFAULT_FREQUENCY_PENALTY = 1.0
+DEFAULT_OUTPUT_FOLDER = "gs://induction-labs/evals/clicks-evals/"
+
 
 def setup_output_folder(output_folder: str) -> tuple[str, CloudPath | None]:
     """
@@ -54,25 +64,25 @@ def setup_output_folder(output_folder: str) -> tuple[str, CloudPath | None]:
 async def run_clicks_evaluation(
     api_url: Annotated[
         str, typer.Option("--api-url", help="API endpoint for the UI-TARS model")
-    ] = "http://127.0.0.1:8080",
+    ] = DEFAULT_API_URL,
     ui_tars_model: Annotated[
         str, typer.Option("--ui-tars-model", help="UI-TARS model name")
-    ] = "",
+    ] = DEFAULT_UI_TARS_MODEL,
     dataset: Annotated[
         str, typer.Option("--dataset", help="Dataset to evaluate on")
-    ] = "dev",
+    ] = DEFAULT_DATASET,
     num_workers: Annotated[
         int, typer.Option("--num-workers", help="Number of concurrent workers")
-    ] = 1,
+    ] = DEFAULT_NUM_WORKERS,
     max_tokens: Annotated[
         int, typer.Option("--max-tokens", help="Maximum tokens for model response")
-    ] = 128,
+    ] = DEFAULT_MAX_TOKENS,
     temperature: Annotated[
         float, typer.Option("--temperature", help="Temperature for sampling")
-    ] = 0.0,
+    ] = DEFAULT_TEMPERATURE,
     frequency_penalty: Annotated[
         float, typer.Option("--frequency-penalty", help="Frequency penalty parameter")
-    ] = 1.0,
+    ] = DEFAULT_FREQUENCY_PENALTY,
     sample_size: Annotated[
         int | None,
         typer.Option(
@@ -81,12 +91,44 @@ async def run_clicks_evaluation(
     ] = None,
     output_folder: Annotated[
         str, typer.Option("--output", help="Output folder for results")
-    ] = "gs://induction-labs/evals/clicks-evals/",
+    ] = DEFAULT_OUTPUT_FOLDER,
     run_id: Annotated[
         str | None, typer.Option("--run-id", help="Custom run ID")
     ] = None,
+    print_cmd: Annotated[
+        bool, typer.Option("--print-cmd", help="Print command in k8s format and exit")
+    ] = False,
 ):
     """Run clicks evaluation with specified parameters."""
+
+    # Handle print-cmd option
+    if print_cmd:
+        cmd_parts = ["eve", "clicks", "run"]
+
+        # Add all options that differ from defaults
+        if api_url != DEFAULT_API_URL:
+            cmd_parts.extend(["--api-url", api_url])
+        if ui_tars_model != DEFAULT_UI_TARS_MODEL:
+            cmd_parts.extend(["--ui-tars-model", ui_tars_model])
+        if dataset != DEFAULT_DATASET:
+            cmd_parts.extend(["--dataset", dataset])
+        if num_workers != DEFAULT_NUM_WORKERS:
+            cmd_parts.extend(["--num-workers", str(num_workers)])
+        if max_tokens != DEFAULT_MAX_TOKENS:
+            cmd_parts.extend(["--max-tokens", str(max_tokens)])
+        if temperature != DEFAULT_TEMPERATURE:
+            cmd_parts.extend(["--temperature", str(temperature)])
+        if frequency_penalty != DEFAULT_FREQUENCY_PENALTY:
+            cmd_parts.extend(["--frequency-penalty", str(frequency_penalty)])
+        if sample_size is not None:
+            cmd_parts.extend(["--sample-size", str(sample_size)])
+        if output_folder != DEFAULT_OUTPUT_FOLDER:
+            cmd_parts.extend(["--output", output_folder])
+        if run_id is not None:
+            cmd_parts.extend(["--run-id", run_id])
+
+        print(str(cmd_parts))
+        return str(cmd_parts)
 
     # Generate run ID if not provided
     if run_id is None:

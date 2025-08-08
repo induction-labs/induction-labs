@@ -110,6 +110,22 @@ class EvalOptions:
     max_trajectory_length: int = 50
 
 
+# Default values for command options
+DEFAULT_TASKS_FILE = (
+    "gs://induction-labs/jonathan/osworld/osworld_subset_solved_by_annotators.json"
+)
+DEFAULT_MODEL_ENDPOINT = "http://localhost:8080/v1/chat/completions"
+DEFAULT_LANGUAGE = Language.EN
+DEFAULT_TEMPERATURE = 0.3
+DEFAULT_TOP_P = 0.9
+DEFAULT_MAX_TRAJECTORY_LENGTH = 100
+DEFAULT_GPU_COUNT = 8
+DEFAULT_PARALLEL_REQUESTS_PER_GPU = 12
+DEFAULT_PARALLEL_VMS = 3
+DEFAULT_TASK_REPEATS = 10
+DEFAULT_OUTPUT_FOLDER = "gs://induction-labs/evals/osworld-evals-testing/"
+
+
 async def evaluate_task(
     agent: UITarsAgent,
     task: dict,
@@ -349,41 +365,88 @@ async def run_evaluation(
     ],
     tasks_file: Annotated[
         str, typer.Argument(help="Path to tasks JSON file")
-    ] = "gs://induction-labs/jonathan/osworld/osworld_subset_solved_by_annotators.json",
+    ] = DEFAULT_TASKS_FILE,
     model_endpoint: Annotated[
         str, typer.Option("--endpoint", help="Model endpoint URL")
-    ] = "http://localhost:8080/v1/chat/completions",
+    ] = DEFAULT_MODEL_ENDPOINT,
     language: Annotated[
         Language, typer.Option("--lang", help="Language for responses")
-    ] = Language.EN,
+    ] = DEFAULT_LANGUAGE,
     temperature: Annotated[
         float, typer.Option("--temperature", help="Temperature for generation")
-    ] = 0.3,
-    top_p: Annotated[float, typer.Option("--top-p", help="Top-p for generation")] = 0.9,
+    ] = DEFAULT_TEMPERATURE,
+    top_p: Annotated[
+        float, typer.Option("--top-p", help="Top-p for generation")
+    ] = DEFAULT_TOP_P,
     max_trajectory_length: Annotated[
         int, typer.Option("--max-steps", help="Maximum steps per task")
-    ] = 100,
+    ] = DEFAULT_MAX_TRAJECTORY_LENGTH,
     gpu_count: Annotated[
         int, typer.Option("--gpus", help="Number of GPUs available")
-    ] = 8,
+    ] = DEFAULT_GPU_COUNT,
     parallel_requests_per_gpu: Annotated[
         int, typer.Option("--requests-per-gpu", help="Parallel requests per GPU")
-    ] = 12,
+    ] = DEFAULT_PARALLEL_REQUESTS_PER_GPU,
     parallel_vms: Annotated[
         int, typer.Option("--parallel-vms", help="Parallel VMs per request group")
-    ] = 3,
+    ] = DEFAULT_PARALLEL_VMS,
     task_repeats: Annotated[
         int, typer.Option("--repeats", help="Number of times to repeat each task")
-    ] = 10,
+    ] = DEFAULT_TASK_REPEATS,
     output_folder: Annotated[
         str, typer.Option("--output", help="Output folder for results")
-    ] = "gs://induction-labs/evals/osworld-evals-testing/",
+    ] = DEFAULT_OUTPUT_FOLDER,
     max_tasks: Annotated[
         int | None,
         typer.Option("--max-tasks", help="Maximum number of unique tasks to evaluate"),
     ] = None,
+    print_cmd: Annotated[
+        bool, typer.Option("--print-cmd", help="Print command in k8s format and exit")
+    ] = False,
 ):
     """Run OSWorld evaluation with specified parameters."""
+
+    # Handle print-cmd option
+    if print_cmd:
+        cmd_parts = ["eve", "osworld", "run"]
+
+        # meta_endpoint is required, so always add it
+        cmd_parts.extend(["--meta-endpoint", meta_endpoint])
+
+        # Add positional argument if different from default
+        if tasks_file != DEFAULT_TASKS_FILE:
+            cmd_parts.append(tasks_file)
+        else:
+            # Add the default tasks file as positional argument
+            cmd_parts.append(tasks_file)
+
+        # Add all options that differ from defaults
+        if model_endpoint != DEFAULT_MODEL_ENDPOINT:
+            cmd_parts.extend(["--endpoint", model_endpoint])
+        if language != DEFAULT_LANGUAGE:
+            cmd_parts.extend(["--lang", language.value])
+        if temperature != DEFAULT_TEMPERATURE:
+            cmd_parts.extend(["--temperature", str(temperature)])
+        if top_p != DEFAULT_TOP_P:
+            cmd_parts.extend(["--top-p", str(top_p)])
+        if max_trajectory_length != DEFAULT_MAX_TRAJECTORY_LENGTH:
+            cmd_parts.extend(["--max-steps", str(max_trajectory_length)])
+        if gpu_count != DEFAULT_GPU_COUNT:
+            cmd_parts.extend(["--gpus", str(gpu_count)])
+        if parallel_requests_per_gpu != DEFAULT_PARALLEL_REQUESTS_PER_GPU:
+            cmd_parts.extend(["--requests-per-gpu", str(parallel_requests_per_gpu)])
+        if parallel_vms != DEFAULT_PARALLEL_VMS:
+            cmd_parts.extend(["--parallel-vms", str(parallel_vms)])
+        if task_repeats != DEFAULT_TASK_REPEATS:
+            cmd_parts.extend(["--repeats", str(task_repeats)])
+        if output_folder != DEFAULT_OUTPUT_FOLDER:
+            cmd_parts.extend(["--output", output_folder])
+        if max_tasks is not None:
+            cmd_parts.extend(["--max-tasks", str(max_tasks)])
+
+        print(str(cmd_parts))
+        return str(cmd_parts)
+
     import datetime
 
     date = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")

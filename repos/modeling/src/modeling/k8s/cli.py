@@ -349,30 +349,22 @@ def load_eve_template() -> dict:
 # http://34.136.17.148 -> GCP head ip
 
 
+# eve clicks run --sample-size 5 --print-cmd | mdl k8s eve ByteDance-Seed/UI-TARS-1.5-7B
+# eve clicks run --num-workers 32 --print-cmd | mdl k8s eve ByteDance-Seed/UI-TARS-1.5-7B
+
+
 @k8s_app.command()
 def eve(
     checkpoint_dirs: Annotated[
         list[str], typer.Argument(help="Eve checkpoint directories (gs:// paths)")
     ],
-    meta_endpoint: Annotated[
-        str,
-        typer.Option("--meta-endpoint", help="Meta endpoint for VM management"),
-    ] = "http://100.110.93.44",
-    num_repeats: Annotated[
-        int,
-        typer.Option("--num-repeats", "-r", help="Number of repeats for osworld run"),
-    ] = 5,
-    num_steps: Annotated[
-        int,
+    eval_cmd: Annotated[
+        str | None,
         typer.Option(
-            "--max-steps",
-            "-n",
-            help="Number of steps the model is allowed to use for osworld run",
+            "--eval-cmd",
+            help="Evaluation command to run. If not provided, reads from stdin",
         ),
-    ] = 100,
-    tasks_file: Annotated[
-        str, typer.Option("--tasks", "-t", help="Path to tasks JSON file")
-    ] = "gs://induction-labs/jonathan/osworld/osworld_subset_solved_by_annotators.json",
+    ] = None,
     image: Annotated[
         str | None,
         typer.Option(
@@ -399,8 +391,29 @@ def eve(
     ] = False,
 ):
     """
-    Submit eve jobs to kubernetes with checkpoint directories and number of repeats.
+    Submit eve jobs to kubernetes with checkpoint directories and evaluation command.
     """
+    # Get eval_cmd from stdin if not provided
+    if eval_cmd is None:
+        logger.info("Reading evaluation command from stdin...")
+        try:
+            eval_cmd = input().strip()
+            logger.info("Read evaluation command: %s", eval_cmd)
+        except (EOFError, KeyboardInterrupt):
+            logger.error("No evaluation command provided")
+            raise typer.Exit(1) from None
+
+    # Parse the eval_cmd string as a list
+    try:
+        import ast
+
+        eval_cmd_list = ast.literal_eval(eval_cmd)
+        if not isinstance(eval_cmd_list, list):
+            raise ValueError("Command must be a list")
+    except (ValueError, SyntaxError) as e:
+        logger.error(f"Failed to parse evaluation command: {eval_cmd}. Error: {e}")
+        raise typer.Exit(1) from e
+
     # Get the image - either from parameter or by running bake with target 'eve'
     if image is None:
         logger.info("No image provided, running bake with target 'eve'...")
@@ -409,7 +422,7 @@ def eve(
         logger.info(f"Using provided image: {image}")
 
     logger.info(
-        f"Submitting {len(checkpoint_dirs)} eve jobs with repeats: {num_repeats}, image: {image}"
+        f"Submitting {len(checkpoint_dirs)} eve jobs with eval command: {eval_cmd}, image: {image}"
     )
 
     from kubernetes import client
@@ -438,28 +451,45 @@ def eve(
         logger.debug(f"Updated container image to: {image}")
 
         # Generate output path based on checkpoint directory and current timestamp
-        # Extract the last two path components (e.g., "2025-08-01T00-14-01.H34n4wHd/step_367")
-        path_parts = checkpoint_dir.rstrip("/").split("/")
-        checkpoint_name = "/".join(path_parts[-3:])
-        current_timestamp = datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
-        output_path = (
-            f"gs://induction-labs/evals/{checkpoint_name}/{current_timestamp}/"
+        # Extract the eval name from the command (e.g., "clicks" from ["eve", "clicks", "run", ...])
+        assert eval_cmd_list[0] == "eve", "Evaluation command must start with 'eve'"
+        assert len(eval_cmd_list) > 1, (
+            "Evaluation command must include at least one argument"
         )
+        eval_name = eval_cmd_list[1]
 
-        # Update the args with the checkpoint directory and number of repeats
-        tasks_file_annotate = "" if not tasks_file else f"'{tasks_file}', "
+        # Extract the last two path components (e.g., "2025-08-01T00-14-01.H34n4wHd/step_367")
+        checkpoint_name = checkpoint_dir.rstrip("/")
+        if checkpoint_dir.startswith("gs://"):
+            path_parts = checkpoint_dir.rstrip("/").split("/")
+            checkpoint_name = "/".join(path_parts[-2:])
+
+        current_timestamp = datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
+        output_path = f"gs://induction-labs/evals/{eval_name}/{checkpoint_name}/{current_timestamp}/"
+
+        # Update the args with the checkpoint directory and evaluation command
+        # Create a modified eval command with updated output path
+        modified_eval_cmd = eval_cmd_list.copy()
+
+        # Find and update the --output argument in the eval command
+        for i, arg in enumerate(modified_eval_cmd):
+            if arg == "--output" and i + 1 < len(modified_eval_cmd):
+                modified_eval_cmd[i + 1] = output_path
+                break
+        else:
+            # If --output not found, add it
+            modified_eval_cmd.extend(["--output", output_path])
+
         container["args"] = [
             "eve",
             "run-procs",
             "start",
             f"['eve', 'vllm', 'start', '{checkpoint_dir}', '--num-gpus=8']",
-            f"['eve', 'osworld', 'run', {tasks_file_annotate}'--output', '{output_path}', '--gpus=8', '--repeats={num_repeats}', '--max-steps={num_steps}', '--meta-endpoint={meta_endpoint}']",
+            str(modified_eval_cmd),
         ]
         job_template["spec"]["template"]["metadata"]["annotations"][
             "container-image"
         ] = image
-
-        print(container["args"][-1])
 
         logger.debug(f"Updated command args: {container['args']}")
 
