@@ -10,7 +10,7 @@ from synapse.utils.logging import configure_logging, logging
 from torch.optim import Optimizer
 from transformers.modeling_utils import PreTrainedModel
 
-from modeling.callbacks.profiler import DummyProfiler, profile, profiler_context
+from modeling.callbacks.profiler import ProfileWrapper
 from modeling.checkpoints.save import save_checkpoint_to_tmpdir
 from modeling.config import UnifiedExperimentConfig
 from modeling.config.data import BaseDataSample
@@ -43,8 +43,7 @@ class InstanceState:
     mesh: "torch.distributed.device_mesh.DeviceMesh"
     generator: "torch.Generator"
     module: "BaseLITModule[PreTrainedModel, Any, BaseModuleConfig]"
-    profile_context: "AbstractContextManager[DummyProfiler | profile] | None" = None
-    profiler: Optional["profile| DummyProfiler"] = None
+    profiler: "ProfileWrapper| None" = None
 
     _optimizer: Optional["Optimizer"] = None
     _lr_scheduler: Optional["torch.optim.lr_scheduler.LRScheduler"] = None
@@ -166,7 +165,7 @@ class ExperimentActor(BaseActor[ActorArgs]):
             generator=generator,
             mesh=device_mesh,
             module=module,
-            profile_context=profiler_context(self.experiment_config),
+            profiler=None,
         )
 
     @property
@@ -221,13 +220,10 @@ class ExperimentActor(BaseActor[ActorArgs]):
             logger.warning(
                 f"No distributed context to shut down on {self.instance_config=}"
             )
-        if hasattr(self, "state") and self.state.profile_context is not None:
+        if hasattr(self, "state") and self.state.profiler is not None:
             logger.info(f"Shutting down profiler context {self.instance_config=}")
-            self.state.profile_context.__exit__(None, None, None)
-        else:
-            logger.warning(
-                f"No profiler context to shut down on {self.instance_config=}"
-            )
+            self.state.profiler.stop()
+            self.state.profiler = None
 
     @remote_method
     def health_check(self) -> float:
@@ -242,11 +238,12 @@ class ExperimentActor(BaseActor[ActorArgs]):
 
     @remote_method
     def start_profiler(self) -> None:
-        assert self.state.profile_context is not None, (
+        assert self.state.profiler is None, (
             "This method should not be called when the profiler is already started."
         )
-        profiler = self.state.profile_context.__enter__()
-        self.state.profiler = profiler
+        self.state.profiler = ProfileWrapper(
+            config=self.experiment_config,
+        )
         logger.info(f"Profiler started for {self.instance_config=}")
 
     @remote_method
@@ -255,9 +252,11 @@ class ExperimentActor(BaseActor[ActorArgs]):
         Stop the profiler for the actor.
         This method should be called to stop profiling after the training or validation step.
         """
-        if self.state.profile_context is not None:
-            self.state.profile_context.__exit__(None, None, None)
-        self.state.profile_context = None
+        assert self.state.profiler is not None, (
+            "This method should not be called when the profiler is not started."
+        )
+        self.state.profiler.stop()
+        self.state.profiler = None
 
     @remote_method
     def train_step(self, sample: BaseDataSample) -> dict[str, float]:

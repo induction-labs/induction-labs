@@ -1,14 +1,9 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Generator
-from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
 
 from synapse.utils.logging import configure_logging
-from torch.profiler import ProfilerAction
-from torch.profiler.profiler import profile
 
 from modeling.config import UnifiedExperimentConfig
 
@@ -48,50 +43,55 @@ def tensorboard_trace_handler(
 
 
 class DummyProfiler:
-    current_action = ProfilerAction.RECORD_AND_SAVE
-
     def step(self):
         pass
 
 
-@contextmanager
-def profiler_context(
-    config: UnifiedExperimentConfig,
-) -> Generator[DummyProfiler | profile, Any, None]:  # object is torch.profiler.profile
-    # TODO: Wrap profiler in a class instead of union
+class ProfileWrapper:
     """
-    Context manager to handle profiling during the experiment.
-    This is a placeholder for actual profiling logic.
+    A wrapper for the profiler to handle the context management and profiling actions.
+    Using this means handling profile cleanup manually.
     """
 
-    try:
-        if config.run.profile is None:
-            yield DummyProfiler()  # Replace with actual profiling logic
+    def __init__(self, config: UnifiedExperimentConfig):
+        self.config = config
+        if self.config.run.profile is None:
+            self.profiler = DummyProfiler()
         else:
-            print("Starting profiler...")
             from torch.profiler import ProfilerActivity, profile, schedule
 
-            profile_dir = config.metadata.output_dir / "profiler"
+            profile_dir = self.config.metadata.output_dir / "profiler"
+            logger.debug(f"Profiler config: {self.config.run.profile}")
+            logger.info("Starting profiler...")
             profile_schedule = schedule(
-                wait=config.run.profile.wait,
-                warmup=config.run.profile.warmup,
-                active=config.run.profile.active,
-                repeat=config.run.profile.repeat,
+                wait=self.config.run.profile.wait,
+                warmup=self.config.run.profile.warmup,
+                active=self.config.run.profile.active,
+                repeat=self.config.run.profile.repeat,
             )
-            with profile(
+            self.profiler = profile(
                 activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
                 schedule=profile_schedule,
                 on_trace_ready=tensorboard_trace_handler(
-                    profile_dir,  # type: ignore[arg-type]
+                    profile_dir,
                 ),
                 record_shapes=True,
                 with_stack=True,
                 with_flops=True,
                 profile_memory=True,
                 with_modules=True,
-            ) as prof:
-                # prof.start()
-                yield prof
-                # prof.stop()
-    finally:
-        print("Profiler context exited.")
+            )
+            self.profiler.start()
+
+    def step(self):
+        assert self.profiler is not None, "Profiler not started."
+        if isinstance(self.profiler, DummyProfiler):
+            return
+        self.profiler.step()
+
+    def stop(self):
+        assert self.profiler is not None, "Profiler not started."
+        if isinstance(self.profiler, DummyProfiler):
+            return
+        self.profiler.stop()
+        self.profiler = None
