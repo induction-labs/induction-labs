@@ -361,7 +361,7 @@ class ExperimentManager:
                 f"{pod_name=}, {node_name=}, {image_name=} are not set in the environment."
             )
             return None
-        assert node_name is not None and image_name is not None, (
+        assert node_name and image_name, (
             f"{pod_name=}, {node_name=}, {image_name=} are not set in the environment."
         )
         return K8sMetadata(

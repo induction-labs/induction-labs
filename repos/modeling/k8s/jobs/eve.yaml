@@ -7,14 +7,15 @@ metadata:
   namespace: induction-labs
   labels:
     kueue.x-k8s.io/queue-name: local-queue # Assign to queue
-  annotations:
-    container-image: TODO
 
 spec:
   suspend: true # Important: Start suspended, Kueue will unsuspend
   backoffLimit: 0 # No retries
   ttlSecondsAfterFinished: 172800 # 2 days
   template:
+    metadata:
+      annotations:
+        container-image: "" # Filled in by k8s cli
     spec:
       restartPolicy: Never
       runtimeClassName: nvidia

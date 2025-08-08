@@ -212,7 +212,9 @@ def submit(
 
     # Update the command args to use the provided config_path
     container["args"] = ["mdl", "run", config_path, "-rhw"]
-    job_template["metadata"]["annotations"]["container-image"] = image
+    job_template["spec"]["template"]["metadata"]["annotations"]["container-image"] = (
+        image
+    )
     # container["args"] = ["sleep", "inf"]  # For debugging purposes
     logger.debug(f"Updated command args to use config: {config_path}")
 
@@ -436,7 +438,7 @@ def eve(
         # Generate output path based on checkpoint directory and current timestamp
         # Extract the last two path components (e.g., "2025-08-01T00-14-01.H34n4wHd/step_367")
         path_parts = checkpoint_dir.rstrip("/").split("/")
-        checkpoint_name = "/".join(path_parts[-2:])
+        checkpoint_name = "/".join(path_parts[-3:])
         current_timestamp = datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
         output_path = (
             f"gs://induction-labs/evals/{checkpoint_name}/{current_timestamp}/"
@@ -451,7 +453,9 @@ def eve(
             f"['eve', 'vllm', 'start', '{checkpoint_dir}', '--num-gpus=8']",
             f"['eve', 'osworld', 'run', {tasks_file_annotate}'--output', '{output_path}', '--gpus=8', '--repeats={num_repeats}', '--max-steps={num_steps}', '--meta-endpoint={meta_endpoint}']",
         ]
-        job_template["metadata"]["annotations"]["container-image"] = image
+        job_template["spec"]["template"]["metadata"]["annotations"][
+            "container-image"
+        ] = image
 
         print(container["args"][-1])
 
