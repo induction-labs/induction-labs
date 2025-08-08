@@ -2,8 +2,10 @@ import logging
 import os
 import shutil
 import subprocess
+import uuid
 from pathlib import Path
 
+import pytest
 from google.cloud import storage
 from synapse.utils.logging import configure_logging
 from transformers.modeling_utils import PreTrainedModel
@@ -23,57 +25,21 @@ logger = logging.getLogger(__name__)
 
 
 def upload_to_gcs(local_dir: Path, gcs_bucket: str, gcs_prefix: Path) -> None:
-    # dest = f"gs://{gcs_bucket}/{gcs_prefix.as_posix().rstrip('/')}/"
-    # logger.info(f"Uploading {local_dir} to {dest} via gcloud storage cp -r")
-    # cmd = [
-    #     "gcloud",
-    #     "storage",
-    #     "cp",
-    #     "-r",
-    #     str(local_dir) + "/",  # ensure trailing slash to copy contents
-    #     dest,
-    # ]
-    # subprocess.run(cmd, check=True)
-    # shutil.rmtree(local_dir, ignore_errors=True)
-
-    # ----------
-
-    # dest = f"gs://{gcs_bucket}/{gcs_prefix.as_posix().rstrip('/')}/"
-    # logger.info("Uploading %s to %s via gcloud storage cp -r", local_dir, dest)
-
-    # result = subprocess.run(
-    #     [
-    #         "gcloud", "storage", "cp", "-r",
-    #         f"{local_dir}/",   # copy contents
-    #         dest,
-    #     ],
-    #     check=True,
-    #     capture_output=True,   # capture both stdout and stderr
-    #     text=True,             # decode to str instead of bytes
-    # )
-
-    # # Everything the command wrote goes into result.stdout / result.stderr
-    # logger.info(result.stdout)
-    # if result.stderr:                       # in case gcloud wrote warnings
-    #     logger.warning(result.stderr)
-
-    # shutil.rmtree(local_dir, ignore_errors=True)
-
-    # ----------
-
     dest = f"gs://{gcs_bucket}/{gcs_prefix.as_posix().rstrip('/')}/"
-    logger.info("Uploading %s → %s (gcloud storage cp -r)", local_dir, dest)
+    command = [
+        "gcloud",
+        "storage",
+        "cp",
+        "-r",
+        f"{str(local_dir).rstrip('/')}/*",
+        dest,
+    ]
 
+    logger.info("Uploading %s → %s ", local_dir, dest)
+    logger.info("Running command: %s", " ".join(command))
     try:
         result = subprocess.run(
-            [
-                "gcloud",
-                "storage",
-                "cp",
-                "-r",
-                f"{str(local_dir).rstrip('/')}/.",
-                dest,
-            ],
+            command,
             capture_output=True,  # grab both streams
             text=True,  # str not bytes
             check=True,  # raise if non-zero
@@ -101,80 +67,6 @@ def upload_to_gcs(local_dir: Path, gcs_bucket: str, gcs_prefix: Path) -> None:
         shutil.rmtree(local_dir, ignore_errors=True)
 
 
-# def upload_to_gcs(local_dir: Path, gcs_bucket: str, gcs_prefix: Path) -> None:
-#     """
-#     Uploads the contents of a local directory to a Google Cloud Storage bucket.
-
-#     Args:
-#         local_dir: Path to the local directory containing files to upload.
-#         gcs_bucket: Name of the GCS bucket to upload files to.
-#         gcs_prefix: Path prefix within the bucket where files will be uploaded.
-#     """
-#     client = storage.Client()
-#     bucket = client.bucket(gcs_bucket)
-#     all_files = [
-#         (root, fname) for root, _, files in os.walk(local_dir) for fname in files
-#     ]
-#     total_files = len(all_files)
-
-#     logger.info(
-#         f"Uploading {total_files} files from {local_dir} to gs://{gcs_bucket}/{gcs_prefix}"
-#     )
-#     for root, fname in tqdm(
-#         all_files,
-#         total=total_files,
-#         desc="Uploading",
-#     ):
-#         local_path = os.path.join(root, fname)
-#         # compute the destination path in the bucket
-#         rel_path = os.path.relpath(local_path, local_dir)
-#         gcs_path = (gcs_prefix / rel_path).as_posix()
-#         blob = bucket.blob(gcs_path)
-#         blob.upload_from_filename(local_path)
-#     # Empty the local directory after upload
-#     shutil.rmtree(local_dir, ignore_errors=True)
-
-
-# def save_checkpoint_to_gcs(
-#     model: PreTrainedModel,
-#     gcs_bucket: str,
-#     gcs_prefix: Path,
-#     local_dir: Path,
-#     is_rank0: bool,
-# ) -> None:
-#     """
-#     1) Save HF model & tokenizer to local_dir
-#     2) Upload every file under local_dir to gs://{gcs_bucket}/{gcs_prefix}/...
-
-#     Args:
-#         model:          a HuggingFace PreTrainedModel instance
-#         tokenizer:      the corresponding PreTrainedTokenizer
-#         gcs_bucket:     name of your GCS bucket (must already exist)
-#         gcs_prefix:     folder prefix inside the bucket, e.g. "checkpoints/run1"
-#         local_dir:      temporary local directory to save to
-#     """
-#     # 1) Save locally
-#     # Performs unsharded saving
-#     # Gather the parameters on all ranks
-
-#     # tokenizer.save_pretrained(local_dir)
-
-#     # 2) Upload to GCS
-#     client = storage.Client()  # Assumes GOOGLE_APPLICATION_CREDENTIALS is set
-#     bucket = client.bucket(gcs_bucket)
-
-#     for root, _, files in os.walk(local_dir):
-#         for fname in files:
-#             local_path = os.path.join(root, fname)
-#             # compute the destination path in the bucket
-#             rel_path = os.path.relpath(local_path, local_dir)
-#             gcs_path = os.path.join(gcs_prefix, rel_path).replace("\\", "/")
-#             blob = bucket.blob(gcs_path)
-#             blob.upload_from_filename(local_path)
-#     # Empty the local directory after upload
-#     shutil.rmtree(local_dir, ignore_errors=True)
-
-
 def ensure_empty_gcs_prefix(bucket_name: str, output_dir: str) -> None:
     """
     Raises a RuntimeError if there are already any objects under `output_dir/`
@@ -197,3 +89,58 @@ def ensure_empty_gcs_prefix(bucket_name: str, output_dir: str) -> None:
         raise RuntimeError(
             f"Output directory gs://{bucket_name}/{prefix} already exists"
         )
+
+
+BUCKET = "induction-labs"
+BASE_PREFIX = Path("jeffrey/testing")
+
+
+@pytest.mark.integration
+def test_upload_to_gcs_including_nested(tmp_path: Path):
+    """
+    Requires:
+      - gcloud CLI installed
+      - Authenticated with access to the bucket
+    Run with: pytest -v -m integration
+    """
+    # Arrange: create top-level and nested files
+    (tmp_path / "hello.txt").write_text("top-level\n")
+    nested_dir = tmp_path / "nest_dir"
+    nested_dir.mkdir()
+    (nested_dir / "test2.txt").write_text("nested\n")
+
+    # Use a unique sub-prefix under jeffrey/testing to avoid collisions
+    run_id = uuid.uuid4().hex[:8]
+    prefix = BASE_PREFIX / f"integration-{run_id}"
+
+    # Act: upload directory contents
+    upload_to_gcs(tmp_path, BUCKET, prefix)
+
+    # Assert: both files exist at the expected (non-nested-root) paths
+    gs_top = f"gs://{BUCKET}/{prefix.as_posix()}/hello.txt"
+    gs_nested = f"gs://{BUCKET}/{prefix.as_posix()}/nest_dir/test2.txt"
+
+    r1 = subprocess.run(
+        ["gcloud", "storage", "cat", gs_top], capture_output=True, text=True, check=True
+    )
+    r2 = subprocess.run(
+        ["gcloud", "storage", "cat", gs_nested],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+    assert r1.stdout == "top-level\n"
+    assert r2.stdout == "nested\n"
+
+    # Cleanup: remove the uploaded test artifacts
+    subprocess.run(
+        ["gcloud", "storage", "rm", "-r", f"gs://{BUCKET}/{prefix.as_posix()}/"],
+        check=True,
+    )
+
+
+if __name__ == "__main__":
+    # Run the test directly if this file is executed
+    pytest.main([__file__, "-v", "-m", "integration"])
+# uv run python -m modeling.checkpoints.save
