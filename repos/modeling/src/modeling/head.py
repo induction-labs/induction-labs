@@ -224,8 +224,12 @@ class ExperimentManager:
             with elapsed_timer("wait_train_data") as train_data_timer:
                 batch = next(train_iter)
             await self.place_train_data(batch)
-
         first_sample_timer.print_timing_tree(logger)
+
+        if self.exp_config.run.profile is not None:
+            # Start the profiler on actor 1
+            logger.info("Starting profiler on actor 1")
+            await self.state.actors.rank0.start_profiler.remote()
 
         for step in pbar:
             if (
@@ -250,6 +254,10 @@ class ExperimentManager:
                     validation_metrics = module_cls.validation_wandb_metrics(
                         all_validation_metrics, global_step=step
                     )
+                    logger.info(
+                        f"Validation metrics at step {step}: {validation_metrics['val/loss']}"
+                    )
+
                 validation_metrics["validation/head_time"] = validation_timer.elapsed
                 self.wandb_log(validation_metrics, step=step)
 
@@ -299,6 +307,18 @@ class ExperimentManager:
                 )
             self.wandb_log({}, step=step, commit=True)
             pbar.set_postfix(loss=f"{loss:.4f}")
+
+        # Stop profiler if it was started
+        if self.exp_config.run.profile is not None:
+            logger.info("Stopping profiler on actor 1")
+            await self.state.actors.rank0.stop_profiler.remote()
+            # Upload config.metadata.output_dir / "profiler" to gcs
+            if (checkpoint_path := self.exp_config.checkpoint_path) is not None:
+                upload_to_gcs(
+                    local_dir=self.exp_config.metadata.output_dir / "profiler",
+                    gcs_bucket=checkpoint_path.bucket_and_path[0],
+                    gcs_prefix=checkpoint_path.bucket_and_path[1] / "profiler",
+                )
 
         step = num_steps
         if (
@@ -710,6 +730,10 @@ class ExperimentManager:
                         exp_config=unified_config,
                         state=manager_state,
                     )
+                except Exception as e:
+                    logger.error("Error during experiment run:")
+                    logger.exception(e, exc_info=True, stack_info=True, stacklevel=1)
+                    raise e
                 finally:
                     tmpdir_context.__exit__(None, None, None)
                     # trainer_timer.print_timing_tree(logger)

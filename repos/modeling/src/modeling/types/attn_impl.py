@@ -29,3 +29,4 @@ class AttentionImplementation(str, Enum):
     SDPA = "sdpa"
     EAGER = "eager"
     MATH = "math"
+    FLEX_ATTN = "flex_attention"

@@ -7,16 +7,18 @@ from pathlib import Path
 from typing import Any
 
 from synapse.utils.logging import configure_logging
+from torch.profiler import ProfilerAction
 from torch.profiler.profiler import profile
 
 from modeling.config import UnifiedExperimentConfig
-from modeling.distributed.distributed import InstanceConfig
 
 logger = configure_logging(__name__, level=logging.INFO)
 
 
 def tensorboard_trace_handler(
-    dir_name: Path, worker_name: str | None = None, use_gzip: bool = False
+    dir_name: Path,
+    worker_name: str | None = None,
+    use_gzip: bool = False,
 ):
     """
     Outputs tracing files to directory of ``dir_name``, then that directory can be
@@ -30,6 +32,7 @@ def tensorboard_trace_handler(
 
     def handler_fn(prof) -> None:
         nonlocal worker_name
+        print(f"Exporting profiling trace to {dir_name}...")
         dir_name.mkdir(parents=True, exist_ok=True)
         if not worker_name:
             worker_name = f"{socket.gethostname()}_{os.getpid()}"
@@ -45,13 +48,15 @@ def tensorboard_trace_handler(
 
 
 class DummyProfiler:
+    current_action = ProfilerAction.RECORD_AND_SAVE
+
     def step(self):
         pass
 
 
 @contextmanager
 def profiler_context(
-    config: UnifiedExperimentConfig, instance: InstanceConfig
+    config: UnifiedExperimentConfig,
 ) -> Generator[DummyProfiler | profile, Any, None]:  # object is torch.profiler.profile
     # TODO: Wrap profiler in a class instead of union
     """
@@ -60,9 +65,10 @@ def profiler_context(
     """
 
     try:
-        if config.run.profile is None or not instance.is_main:
+        if config.run.profile is None:
             yield DummyProfiler()  # Replace with actual profiling logic
         else:
+            print("Starting profiler...")
             from torch.profiler import ProfilerActivity, profile, schedule
 
             profile_dir = config.metadata.output_dir / "profiler"
@@ -88,4 +94,4 @@ def profiler_context(
                 yield prof
                 # prof.stop()
     finally:
-        pass
+        print("Profiler context exited.")

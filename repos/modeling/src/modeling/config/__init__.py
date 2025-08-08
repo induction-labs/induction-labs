@@ -546,13 +546,24 @@ class ExperimentConfig(BaseModel):
             if self.metadata.wandb is not None and enable_wandb
             else None
         )
+        checkpoint_config = (
+            self.metadata.checkpoint.model_copy(
+                update={
+                    "checkpoint_frequency": 0,  # Disable checkpointing in tests
+                    "checkpoint_first_step": False,
+                    "checkpoint_last_step": False,
+                }
+            )
+            if self.metadata.checkpoint is not None
+            else None
+        )
         return self.model_copy(
             update={
                 "metadata": self.metadata.model_copy(
                     update={
                         "wandb": updated_wandb_config,
                         "output_dir": Path("/tmp") / self.metadata.output_dir.name,
-                        "checkpoint": None,
+                        "checkpoint": checkpoint_config,
                     }
                 ),
                 "run": self.run.model_copy(

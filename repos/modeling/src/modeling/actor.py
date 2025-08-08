@@ -10,6 +10,7 @@ from synapse.utils.logging import configure_logging, logging
 from torch.optim import Optimizer
 from transformers.modeling_utils import PreTrainedModel
 
+from modeling.callbacks.profiler import DummyProfiler, profile, profiler_context
 from modeling.checkpoints.save import save_checkpoint_to_tmpdir
 from modeling.config import UnifiedExperimentConfig
 from modeling.config.data import BaseDataSample
@@ -42,6 +43,8 @@ class InstanceState:
     mesh: "torch.distributed.device_mesh.DeviceMesh"
     generator: "torch.Generator"
     module: "BaseLITModule[PreTrainedModel, Any, BaseModuleConfig]"
+    profile_context: "AbstractContextManager[DummyProfiler | profile] | None" = None
+    profiler: Optional["profile| DummyProfiler"] = None
 
     _optimizer: Optional["Optimizer"] = None
     _lr_scheduler: Optional["torch.optim.lr_scheduler.LRScheduler"] = None
@@ -164,6 +167,7 @@ class ExperimentActor(BaseActor[ActorArgs]):
             generator=generator,
             mesh=device_mesh,
             module=module,
+            profile_context=profiler_context(self.experiment_config),
         )
 
     @property
@@ -210,12 +214,20 @@ class ExperimentActor(BaseActor[ActorArgs]):
         Shutdown the actor.
         This method should be called to clean up resources when the actor is no longer needed.
         """
+
         if hasattr(self, "distributed_context"):
             logger.info(f"Shutting down distributed context {self.instance_config=}")
             self.distributed_context.__exit__(None, None, None)
         else:
             logger.warning(
                 f"No distributed context to shut down on {self.instance_config=}"
+            )
+        if hasattr(self, "state") and self.state.profile_context is not None:
+            logger.info(f"Shutting down profiler context {self.instance_config=}")
+            self.state.profile_context.__exit__(None, None, None)
+        else:
+            logger.warning(
+                f"No profiler context to shut down on {self.instance_config=}"
             )
 
     @remote_method
@@ -228,6 +240,24 @@ class ExperimentActor(BaseActor[ActorArgs]):
         #     check_nans(param, f"{name}")
         x = torch.rand(1, generator=self.g, device=self.device).item()
         return x
+
+    @remote_method
+    def start_profiler(self) -> None:
+        assert self.state.profile_context is not None, (
+            "This method should not be called when the profiler is already started."
+        )
+        profiler = self.state.profile_context.__enter__()
+        self.state.profiler = profiler
+        logger.info(f"Profiler started for {self.instance_config=}")
+
+    @remote_method
+    def stop_profiler(self) -> None:
+        """
+        Stop the profiler for the actor.
+        This method should be called to stop profiling after the training or validation step.
+        """
+        if self.state.profile_context is not None:
+            self.state.profile_context.__exit__(None, None, None)
 
     @remote_method
     def set_next_sample(self, sample: BaseDataSample) -> None:
@@ -261,40 +291,35 @@ class ExperimentActor(BaseActor[ActorArgs]):
         self.next_sample = None
 
         # Forward pass
-        # with torch.profiler.record_function("training_step"):
-        with elapsed_timer(name="remote_train") as timer:
+        # with
+        with (
+            torch.profiler.record_function("training_step"),
+            elapsed_timer(name="remote_train") as timer,
+        ):
             sample = sample.to_device(self.device)
             self.module.model.train()
             self.state.optimizer.zero_grad(set_to_none=True)
-            loss, metrics = self.module.training_step(sample)
+            with torch.profiler.record_function("forward"):
+                loss, metrics = self.module.training_step(sample)
             # logger.info(f"finished forward pass loss: {loss.item()}")
 
             # Backward pass
-            # with torch.profiler.record_function("backward"):
-            loss.backward()
-            # logger.info("finished backward pass")
-            clip_norm_og = torch.nn.utils.clip_grad_norm_(
-                self.state.module.model.parameters(),
-                self.experiment_config.run.grad_clip or float("inf"),
-            )
-            clip_norm_clipped = min(
-                clip_norm_og.item(),
-                self.experiment_config.run.grad_clip or float("inf"),
-            )
+            with torch.profiler.record_function("backward"):
+                loss.backward()
 
             # Update weights
-            # with torch.profiler.record_function("optimizer_step"):
-            self.state.optimizer.step()
-            self.state.lr_scheduler.step()
+            with torch.profiler.record_function("optimizer_step"):
+                self.state.optimizer.step()
+                self.state.lr_scheduler.step()
             self.state.optimizer.zero_grad(set_to_none=True)
 
         # Add learning rate to metrics
         metrics["train/learning_rate"] = self.state.optimizer.param_groups[0]["lr"]
         metrics["train/loss"] = loss.item()
-        metrics["train/clip_norm_og"] = clip_norm_og.item()
-        metrics["train/clip_norm_clipped"] = clip_norm_clipped
         metrics["train/step_time"] = timer.elapsed
         # logger.debug(f"Training step completed with loss: {loss.item()}")
+        if self.state.profiler is not None:
+            self.state.profiler.step()
         return metrics
 
     @remote_method
