@@ -10,6 +10,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Never, cast
 
+import ray
 import torch
 import tqdm
 import wandb
@@ -184,18 +185,6 @@ class ExperimentManager:
             gcs_prefix=self.exp_config.checkpoint_path.bucket_and_path[1] / suffix,
         )
 
-    async def place_train_data(self, batch: list[SampleWithMetadata[BaseDataSample]]):
-        with elapsed_timer("train/place_data") as place_data_timer:
-            await asyncio.gather(
-                *[
-                    actor.set_next_sample.remote(data.sample)
-                    for actor, data in zip(
-                        self.state.actors.all_actors, batch, strict=True
-                    )
-                ]
-            )
-        return place_data_timer
-
     async def run(self):
         """
         Run the experiment instance.
@@ -223,7 +212,10 @@ class ExperimentManager:
         with elapsed_timer("Experiment.PlaceFirstSample") as first_sample_timer:
             with elapsed_timer("wait_train_data") as train_data_timer:
                 batch = next(train_iter)
-            await self.place_train_data(batch)
+            batches_ref: list[ray.ObjectRef[BaseDataSample]] = [
+                ray.put(item.sample) for item in batch
+            ]
+            # await self.place_train_data(batch)
         first_sample_timer.print_timing_tree(logger)
 
         if self.exp_config.run.profile is not None:
@@ -264,8 +256,10 @@ class ExperimentManager:
             with elapsed_timer("training_step") as training_timer:
                 with elapsed_timer("train_step") as call_train_step_remote_timer:
                     train_promises = [
-                        actor.train_step.remote()
-                        for actor in self.state.actors.all_actors
+                        actor.train_step.remote(item)
+                        for actor, item in zip(
+                            self.state.actors.all_actors, batches_ref, strict=True
+                        )
                     ]
                 with elapsed_timer("wait_train_data") as train_data_timer:
                     batch = next(train_iter)
@@ -276,7 +270,11 @@ class ExperimentManager:
                 )
                 indices = [data.indices for data in batch]
                 # logger.info(f"Training step {step}: {indices=} indices")
-                place_data_timer = await self.place_train_data(batch)
+                with elapsed_timer("place_train_data") as place_data_timer:
+                    batches_ref: list[ray.ObjectRef[BaseDataSample]] = [
+                        ray.put(item.sample) for item in batch
+                    ]
+                    # place_data_timer = await self.place_train_data(batch)
                 with elapsed_timer("train_wandb_metrics") as wait_train_step:
                     all_train_metrics = await asyncio.gather(*train_promises)
                 # Reduce metrics to get mean
@@ -487,7 +485,7 @@ class ExperimentManager:
                     RemoteArgs(
                         num_cpus=NUM_ACTOR_CPUS,
                         num_gpus=1.0,
-                        max_concurrency=4,
+                        max_concurrency=1,
                         scheduling_strategy=PlacementGroupSchedulingStrategy(
                             placement_group=pg,
                         ),
@@ -743,3 +741,6 @@ class ExperimentManager:
                         manager_state.wandb.finish()
                     global_timer.__exit__(None, None, None)
                     global_timer.print_timing_tree(logger)
+
+
+# gs://induction-labs/checkpoints/uitars_sft_7b_yehaw_two_epoch/2025-08-08T02-08-58.DjCt3WjG/profiler/profiler/modeling-bwdmb-6brff_1052.1754619567079188442.pt.trace.json
