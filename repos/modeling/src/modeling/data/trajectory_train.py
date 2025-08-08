@@ -141,7 +141,7 @@ def load_turns_gcs(gs_uri: str):
 
     records = json.loads(data_str)  # list-of-dicts
     return [
-        {"image": r["image"], "text": r["text"]} for r in records[:-1]
+        {"image": r["image"], "text": r["text"]} for r in records
     ]  # mimic .iloc[0:-1]
 
 
