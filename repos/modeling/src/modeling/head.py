@@ -360,18 +360,20 @@ class ExperimentManager:
         pod_name = os.environ.get("K8S_POD_NAME", None)
         node_name = os.environ.get("K8S_NODE_NAME", None)
         image_name = os.environ.get("K8S_IMAGE_NAME", None)
+        job_name = os.environ.get("K8S_JOB_NAME", None)
         if pod_name is None:
-            assert node_name is None and image_name is None, (
-                f"{pod_name=}, {node_name=}, {image_name=} are not set in the environment."
+            assert node_name is None and image_name is None and job_name is None, (
+                f"{pod_name=}, {node_name=}, {image_name=}, {job_name=} are not set in the environment."
             )
             return None
-        assert node_name and image_name, (
-            f"{pod_name=}, {node_name=}, {image_name=} are not set in the environment."
+        assert node_name and image_name and job_name, (
+            f"{pod_name=}, {node_name=}, {image_name=}, {job_name=} are not set in the environment."
         )
         return K8sMetadata(
             pod_name=pod_name,
             node_name=node_name,
             image_name=image_name,
+            job_name=job_name,
         )
 
     @staticmethod
@@ -379,7 +381,9 @@ class ExperimentManager:
         """
         Initialize a WandbLogger instance with the configuration.
         """
-        id = gen_id(8)
+        k8s_config = ExperimentManager.get_k8s_metadata()
+        id = gen_id(8) if k8s_config is None else k8s_config.pod_name
+        # Use job_name as shortname probably
         return RuntimeConfig(
             id=id,
             start_time=datetime.now(tz=UTC),

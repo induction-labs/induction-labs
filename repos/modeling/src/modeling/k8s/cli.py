@@ -221,7 +221,9 @@ def submit(
     # Save the modified k8s yaml config beside the original config toml
 
     config_path_obj = Path(config_path)
-    yaml_config_path = config_path_obj.with_suffix(f".{gen_id(6)}.yaml")
+    # Generate 3 id - k8s generate default generates 5, so to get 8 character id we need 3 more
+    job_3_id = gen_id(3)
+    yaml_config_path = config_path_obj.with_suffix(f".{job_3_id}.yaml")
 
     try:
         with open(yaml_config_path, "w") as f:

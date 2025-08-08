@@ -50,6 +50,7 @@ class K8sMetadata(BaseModel):
     pod_name: str
     node_name: str
     image_name: str
+    job_name: str
 
 
 class RuntimeConfig(BaseModel):
