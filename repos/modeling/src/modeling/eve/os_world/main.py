@@ -111,10 +111,9 @@ class EvalOptions:
 
 
 # Default values for command options
-DEFAULT_TASKS_FILE = (
-    "gs://induction-labs/jonathan/osworld/osworld_subset_solved_by_annotators.json"
-)
+DEFAULT_TASKS_FILE = "gs://induction-labs/jonathan/osworld/osworld_subset_solved_by_annotators_induction_mirror.json"
 DEFAULT_MODEL_ENDPOINT = "http://localhost:8080/v1/chat/completions"
+DEFAULT_META_ENDPOINT = "http://100.110.93.44"
 DEFAULT_LANGUAGE = Language.EN
 DEFAULT_TEMPERATURE = 0.3
 DEFAULT_TOP_P = 0.9
@@ -362,7 +361,7 @@ async def cancel_all_tasks():
 async def run_evaluation(
     meta_endpoint: Annotated[
         str, typer.Option("--meta-endpoint", help="Meta endpoint for VM management")
-    ],
+    ] = DEFAULT_META_ENDPOINT,
     tasks_file: Annotated[
         str, typer.Argument(help="Path to tasks JSON file")
     ] = DEFAULT_TASKS_FILE,

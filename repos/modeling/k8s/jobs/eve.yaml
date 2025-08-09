@@ -17,6 +17,8 @@ spec:
       annotations:
         container-image: "" # Filled in by k8s cli
     spec:
+      # nodeSelector:
+      #   nvidia.com/gpu.product: NVIDIA-H100-80GB-HBM3
       restartPolicy: Never
       runtimeClassName: nvidia
       tolerations:

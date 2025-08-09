@@ -106,236 +106,300 @@ UITarsActionSweep = (
     )
     .sweep(
         [
-            # (
-            #     "gs://induction-labs/jonathan/halluminate_v1_synth/all_samples_correct_trajectories_expanded_under_50_train.jsonl",
-            #     "gs://induction-labs/jonathan/halluminate_v1_synth/all_samples_correct_trajectories_expanded_under_50_test.jsonl",
-            #     435*3,
-            #     5e-5,
-            #     True,
-            #     12839,
-            # ),
-            # (
-            #     "gs://induction-labs/jonathan/halluminate_v1_synth/all_samples_correct_trajectories_expanded_under_50_train.jsonl",
-            #     "gs://induction-labs/jonathan/halluminate_v1_synth/all_samples_correct_trajectories_expanded_under_50_test.jsonl",
-            #     435*3,
-            #     1e-4,
-            #     True,
-            #     128399,
-            # ),
-            # (
-            #     "gs://induction-labs/jonathan/halluminate_v1_synth/only_osworld_samples_correct_trajectories_expanded_under_50_train.jsonl",
-            #     "gs://induction-labs/jonathan/halluminate_v1_synth/only_osworld_samples_correct_trajectories_expanded_under_50_test.jsonl",
-            #     70*3,
-            #     5e-5,
-            #     True,
-            #     128392,
-            # ),
-            # (
-            #     "gs://induction-labs/jonathan/halluminate_v1_synth/only_osworld_samples_correct_trajectories_expanded_under_50_train.jsonl",
-            #     "gs://induction-labs/jonathan/halluminate_v1_synth/only_osworld_samples_correct_trajectories_expanded_under_50_test.jsonl",
-            #     70*3,
-            #     1e-5,
-            #     True,
-            #     1829238,
-            # ),
-            # (
-            #     "gs://induction-labs/jonathan/halluminate_v1_synth/only_osworld_samples_correct_trajectories_expanded_under_50_train.jsonl",
-            #     "gs://induction-labs/jonathan/halluminate_v1_synth/only_osworld_samples_correct_trajectories_expanded_under_50_test.jsonl",
-            #     70*3,
-            #     1e-4,
-            #     True,
-            #     128390,
-            # ),
-            # (
-            #     "gs://induction-labs/jonathan/halluminate_v1_synth/only_osworld_samples_correct_trajectories_expanded_under_50_train.jsonl",
-            #     "gs://induction-labs/jonathan/halluminate_v1_synth/only_osworld_samples_correct_trajectories_expanded_under_50_test.jsonl",
-            #     70*3,
-            #     5e-6,
-            #     True,
-            #     18938,
-            # ),
-            # --------------------
-            #
-            # (
-            #     "gs://induction-labs/jonathan/halluminate_v1_synth/all_samples_correct_trajectories_expanded_under_50_train.jsonl",
-            #     "gs://induction-labs/jonathan/halluminate_v1_synth/all_samples_correct_trajectories_expanded_under_50_test.jsonl",
-            #     # 620 * 2,
-            #     430 * 2,
-            #     1e-4,
-            #     True,
-            # ),
-            # (
-            #     "gs://induction-labs/jonathan/sampled_trajectories/all_trajectories/together__samples_correct_trajectories_expanded_under_50_train_3x.jsonl",
-            #     "gs://induction-labs/jonathan/sampled_trajectories/all_trajectories/together__samples_correct_trajectories_expanded_under_50_test.jsonl",
-            #     620*3,
-            #     5e-5,
-            #     True,
-            #     12839,
-            # ),
-            # (
-            #     "gs://induction-labs/jonathan/sampled_trajectories/all_trajectories/together__samples_correct_trajectories_expanded_under_50_train.jsonl",
-            #     "gs://induction-labs/jonathan/sampled_trajectories/all_trajectories/together__samples_correct_trajectories_expanded_under_50_test.jsonl",
-            #     620*3,
-            #     1e-4,
-            #     True,
-            #     43920,
-            # ),
-            # (
-            #     "gs://induction-labs/jonathan/sampled_trajectories/all_trajectories/together_no_special_weighting_samples_correct_trajectories_expanded_under_50_train.jsonl",
-            #     "gs://induction-labs/jonathan/sampled_trajectories/all_trajectories/together_no_special_weighting_samples_correct_trajectories_expanded_under_50_test.jsonl",
-            #     735 * 2,
-            #     1e-5,
-            #     True,
-            # ),
-            # (
-            #     "gs://induction-labs/jonathan/sampled_trajectories/all_trajectories/min_3_samples_correct_trajectories_expanded_under_50_train_4x.jsonl",
-            #     "gs://induction-labs/jonathan/sampled_trajectories/all_trajectories/min_3_samples_correct_trajectories_expanded_under_50_test.jsonl",
-            #     320,
-            #     1e-4,
-            #     True,
-            # ),
-            # (
-            #     "gs://induction-labs/jonathan/sampled_trajectories/all_trajectories/min_3_samples_correct_trajectories_expanded_under_50_train_4x.jsonl",
-            #     "gs://induction-labs/jonathan/sampled_trajectories/all_trajectories/min_3_samples_correct_trajectories_expanded_under_50_test.jsonl",
-            #     320,
-            #     1e-4,
-            #     False,
-            # ),
-            # (
-            #     "gs://induction-labs/jonathan/halluminate_v1_synth/hard_samples_correct_trajectories_expanded_under_50_train.jsonl",
-            #     "gs://induction-labs/jonathan/halluminate_v1_synth/hard_samples_correct_trajectories_expanded_under_50_test.jsonl",
-            #     46 * 3,
-            #     5e-5,
-            #     True,
-            #     18392,
-            # ),
-            (
-                "gs://induction-labs/jonathan/halluminate_v1_synth/hard_samples_correct_trajectories_expanded_under_50_train.jsonl",
-                "gs://induction-labs/jonathan/halluminate_v1_synth/hard_samples_correct_trajectories_expanded_under_50_test.jsonl",
-                46 * 3,
-                1e-4,
-                True,
-                40302,
-            ),
+            # ------- b200 ------------
+            # GTE3
+            # rewrite to be like uitars
+            # {
+            #     "init": "gs://induction-labs/checkpoints/uitars_sft_7b_yehaw_two_epoch/2025-08-08T07-01-09.ZOqJv1rI/step_-1/step_-1/",
+            #     "data": "gs://induction-labs/jonathan/data_fixed_0807/all_human_snapshot_0808_postprocessed/gte3_samples_correct_trajectories_expanded_under_50_{set}.jsonl",
+            #     "num_steps": 208*3,
+            #     "batch_size": 64,
+            #     "start_lr": 2e-5,
+            #     "end_lr_ratio": 0.5,
+            #     "warmup_steps": 10,
+            #     "seed": 281938,
+            # },
+            {
+                "init": "gs://induction-labs/checkpoints/uitars_sft_7b_yehaw_two_epoch/2025-08-08T07-01-09.ZOqJv1rI/step_-1/step_-1/",
+                "data": "gs://induction-labs/jonathan/data_fixed_0807/all_human_snapshot_0808_postprocessed/gte3_samples_correct_trajectories_expanded_under_50_{set}.jsonl",
+                "num_steps": 208 * 3,
+                "batch_size": 64,
+                "start_lr": 4e-5,
+                "end_lr_ratio": 0.5,
+                "warmup_steps": 10,
+                "seed": 281938,
+            },
+            {
+                "init": None,
+                "data": "gs://induction-labs/jonathan/data_fixed_0807/all_human_snapshot_0808_postprocessed/gte3_samples_correct_trajectories_expanded_under_50_{set}.jsonl",
+                "num_steps": 208 * 3,
+                "batch_size": 64,
+                "start_lr": 2e-5,
+                "end_lr_ratio": 0.5,
+                "warmup_steps": 10,
+                "seed": 281938,
+            },
+            {
+                "init": None,
+                "data": "gs://induction-labs/jonathan/data_fixed_0807/all_human_snapshot_0808_postprocessed/gte3_samples_correct_trajectories_expanded_under_50_{set}.jsonl",
+                "num_steps": 208 * 3,
+                "batch_size": 64,
+                "start_lr": 4e-5,
+                "end_lr_ratio": 0.5,
+                "warmup_steps": 10,
+                "seed": 281938,
+            },
+            {
+                "init": "gs://induction-labs/checkpoints/uitars_sft_7b_yehaw_two_epoch/2025-08-08T07-01-09.ZOqJv1rI/step_-1/step_-1/",
+                "data": "gs://induction-labs/jonathan/data_fixed_0807/all_human_snapshot_0808_postprocessed/gte3_balanced_samples_correct_trajectories_expanded_under_50_{set}.jsonl",
+                "num_steps": 145 * 3,
+                "batch_size": 64,
+                "start_lr": 2e-5,
+                "end_lr_ratio": 0.5,
+                "warmup_steps": 10,
+                "seed": 281938,
+            },
+            # {
+            #     "init": "gs://induction-labs/checkpoints/uitars_sft_7b_yehaw_two_epoch/2025-08-08T07-01-09.ZOqJv1rI/step_-1/step_-1/",
+            #     "data": "gs://induction-labs/jonathan/data_fixed_0807/all_human_snapshot_0808_postprocessed/gte3_balanced_samples_correct_trajectories_expanded_under_50_{set}.jsonl",
+            #     "num_steps": 145*3,
+            #     "batch_size": 64,
+            #     "start_lr": 5e-5,
+            #     "end_lr_ratio": 0.5,
+            #     "warmup_steps": 10,
+            #     "seed": 281938,
+            # },
+            # use original voice
+            # {
+            #     "init": "gs://induction-labs/checkpoints/uitars_sft_7b_yehaw_two_epoch/2025-08-08T07-01-09.ZOqJv1rI/step_-1/step_-1/",
+            #     "data": "gs://induction-labs/jonathan/data_fixed_0807/all_human_snapshot_0807_actually_fixed/gte3_samples_correct_trajectories_expanded_under_50_{set}.jsonl",
+            #     "num_steps": 208*3,
+            #     "batch_size": 64,
+            #     "start_lr": 2e-5,
+            #     "end_lr_ratio": 0.5,
+            #     "warmup_steps": 10,
+            #     "seed": 281938,
+            # },
+            {
+                "init": "gs://induction-labs/checkpoints/uitars_sft_7b_yehaw_two_epoch/2025-08-08T07-01-09.ZOqJv1rI/step_-1/step_-1/",
+                "data": "gs://induction-labs/jonathan/data_fixed_0807/all_human_snapshot_0807_actually_fixed/gte3_samples_correct_trajectories_expanded_under_50_{set}.jsonl",
+                "num_steps": 208 * 3,
+                "batch_size": 64,
+                "start_lr": 4e-5,
+                "end_lr_ratio": 0.5,
+                "warmup_steps": 10,
+                "seed": 281938,
+            },
+            {
+                "init": None,
+                "data": "gs://induction-labs/jonathan/data_fixed_0807/all_human_snapshot_0807_actually_fixed/gte3_samples_correct_trajectories_expanded_under_50_{set}.jsonl",
+                "num_steps": 208 * 3,
+                "batch_size": 64,
+                "start_lr": 2e-5,
+                "end_lr_ratio": 0.5,
+                "warmup_steps": 10,
+                "seed": 281938,
+            },
+            {
+                "init": None,
+                "data": "gs://induction-labs/jonathan/data_fixed_0807/all_human_snapshot_0807_actually_fixed/gte3_samples_correct_trajectories_expanded_under_50_{set}.jsonl",
+                "num_steps": 208 * 3,
+                "batch_size": 64,
+                "start_lr": 4e-5,
+                "end_lr_ratio": 0.5,
+                "warmup_steps": 10,
+                "seed": 281938,
+            },
+            {
+                "init": "gs://induction-labs/checkpoints/uitars_sft_7b_yehaw_two_epoch/2025-08-08T07-01-09.ZOqJv1rI/step_-1/step_-1/",
+                "data": "gs://induction-labs/jonathan/data_fixed_0807/all_human_snapshot_0807_actually_fixed/gte3_balanced_samples_correct_trajectories_expanded_under_50_{set}.jsonl",
+                "num_steps": 145 * 3,
+                "batch_size": 64,
+                "start_lr": 2e-5,
+                "end_lr_ratio": 0.5,
+                "warmup_steps": 10,
+                "seed": 281938,
+            },
+            # {
+            #     "init": "gs://induction-labs/checkpoints/uitars_sft_7b_yehaw_two_epoch/2025-08-08T07-01-09.ZOqJv1rI/step_-1/step_-1/",
+            #     "data": "gs://induction-labs/jonathan/data_fixed_0807/all_human_snapshot_0807_actually_fixed/gte3_balanced_samples_correct_trajectories_expanded_under_50_{set}.jsonl",
+            #     "num_steps": 145*3,
+            #     "batch_size": 64,
+            #     "start_lr": 5e-5,
+            #     "end_lr_ratio": 0.5,
+            #     "warmup_steps": 10,
+            #     "seed": 281938,
+            # },
+            # ---------- h200 -----------
+            # # GTE 4
+            # # original voice
+            # # balanced
+            # # {
+            # #     "init": "gs://induction-labs/checkpoints/uitars_sft_7b_yehaw_two_epoch/2025-08-08T07-01-09.ZOqJv1rI/step_-1/step_-1/",
+            # #     "data": "gs://induction-labs/jonathan/data_fixed_0807/all_human_snapshot_0807_actually_fixed/gte4_balanced_samples_correct_trajectories_expanded_under_50_{set}.jsonl",
+            # #     "num_steps": 39*3,
+            # #     "batch_size": 32,
+            # #     "start_lr": 2e-5,
+            # #     "end_lr_ratio": 0.5,
+            # #     "warmup_steps": 5,
+            # #     "seed": 281938,
+            # # },
+            # {
+            #     "init": "gs://induction-labs/checkpoints/uitars_sft_7b_yehaw_two_epoch/2025-08-08T07-01-09.ZOqJv1rI/step_-1/step_-1/",
+            #     "data": "gs://induction-labs/jonathan/data_fixed_0807/all_human_snapshot_0807_actually_fixed/gte4_balanced_samples_correct_trajectories_expanded_under_50_{set}.jsonl",
+            #     "num_steps": 39*3,
+            #     "batch_size": 32,
+            #     "start_lr": 5e-5,
+            #     "end_lr_ratio": 0.5,
+            #     "warmup_steps": 5,
+            #     "seed": 281938,
+            # },
+            # {
+            #     "init": "gs://induction-labs/checkpoints/uitars_sft_7b_yehaw_two_epoch/2025-08-08T07-01-09.ZOqJv1rI/step_-1/step_-1/",
+            #     "data": "gs://induction-labs/jonathan/data_fixed_0807/all_human_snapshot_0807_actually_fixed/gte4_balanced_samples_correct_trajectories_expanded_under_50_{set}.jsonl",
+            #     "num_steps": 39*3,
+            #     "batch_size": 32,
+            #     "start_lr": 1e-4,
+            #     "end_lr_ratio": 0.1,
+            #     "warmup_steps": 5,
+            #     "seed": 281938,
+            # },
+            # # all
+            # # {
+            # #     "init": "gs://induction-labs/checkpoints/uitars_sft_7b_yehaw_two_epoch/2025-08-08T07-01-09.ZOqJv1rI/step_-1/step_-1/",
+            # #     "data": "gs://induction-labs/jonathan/data_fixed_0807/all_human_snapshot_0807_actually_fixed/gte4_samples_correct_trajectories_expanded_under_50_{set}.jsonl",
+            # #     "num_steps": 90*3,
+            # #     "batch_size": 32,
+            # #     "start_lr": 2e-5,
+            # #     "end_lr_ratio": 0.5,
+            # #     "warmup_steps": 5,
+            # #     "seed": 281938,
+            # # },
+            # {
+            #     "init": "gs://induction-labs/checkpoints/uitars_sft_7b_yehaw_two_epoch/2025-08-08T07-01-09.ZOqJv1rI/step_-1/step_-1/",
+            #     "data": "gs://induction-labs/jonathan/data_fixed_0807/all_human_snapshot_0807_actually_fixed/gte4_samples_correct_trajectories_expanded_under_50_{set}.jsonl",
+            #     "num_steps": 90*3,
+            #     "batch_size": 32,
+            #     "start_lr": 5e-5,
+            #     "end_lr_ratio": 0.5,
+            #     "warmup_steps": 5,
+            #     "seed": 281938,
+            # },
+            # {
+            #     "init": "gs://induction-labs/checkpoints/uitars_sft_7b_yehaw_two_epoch/2025-08-08T07-01-09.ZOqJv1rI/step_-1/step_-1/",
+            #     "data": "gs://induction-labs/jonathan/data_fixed_0807/all_human_snapshot_0807_actually_fixed/gte4_samples_correct_trajectories_expanded_under_50_{set}.jsonl",
+            #     "num_steps": 90*3,
+            #     "batch_size": 32,
+            #     "start_lr": 1e-4,
+            #     "end_lr_ratio": 0.1,
+            #     "warmup_steps": 5,
+            #     "seed": 281938,
+            # },
+            # # new voice
+            # # original voice
+            # # balanced
+            # # {
+            # #     "init": "gs://induction-labs/checkpoints/uitars_sft_7b_yehaw_two_epoch/2025-08-08T07-01-09.ZOqJv1rI/step_-1/step_-1/",
+            # #     "data": "gs://induction-labs/jonathan/data_fixed_0807/all_human_snapshot_0808_postprocessed/gte4_balanced_samples_correct_trajectories_expanded_under_50_{set}.jsonl",
+            # #     "num_steps": 39*3,
+            # #     "batch_size": 32,
+            # #     "start_lr": 2e-5,
+            # #     "end_lr_ratio": 0.5,
+            # #     "warmup_steps": 5,
+            # #     "seed": 281938,
+            # # },
+            # {
+            #     "init": "gs://induction-labs/checkpoints/uitars_sft_7b_yehaw_two_epoch/2025-08-08T07-01-09.ZOqJv1rI/step_-1/step_-1/",
+            #     "data": "gs://induction-labs/jonathan/data_fixed_0807/all_human_snapshot_0808_postprocessed/gte4_balanced_samples_correct_trajectories_expanded_under_50_{set}.jsonl",
+            #     "num_steps": 39*3,
+            #     "batch_size": 32,
+            #     "start_lr": 5e-5,
+            #     "end_lr_ratio": 0.5,
+            #     "warmup_steps": 5,
+            #     "seed": 281938,
+            # },
+            # {
+            #     "init": "gs://induction-labs/checkpoints/uitars_sft_7b_yehaw_two_epoch/2025-08-08T07-01-09.ZOqJv1rI/step_-1/step_-1/",
+            #     "data": "gs://induction-labs/jonathan/data_fixed_0807/all_human_snapshot_0808_postprocessed/gte4_balanced_samples_correct_trajectories_expanded_under_50_{set}.jsonl",
+            #     "num_steps": 39*3,
+            #     "batch_size": 32,
+            #     "start_lr": 1e-4,
+            #     "end_lr_ratio": 0.1,
+            #     "warmup_steps": 5,
+            #     "seed": 281938,
+            # },
+            # # all
+            # # {
+            # #     "init": "gs://induction-labs/checkpoints/uitars_sft_7b_yehaw_two_epoch/2025-08-08T07-01-09.ZOqJv1rI/step_-1/step_-1/",
+            # #     "data": "gs://induction-labs/jonathan/data_fixed_0807/all_human_snapshot_0808_postprocessed/gte4_samples_correct_trajectories_expanded_under_50_{set}.jsonl",
+            # #     "num_steps": 90*3,
+            # #     "batch_size": 32,
+            # #     "start_lr": 2e-5,
+            # #     "end_lr_ratio": 0.5,
+            # #     "warmup_steps": 5,
+            # #     "seed": 281938,
+            # # },
+            # {
+            #     "init": "gs://induction-labs/checkpoints/uitars_sft_7b_yehaw_two_epoch/2025-08-08T07-01-09.ZOqJv1rI/step_-1/step_-1/",
+            #     "data": "gs://induction-labs/jonathan/data_fixed_0807/all_human_snapshot_0808_postprocessed/gte4_samples_correct_trajectories_expanded_under_50_{set}.jsonl",
+            #     "num_steps": 90*3,
+            #     "batch_size": 32,
+            #     "start_lr": 5e-5,
+            #     "end_lr_ratio": 0.5,
+            #     "warmup_steps": 5,
+            #     "seed": 281938,
+            # },
+            # {
+            #     "init": "gs://induction-labs/checkpoints/uitars_sft_7b_yehaw_two_epoch/2025-08-08T07-01-09.ZOqJv1rI/step_-1/step_-1/",
+            #     "data": "gs://induction-labs/jonathan/data_fixed_0807/all_human_snapshot_0808_postprocessed/gte4_samples_correct_trajectories_expanded_under_50_{set}.jsonl",
+            #     "num_steps": 90*3,
+            #     "batch_size": 32,
+            #     "start_lr": 1e-4,
+            #     "end_lr_ratio": 0.1,
+            #     "warmup_steps": 5,
+            #     "seed": 281938,
+            # },
         ],
         lambda values, exp: (
-            exp.train_datapack.__setattr__("dataset_path", values[0]),
-            exp.validation_datapack.__setattr__("dataset_path", values[1]),
-            exp.run.__setattr__("num_steps", values[2]),
-            exp.module.__setattr__("freeze_vision", values[4]),
+            exp.train_datapack.__setattr__(
+                "dataset_path", values["data"].format(set="train")
+            ),
+            exp.validation_datapack.__setattr__(
+                "dataset_path", values["data"].format(set="test")
+            ),
+            exp.run.__setattr__("num_steps", values["num_steps"]),
+            exp.module.__setattr__("freeze_vision", True),
+            exp.module.__setattr__(
+                "checkpoint_path",
+                CloudPath.from_str(values["init"]) if values["init"] else None,
+            ),
             exp.metadata.__setattr__(
                 "checkpoint",
                 GCSCheckpointConfig(
                     checkpoint_prefix=exp.metadata.checkpoint.checkpoint_prefix,
-                    checkpoint_frequency=values[2] // 3,
-                    checkpoint_first_step=False,  # Save the first step
+                    # checkpoint_prefix=CloudPath.from_str(
+                    #     "gs://induction-labs/checkpoints/uitars_sft_7b_yehaw_two_epoch/2025-08-05T11-05-09.LRJVBr96/step_480/",
+                    # ),
+                    checkpoint_frequency=values["num_steps"] // 3,
+                    checkpoint_first_step=True,  # Save the first step
                     checkpoint_last_step=True,  # Save the last step
                 ),
             ),
             exp.run.__setattr__(
                 "lr",
                 LinearLRSchedule(
-                    peak_lr=values[3],
-                    end_lr=values[3] * 0.5,
-                    warmup_steps=3,
-                    end_step=values[2],
+                    peak_lr=values["start_lr"],
+                    end_lr=values["start_lr"] * values["end_lr_ratio"],
+                    warmup_steps=values["warmup_steps"],
+                    end_step=values["num_steps"],
                 ),
             ),
-            exp.run.__setattr__("seed", values[5]),
+            exp.run.__setattr__("seed", values["seed"]),
+            exp.run.__setattr__("batch_size", values["batch_size"]),
             exp,
         )[-1],
     )
-    # .sweep(
-    #     [32],
-    #     lambda num_workers, exp: (
-    #         exp.run.__setattr__("dataloader_num_workers", num_workers),
-    #         exp,
-    #     )[-1]
-    # )
-    # .sweep(
-    #     [2],
-    #     lambda num_workers, exp: (
-    #         exp.run.__setattr__("dataloader_prefetch_factor", num_workers),
-    #         exp,
-    #     )[-1]
-    # )
-    # .sweep(
-    #     [True, False],
-    #     lambda freeze_vision, exp: (
-    #         exp.module.__setattr__("freeze_vision", freeze_vision),
-    #         exp,
-    #     )[-1],
-    # )
-    # .sweep(
-    #     [
-    #         None,
-    #         CloudPath.from_str(
-    #             "gs://induction-labs/checkpoints/UITars_7B_uninitialized/2025-07-17T23-05-38/step_100"
-    #         ),
-    #         CloudPath.from_str(
-    #             "gs://induction-labs/checkpoints/sweeps_optimizer/2025-07-22T17-28-51.iGEDRrvU/step_-1"
-    #         ),
-    #     ],
-    #     lambda checkpoint, exp: (
-    #         exp.module.__setattr__("checkpoint_path", checkpoint),
-    #         exp,
-    #     )[-1],
-    # )
-    # .sweep(range(20, 24), Sweep.S.seed)
-    # .sweep(
-    #     [
-    #         # UITarsActionLITConfig.CursorPredictionLoss.L2_DISTANCE,
-    #         (UITarsActionLITConfig.CursorPredictionLoss.ANALYTICAL_DISTANCE, 50),
-    #         (UITarsActionLITConfig.CursorPredictionLoss.COEFFICIENTS_DISTANCE, 300),
-    #         (UITarsActionLITConfig.CursorPredictionLoss.ANALYTICAL_DISTANCE, None),
-    #         (UITarsActionLITConfig.CursorPredictionLoss.COEFFICIENTS_DISTANCE, None),
-    #     ],
-    #     lambda loss, exp: (
-    #         exp.module.__setattr__("loss_type", loss[0]),
-    #         exp.run.__setattr__("grad_clip", loss[1]),
-    #         exp,
-    #     )[-1],
-    # )
-    # .sweep(
-    #     [
-    #         # OptimizerType.ADAMW,
-    #         OptimizerType.ADAGRAD,
-    #         OptimizerType.SGD,
-    #     ],
-    #     lambda optimizer, exp: (
-    #         exp.module.__setattr__("optimizer", optimizer),
-    #         exp,
-    #     )[-1],
-    # )
-    # .sweep(
-    #     [
-    #         # LinearLRSchedule(
-    #         #     peak_lr=1e-5,
-    #         #     end_lr=1e-5,
-    #         #     warmup_steps=0,
-    #         #     end_step=3_000,
-    #         # ),
-    #         *(
-    #             LinearLRSchedule(
-    #                 peak_lr=peak_lr,
-    #                 end_lr=peak_lr * 0.5,
-    #                 warmup_steps=10,
-    #                 end_step=420 * 2 * 2,
-    #             )
-    #             for peak_lr in [5e-5]  # [1e-5, 5e-5, 5e-6, 1e-4]
-    #         ),
-    #     ],
-    #     Sweep.S.lr,
-    # )
-    # .sweep(
-    #     [32],
-    #     Sweep.S.batch_size
-    # )
-    # .sweep(
-    # )
-    # .sweep(range(20, 24), Sweep.S.seed)
 )
-# 0.0005
 
 
 # mdl export modeling.experiments.vl_sft.uitars.UITarsActionExperimentConfig_CPU
