@@ -19,7 +19,7 @@ members = [
     "synapse",
     "synth",
 ]
-overrides = [{ name = "nvidia-nccl-cu12", specifier = "==2.26.2.post1" }]
+overrides = [{ name = "nvidia-nccl-cu12", marker = "platform_machine == 'x86_64'", specifier = "==2.26.2.post1" }]
 
 [[package]]
 name = "absl-py"
@@ -3011,7 +3011,6 @@ name = "nvidia-nccl-cu12"
 version = "2.26.2.post1"
 source = { registry = "https://pypi.org/simple" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/15/c6/b39fd44485cfad53a569ab62ce0c8f583ecf81aa7ca87bacbc8371ec5989/nvidia_nccl_cu12-2.26.2.post1-py3-none-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:65640d57dd2a20de11048f0a163dd6b6ba8ae97eb3bfc11d80d3c409566bfce7", size = 291669092, upload-time = "2025-04-08T15:11:42.763Z" },
     { url = "https://files.pythonhosted.org/packages/9f/30/aa24e8e02cd860d80a31ee32cc3a0db9ffb93efb2556705db3ce6c924926/nvidia_nccl_cu12-2.26.2.post1-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:5ffda04fd1296a90aae76a7e9999d9d3d69ffcec6573109a286fdd2158599114", size = 291662170, upload-time = "2025-04-08T15:11:56.371Z" },
 ]
 
@@ -4992,7 +4991,7 @@ dependencies = [
     { name = "fsspec", marker = "sys_platform != 'linux'" },
     { name = "jinja2", marker = "sys_platform != 'linux'" },
     { name = "networkx", marker = "sys_platform != 'linux'" },
-    { name = "nvidia-nccl-cu12", marker = "sys_platform != 'linux'" },
+    { name = "nvidia-nccl-cu12", marker = "platform_machine == 'x86_64' and sys_platform != 'linux'" },
     { name = "setuptools", marker = "sys_platform != 'linux'" },
     { name = "sympy", marker = "sys_platform != 'linux'" },
     { name = "typing-extensions", marker = "sys_platform != 'linux'" },
@@ -5026,7 +5025,7 @@ dependencies = [
     { name = "nvidia-cusolver-cu12", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "nvidia-cusparse-cu12", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "nvidia-cusparselt-cu12", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
-    { name = "nvidia-nccl-cu12", marker = "sys_platform == 'linux'" },
+    { name = "nvidia-nccl-cu12", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "nvidia-nvjitlink-cu12", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "nvidia-nvtx-cu12", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "setuptools", marker = "sys_platform == 'linux'" },
