@@ -462,7 +462,7 @@ def eve(
         checkpoint_name = checkpoint_dir.rstrip("/")
         if checkpoint_dir.startswith("gs://"):
             path_parts = checkpoint_dir.rstrip("/").split("/")
-            checkpoint_name = "/".join(path_parts[-2:])
+            checkpoint_name = "/".join(path_parts[-3:])
 
         current_timestamp = datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
         output_path = f"gs://induction-labs/evals/{eval_name}/{checkpoint_name}/{current_timestamp}/"

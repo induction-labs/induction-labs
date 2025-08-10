@@ -235,7 +235,8 @@ def parse_action_to_structure_output(
         all_action.append(action_str)
 
     parsed_actions = [
-        parse_action(action.replace("\n", "\\n").lstrip()) for action in all_action
+        parse_action(action.replace("\n", "\\\\n").replace("\\n", "\\\\n").lstrip())
+        for action in all_action
     ]
     actions = []
     for action_instance, raw_str in zip(parsed_actions, all_action, strict=False):
@@ -292,6 +293,17 @@ def parse_action_to_structure_output(
             }
         )
     return actions
+
+
+def split_keep_delims(text: str, keep_empty: bool = False) -> list[str]:
+    pattern = r"(\\n|<Backspace>|<Delete>)"
+
+    parts = re.split(pattern, text)
+
+    if not keep_empty:
+        parts = [p for p in parts if p != ""]
+
+    return parts
 
 
 def parsing_response_to_pyautogui_code(
@@ -425,30 +437,38 @@ def parsing_response_to_pyautogui_code(
             content = action_inputs.get("content", "")
             content = escape_single_quotes(content)
             stripped_content = content
-            if content.endswith(("\n", "\\n")):
-                stripped_content = stripped_content.rstrip("\\n").rstrip("\n")
+            # if content.endswith(("\n", "\\n")):
+            #     stripped_content = stripped_content.rstrip("\\n").rstrip("\n")
             if content:
-                if input_swap:
-                    pyautogui_code += "\nimport pyperclip"
-                    pyautogui_code += f"\npyperclip.copy('{stripped_content}')"
-                    pyautogui_code += "\npyautogui.hotkey('ctrl', 'v')"
-                    pyautogui_code += "\ntime.sleep(0.5)\n"
-                    if content.endswith(("\n", "\\n")):
-                        pyautogui_code += "\npyautogui.press('enter')"
+                # if input_swap:
+                #     pyautogui_code += "\nimport pyperclip"
+                #     pyautogui_code += f"\npyperclip.copy('{stripped_content}')"
+                #     pyautogui_code += "\npyautogui.hotkey('ctrl', 'v')"
+                #     pyautogui_code += "\ntime.sleep(0.5)\n"
+                #     if content.endswith(("\n", "\\n")):
+                #         pyautogui_code += "\npyautogui.press('enter')"
 
-                elif "<Backspace>" in stripped_content:
-                    assert stripped_content == "<Backspace>", (
-                        f"Only support <Backspace> action, {stripped_content=}"
-                    )
-                    pyautogui_code += "\npyautogui.press('backspace')\n"
+                # elif "<Backspace>" in stripped_content:
+                #     assert stripped_content == "<Backspace>", (
+                #         f"Only support <Backspace> action, {stripped_content=}"
+                #     )
+                #     pyautogui_code += "\npyautogui.press('backspace')\n"
 
-                else:
-                    pyautogui_code += (
-                        f"\npyautogui.write('{stripped_content}', interval=0.1)"
-                    )
-                    pyautogui_code += "\ntime.sleep(0.5)\n"
-                    if content.endswith(("\n", "\\n")):
+                # else:
+                pieces = split_keep_delims(stripped_content, keep_empty=False)
+                for piece in pieces:
+                    if piece == "<Backspace>":
+                        pyautogui_code += "\npyautogui.press('backspace')"
+                    elif piece == "<Delete>":
+                        pyautogui_code += "\npyautogui.press('delete')"
+                    elif piece == "\\n":
                         pyautogui_code += "\npyautogui.press('enter')"
+                    else:
+                        pyautogui_code += f"\npyautogui.write('{piece}', interval=0.1)"
+                    pyautogui_code += "\ntime.sleep(0.25)\n"
+                pyautogui_code += "\ntime.sleep(0.25)\n"
+                # if content.endswith(("\n", "\\n")):
+                #     pyautogui_code += "\npyautogui.press('enter')"
 
         elif action_type in ["drag", "select"]:
             # Parsing drag or select action based on start and end_boxes

@@ -10,7 +10,7 @@ from google.cloud import compute_v1
 dotenv.load_dotenv()
 
 # Your existing GCP functions (keeping them for reference)
-SERVER_TEMPLATE_NAME = "osworld-annotation-server-us-central1-v4-3"
+SERVER_TEMPLATE_NAME = "osworld-annotation-server-us-central1-v5-1"
 SERVER_REGION = "us-central1-a"
 PROJECT_ID = "induction-labs"
 
