@@ -246,7 +246,7 @@ async def run_clicks_evaluation(
 
         # Upload to GCS if needed
         if cloud_output_path:
-            print(f"Uploading results to {cloud_output_path.to_str()}...")
+            print(f"Uploading results to {cloud_output_path.uri}...")
             bucket_name, gcs_path = cloud_output_path.bucket_and_path
             await asyncio.to_thread(
                 upload_to_gcs,
