@@ -4773,6 +4773,7 @@ version = "0.1.0"
 source = { editable = "repos/synth" }
 dependencies = [
     { name = "gcsfs" },
+    { name = "google-genai" },
     { name = "jsonlines" },
     { name = "numpy" },
     { name = "openai" },
@@ -4792,6 +4793,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "gcsfs", specifier = ">=2025.3.0" },
+    { name = "google-genai", specifier = ">=1.28.0" },
     { name = "jsonlines", specifier = ">=4.0.0" },
     { name = "numpy" },
     { name = "openai", specifier = ">=1.90.0" },

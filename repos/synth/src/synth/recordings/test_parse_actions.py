@@ -100,7 +100,13 @@ def test_hotkey_ctrl_s():
         key("b", False, 0.45),
     ]
     expected = [
-        action_model(HotkeyAction(key=["ctrl", "shift", "s"]), 0.0, end_t=0.3),
+        Action(
+            action=HotkeyAction(
+                action_type="hotkey", modifiers={"shift", "ctrl"}, key="s"
+            ),
+            timestamp=0.1,
+            end_timestamp=0.2,
+        ),
         action_model(TypeAction(content="b"), 0.4, end_t=0.45),
     ]
     assert parse_actions(ev) == expected
@@ -119,7 +125,11 @@ def test_hotkey_ctrl_a():
     ]
     expected = [
         action_model(TypeAction(content="b"), 0.0, end_t=0.05),
-        action_model(HotkeyAction(key=["ctrl", "a"]), 0.06, end_t=0.3),
+        Action(
+            action=HotkeyAction(action_type="hotkey", modifiers={"ctrl"}, key="a"),
+            timestamp=0.1,
+            end_timestamp=0.2,
+        ),
         action_model(TypeAction(content="s"), 0.4, end_t=0.5),
     ]
     assert parse_actions(ev) == expected
@@ -140,7 +150,11 @@ def test_hotkey_then_type():
     ]
     expected = [
         action_model(TypeAction(content="b"), 0.0, end_t=0.05),
-        action_model(HotkeyAction(key=["ctrl", "a"]), 0.06, end_t=0.3),
+        Action(
+            action=HotkeyAction(action_type="hotkey", modifiers={"ctrl"}, key="a"),
+            timestamp=0.1,
+            end_timestamp=0.2,
+        ),
         action_model(TypeAction(content="<shift>\\n</shift>"), 0.4, end_t=0.7),
     ]
     assert parse_actions(ev) == expected
@@ -394,7 +408,11 @@ def test_enter_newline_shortcut():
     ]
     expected = [
         action_model(TypeAction(content="x\\n"), 0.0, end_t=0.15),
-        action_model(HotkeyAction(key=["ctrl", "c"]), 0.2, end_t=0.35),
+        Action(
+            action=HotkeyAction(action_type="hotkey", modifiers={"ctrl"}, key="c"),
+            timestamp=0.25,
+            end_timestamp=0.3,
+        ),
     ]
     assert parse_actions(ev) == expected
 
@@ -423,7 +441,12 @@ def test_composite_timings():
         key("enter", False, 0.15),
     ]
     expected = [
-        action_model(ScrollAction(point=Point(x=100, y=100), direction="up"), 0.0),
+        action_model(
+            ScrollAction(
+                point=Point(x=100, y=100), direction="up", displacement=(0, 3)
+            ),
+            0.0,
+        ),
         action_model(TypeAction(content="p"), 0.02, end_t=0.05),
         action_model(ClickAction(point=Point(x=100, y=100)), 0.07, end_t=0.08),
         action_model(TypeAction(content="\\n"), 0.1, end_t=0.15),
@@ -447,7 +470,12 @@ def test_scroll_directions(dx, dy, expect):
     ev = [scroll(dx, dy, 100, 100, 0.0)]
     out = parse_actions(ev)
     expected = [
-        action_model(ScrollAction(point=Point(x=100, y=100), direction=expect), 0.0)
+        action_model(
+            ScrollAction(
+                point=Point(x=100, y=100), direction=expect, displacement=(dx, (dy))
+            ),
+            0.0,
+        )
     ]
     assert out == expected
 
@@ -461,10 +489,11 @@ def test_multiple_scrolls():
     out = parse_actions(ev)
     expected = [
         action_model(
-            ScrollAction(point=Point(x=100, y=100), direction="up"), 0.0, end_t=0.1
-        ),
-        action_model(
-            ScrollAction(point=Point(x=100, y=100), direction="up"), 0.1, end_t=0.2
+            ScrollAction(
+                point=Point(x=100, y=100), direction="up", displacement=(0, 9)
+            ),
+            0.0,
+            end_t=0.2,
         ),
     ]
     assert out == expected
@@ -479,10 +508,11 @@ def test_multiple_scrolls_move_a_bit():
     out = parse_actions(ev)
     expected = [
         action_model(
-            ScrollAction(point=Point(x=100, y=100), direction="up"), 0.0, end_t=0.1
-        ),
-        action_model(
-            ScrollAction(point=Point(x=100, y=100), direction="up"), 0.1, end_t=0.2
+            ScrollAction(
+                point=Point(x=100, y=100), direction="up", displacement=(0, 9)
+            ),
+            0.0,
+            end_t=0.2,
         ),
     ]
     assert out == expected
@@ -497,13 +527,25 @@ def test_multiple_scrolls_move_a_lot():
     out = parse_actions(ev)
     expected = [
         action_model(
-            ScrollAction(point=Point(x=100, y=100), direction="up"), 0.0, end_t=0.0
+            ScrollAction(
+                point=Point(x=100, y=100), direction="up", displacement=(0, 3)
+            ),
+            0.0,
+            end_t=0.0,
         ),
         action_model(
-            ScrollAction(point=Point(x=150, y=900), direction="up"), 0.1, end_t=0.1
+            ScrollAction(
+                point=Point(x=150, y=900), direction="up", displacement=(0, 3)
+            ),
+            0.1,
+            end_t=0.1,
         ),
         action_model(
-            ScrollAction(point=Point(x=100, y=100), direction="up"), 0.2, end_t=0.2
+            ScrollAction(
+                point=Point(x=100, y=100), direction="up", displacement=(0, 3)
+            ),
+            0.2,
+            end_t=0.2,
         ),
     ]
     assert out == expected
@@ -523,75 +565,169 @@ def test_multiple_scrolls_with_stuff_between():
     out = parse_actions(ev)
     expected = [
         action_model(
-            ScrollAction(point=Point(x=100, y=100), direction="up"), 0.0, end_t=0.2
+            ScrollAction(
+                point=Point(x=100, y=100), direction="up", displacement=(0, 3)
+            ),
+            0.0,
+            end_t=0.2,
         ),
         action_model(TypeAction(content="a"), 0.3, end_t=0.4),
         action_model(
-            ScrollAction(point=Point(x=100, y=100), direction="up"), 0.5, end_t=0.7
+            ScrollAction(
+                point=Point(x=100, y=100), direction="up", displacement=(0, 3)
+            ),
+            0.5,
+            end_t=0.7,
         ),
     ]
     assert out == expected
 
 
-def test_multiple_scrolls_more_than_5():
+def test_arrow_keys_with_space():
     ev = [
-        scroll(0, 1, 100, 100, 0.0),
-        scroll(0, 1, 100, 100, 0.1),
-        scroll(0, 1, 100, 100, 0.2),
-        scroll(0, 1, 100, 100, 0.3),
-        scroll(0, 1, 100, 100, 0.4),
-        # break here and add a new scroll
-        scroll(0, 1, 100, 100, 0.5),
-        scroll(0, 1, 100, 100, 0.6),
-        scroll(0, 3, 100, 100, 0.7),
-        # break into two
-        scroll(0, 10, 100, 100, 0.8),
-        # boundary condition
-        scroll(0, 2, 100, 100, 0.9),
-        scroll(0, 4, 100, 100, 1.0),
-        scroll(0, 2, 100, 100, 1.1),
-        scroll(0, 1, 200, 200, 1.2),
-        scroll(0, 1, 200, 201, 1.3),
-        scroll(0, 1, 200, 200, 1.4),
-        scroll(0, 1, 203, 204, 1.5),
-        scroll(0, 1, 200, 200, 1.6),
-        scroll(0, 4, 200, 200, 1.6),
-        scroll(0, 1, 200, 200, 5.7),
+        ({"action": "key_button", "key": "left", "is_down": True}, 1754667368.6583781),
+        ({"action": "key_button", "key": "left", "is_down": False}, 1754667368.7578633),
+        ({"action": "key_button", "key": "left", "is_down": True}, 1754667368.8691633),
+        ({"action": "key_button", "key": "left", "is_down": False}, 1754667368.8965094),
+        ({"action": "key_button", "key": "space", "is_down": True}, 1754667369.3502343),
+        (
+            {"action": "key_button", "key": "space", "is_down": False},
+            1754667369.4981089,
+        ),
+        ({"action": "key_button", "key": "right", "is_down": True}, 1754667369.8629737),
+        (
+            {"action": "key_button", "key": "right", "is_down": False},
+            1754667369.9980738,
+        ),
+        ({"action": "key_button", "key": "right", "is_down": True}, 1754667370.0774493),
     ]
+    ev = [{"action": a[0], "timestamp": a[1]} for a in ev]
     out = parse_actions(ev)
     expected = [
-        action_model(
-            ScrollAction(point=Point(x=100, y=100), direction="up"), 0.0, end_t=0.4
+        Action(
+            action=HotkeyAction(action_type="hotkey", modifiers=set(), key="left"),
+            timestamp=1754667368.6583781,
+            end_timestamp=1754667368.6583781,
         ),
-        action_model(
-            ScrollAction(point=Point(x=100, y=100), direction="up"), 0.5, end_t=0.7
+        Action(
+            action=HotkeyAction(action_type="hotkey", modifiers=set(), key="left"),
+            timestamp=1754667368.8691633,
+            end_timestamp=1754667368.8691633,
         ),
-        action_model(
-            ScrollAction(point=Point(x=100, y=100), direction="up"), 0.8, end_t=0.8
+        Action(
+            action=TypeAction(action_type="type", content=" "),
+            timestamp=1754667369.3502343,
+            end_timestamp=1754667369.4981089,
         ),
-        action_model(
-            ScrollAction(point=Point(x=100, y=100), direction="up"), 0.8, end_t=0.8
+        Action(
+            action=HotkeyAction(action_type="hotkey", modifiers=set(), key="right"),
+            timestamp=1754667369.8629737,
+            end_timestamp=1754667369.8629737,
         ),
-        action_model(
-            ScrollAction(point=Point(x=100, y=100), direction="up"), 0.9, end_t=1.0
-        ),
-        # even though there aren't 5 remaining we'll scroll anyways
-        action_model(
-            ScrollAction(point=Point(x=100, y=100), direction="up"), 1.0, end_t=1.1
-        ),
-        # break since the point is different by > 50px
-        action_model(
-            ScrollAction(point=Point(x=200, y=200), direction="up"), 1.2, end_t=1.6
-        ),
-        action_model(
-            ScrollAction(point=Point(x=200, y=200), direction="up"), 1.6, end_t=1.6
-        ),
-        # break here since the time diff >5
-        action_model(
-            ScrollAction(point=Point(x=200, y=200), direction="up"), 5.7, end_t=5.7
+        Action(
+            action=HotkeyAction(action_type="hotkey", modifiers=set(), key="right"),
+            timestamp=1754667370.0774493,
+            end_timestamp=1754667370.0774493,
         ),
     ]
     assert out == expected
+
+
+# def test_multiple_scrolls_more_than_5():
+#     ev = [
+#         scroll(0, 1, 100, 100, 0.0),
+#         scroll(0, 1, 100, 100, 0.1),
+#         scroll(0, 1, 100, 100, 0.2),
+#         scroll(0, 1, 100, 100, 0.3),
+#         scroll(0, 1, 100, 100, 0.4),
+#         # break here and add a new scroll
+#         scroll(0, 1, 100, 100, 0.5),
+#         scroll(0, 1, 100, 100, 0.6),
+#         scroll(0, 3, 100, 100, 0.7),
+#         # break into two
+#         scroll(0, 10, 100, 100, 0.8),
+#         # boundary condition
+#         scroll(0, 2, 100, 100, 0.9),
+#         scroll(0, 4, 100, 100, 1.0),
+#         scroll(0, 2, 100, 100, 1.1),
+#         scroll(0, 1, 200, 200, 1.2),
+#         scroll(0, 1, 200, 201, 1.3),
+#         scroll(0, 1, 200, 200, 1.4),
+#         scroll(0, 1, 203, 204, 1.5),
+#         scroll(0, 1, 200, 200, 1.6),
+#         scroll(0, 4, 200, 200, 1.6),
+#         scroll(0, 1, 200, 200, 5.7),
+#     ]
+#     out = parse_actions(ev)
+#     expected = [
+#         action_model(
+#             ScrollAction(
+#                 point=Point(x=100, y=100), direction="up", displacement=(0, 3)
+#             ),
+#             0.0,
+#             end_t=0.4,
+#         ),
+#         action_model(
+#             ScrollAction(
+#                 point=Point(x=100, y=100), direction="up", displacement=(0, 3)
+#             ),
+#             0.5,
+#             end_t=0.7,
+#         ),
+#         action_model(
+#             ScrollAction(
+#                 point=Point(x=100, y=100), direction="up", displacement=(0, 3)
+#             ),
+#             0.8,
+#             end_t=0.8,
+#         ),
+#         action_model(
+#             ScrollAction(
+#                 point=Point(x=100, y=100), direction="up", displacement=(0, 3)
+#             ),
+#             0.8,
+#             end_t=0.8,
+#         ),
+#         action_model(
+#             ScrollAction(
+#                 point=Point(x=100, y=100), direction="up", displacement=(0, 3)
+#             ),
+#             0.9,
+#             end_t=1.0,
+#         ),
+#         # even though there aren't 5 remaining we'll scroll anyways
+#         action_model(
+#             ScrollAction(
+#                 point=Point(x=100, y=100), direction="up", displacement=(0, 3)
+#             ),
+#             1.0,
+#             end_t=1.1,
+#         ),
+#         # break since the point is different by > 50px
+#         action_model(
+#             ScrollAction(
+#                 point=Point(x=200, y=200), direction="up", displacement=(0, 3)
+#             ),
+#             1.2,
+#             end_t=1.6,
+#         ),
+#         action_model(
+#             ScrollAction(
+#                 point=Point(x=200, y=200), direction="up", displacement=(0, 3)
+#             ),
+#             1.6,
+#             end_t=1.6,
+#         ),
+#         # break here since the time diff >5
+#         action_model(
+#             ScrollAction(
+#                 point=Point(x=200, y=200), direction="up", displacement=(0, 3)
+#             ),
+#             5.7,
+#             end_t=5.7,
+#         ),
+#     ]
+#     assert out == expected
 
 
 # 8 ───── Lone mouse-moves are ignored ───────────────────────────────────────

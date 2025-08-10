@@ -19,49 +19,78 @@ class ActionBase(BaseModel, ABC):
         """Convert the action back to its original text format"""
 
 
+def get_modifiers_str(modifiers: set[str]) -> str:
+    """Convert a set of modifier keys to a space-separated string"""
+    modifier_str = " ".join(modifiers)
+    return f", modifiers='{modifier_str}'" if modifiers else ""
+
+
 class ClickAction(ActionBase):
     action_type: Literal["click"] = "click"
+    modifiers: set[str] = Field(
+        default_factory=set,
+        description="Modifier keys in lowercase, e.g., ['ctrl', 'shift']",
+    )
     point: Point
 
     def dump_to_text(self) -> str:
-        return f"click(point='<point>{self.point.x} {self.point.y}</point>')"
+        modifier_part = get_modifiers_str(self.modifiers)
+        return f"click(point='<point>{self.point.x} {self.point.y}</point>'{modifier_part})"
 
 
 class LeftDoubleAction(ActionBase):
     action_type: Literal["left_double"] = "left_double"
+    modifiers: set[str] = Field(
+        default_factory=set,
+        description="Modifier keys in lowercase, e.g., ['ctrl', 'shift']",
+    )
     point: Point
 
     def dump_to_text(self) -> str:
-        return f"left_double(point='<point>{self.point.x} {self.point.y}</point>')"
+        modifier_part = get_modifiers_str(self.modifiers)
+        return f"left_double(point='<point>{self.point.x} {self.point.y}</point>'{modifier_part})"
 
 
 class RightSingleAction(ActionBase):
     action_type: Literal["right_single"] = "right_single"
     point: Point
+    modifiers: set[str] = Field(
+        default_factory=set,
+        description="Modifier keys in lowercase, e.g., ['ctrl', 'shift']",
+    )
 
     def dump_to_text(self) -> str:
-        return f"right_single(point='<point>{self.point.x} {self.point.y}</point>')"
+        modifier_part = get_modifiers_str(self.modifiers)
+        return f"right_single(point='<point>{self.point.x} {self.point.y}</point>'{modifier_part})"
 
 
 class DragAction(ActionBase):
     action_type: Literal["drag"] = "drag"
     start_point: Point
     end_point: Point
+    modifiers: set[str] = Field(
+        default_factory=set,
+        description="Modifier keys in lowercase, e.g., ['ctrl', 'shift']",
+    )
 
     def dump_to_text(self) -> str:
+        modifier_part = get_modifiers_str(self.modifiers)
         return (
             f"drag(start_point='<point>{self.start_point.x} {self.start_point.y}</point>', "
-            f"end_point='<point>{self.end_point.x} {self.end_point.y}</point>')"
+            f"end_point='<point>{self.end_point.x} {self.end_point.y}</point>'{modifier_part})"
         )
 
 
 class HotkeyAction(ActionBase):
     action_type: Literal["hotkey"] = "hotkey"
-    key: list[str] = Field(..., description="Keys in lowercase, max 3 keys")
+    modifiers: set[str] = Field(
+        ..., description="Modifier keys in lowercase, e.g., ['ctrl', 'shift']"
+    )
+    key: str = Field(..., description="Keys in lowercase, max 3 keys")
 
     def dump_to_text(self) -> str:
-        key_str = " ".join(self.key)
-        return f"hotkey(key='{key_str}')"
+        modifier_str = get_modifiers_str(self.modifiers)
+        return f"hotkey(key='{self.key}'{modifier_str})"
 
 
 class TypeAction(ActionBase):
@@ -78,6 +107,10 @@ class ScrollAction(ActionBase):
     action_type: Literal["scroll"] = "scroll"
     point: Point
     direction: Literal["down", "up", "right", "left"]
+    displacement: tuple[int, int] = Field(
+        ...,
+        description="Displacement in pixels (dx, dy) for the scroll action",
+    )
 
     def dump_to_text(self) -> str:
         return (
