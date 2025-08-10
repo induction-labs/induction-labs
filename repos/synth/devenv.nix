@@ -6,6 +6,8 @@
   ...
 }: {
   packages = [
+    # Requires ffmpeg4 because of this https://github.com/gcanat/video_reader-rs/issues/4
+    pkgs.ffmpeg.dev
   ];
 
   languages.python = {

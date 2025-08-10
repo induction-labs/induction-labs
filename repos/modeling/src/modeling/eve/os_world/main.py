@@ -418,6 +418,10 @@ async def run_evaluation(
         int | None,
         typer.Option("--max-tasks", help="Maximum number of unique tasks to evaluate"),
     ] = None,
+    checkpoint_dir: Annotated[
+        str, typer.Option("--checkpoint-dir", help="Model checkpoint directory")
+    ] = "",
+    # print_cmd: Annotated[bool, typer.Option("--print-cmd", help="Print command in k8s format and exit")] = False,
     print_cmd: Annotated[
         bool, typer.Option("--print-cmd", help="Print command in k8s format and exit")
     ] = False,
@@ -518,7 +522,7 @@ async def run_evaluation(
 
             # Upload to GCS if needed
             if cloud_output_path:
-                print(f"Uploading results to {cloud_output_path.to_str()}...")
+                print(f"Uploading results to {cloud_output_path.uri}...")
                 bucket_name, gcs_path = cloud_output_path.bucket_and_path
                 await asyncio.to_thread(
                     upload_to_gcs,

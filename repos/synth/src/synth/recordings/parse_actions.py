@@ -92,12 +92,12 @@ SHIFT_MAP = {
 
 CAPSLOCKS_KEYS = set("abcdefghijklmnopqrstuvwxyz")
 NUMLOCK_KEYS = set("0123456789")
+reverse_map = {v.lower(): k for k, v in SHIFT_MAP.items()}
 
 
 def normalize_key_to_physical(key):
     """Convert any key to its physical key identifier (unshifted form)"""
     # Create reverse lookup for shifted chars -> unshifted
-    reverse_map = {v.lower(): k for k, v in SHIFT_MAP.items()}
     key_lower = key.lower()
     return reverse_map.get(key_lower, key_lower)
 
@@ -105,7 +105,7 @@ def normalize_key_to_physical(key):
 def parse_scroll(
     events: list[dict],
     /,
-    page_delta: int = 5,
+    page_delta: int = 1024,
     point_threshold: int = 50,
     time_threshold: float = 4.0,
 ) -> list[Action]:
@@ -127,25 +127,33 @@ def parse_scroll(
     origin: tuple[int, int] | None = None  # pointer at group start
     axis: str | None = None  # "x" (horizontal) or "y" (vertical)
     direction: str | None = None  # "up"|"down"|"left"|"right"
-    acc: int = 0  # |ΣΔ| accumulated so far
+    acc_dx: int = 0  # |ΣΔ| accumulated so far
+    acc_dy: int = 0  # |ΣΔ| accumulated so far
     start_t: float | None = None  # first timestamp contributing
     last_t: float | None = None  # previous event time
 
     def flush():
         """Emit one residual page, if any, for the current group."""
-        nonlocal acc, start_t, last_t, origin, axis, direction
-        if acc and start_t is not None and last_t is not None:
+        nonlocal acc_dx, acc_dy, start_t, last_t, origin, axis, direction
+        if (acc_dx or acc_dy) and start_t is not None and last_t is not None:
             out.append(
                 Action(
                     action=ScrollAction(
-                        point=Point(x=origin[0], y=origin[1]), direction=direction
+                        point=Point(x=origin[0], y=origin[1]),
+                        direction=direction,
+                        displacement=(acc_dx, acc_dy),
                     ),
                     timestamp=start_t,
                     end_timestamp=last_t,
                 )
             )
         # reset group state (origin/axis/direction stay - they are set on next use)
-        acc = 0
+        acc_dx = 0
+        acc_dy = 0
+        last_t = None
+        origin = None
+        axis = None
+        direction = None
         start_t = None
 
     # ----------------------------------------------------------------------
@@ -158,14 +166,18 @@ def parse_scroll(
         # Pick the *dominant* axis for this event.  (Best-effort: we assume
         # most mice send either dx OR dy ≠ 0 - if both are non-zero we use
         # whichever has the larger magnitude.)
+        if dy == 0 and dx == 0:
+            if origin is not None:
+                x = ev["action"]["x"]
+                y = ev["action"]["y"]
+                t = ev["timestamp"]
+            continue
         if abs(dy) > 0:
-            delta = dy
             axis_now = "y"
-            dir_now = "up" if delta > 0 else "down"
+            dir_now = "up" if dy > 0 else "down"
         else:
-            delta = dx
             axis_now = "x"
-            dir_now = "right" if delta > 0 else "left"
+            dir_now = "right" if dx > 0 else "left"
 
         x = ev["action"]["x"]
         y = ev["action"]["y"]
@@ -185,6 +197,15 @@ def parse_scroll(
             or abs(y - origin[1]) > point_threshold
             or (last_t is not None and t - last_t > time_threshold)
         ):
+            # print(
+            #     "flush1",
+            #     ev["timestamp"],
+            #     axis_now != axis,
+            #     dir_now != direction,
+            #     abs(x - origin[0]) > point_threshold,
+            #     abs(y - origin[1]) > point_threshold,
+            #     last_t is not None and t - last_t > time_threshold,
+            # )
             flush()
             origin = (x, y)
             axis = axis_now
@@ -193,22 +214,16 @@ def parse_scroll(
         if start_t is None:  # first contribution to (possibly new) page
             start_t = t
 
-        acc += abs(delta)
+        acc_dx += dx
+        acc_dy += dy
         last_t = t
 
+        acc_change = acc_dx if axis_now == "x" else acc_dy
+
         # spit out complete pages immediately
-        while acc >= page_delta:
-            out.append(
-                Action(
-                    action=ScrollAction(
-                        point=Point(x=origin[0], y=origin[1]), direction=direction
-                    ),
-                    timestamp=start_t,
-                    end_timestamp=t,
-                )
-            )
-            acc -= page_delta
-            start_t = t if acc else None  # leftovers start “now”
+        if abs(acc_change) >= page_delta:
+            # print("flush2", start_t)
+            flush()
 
     flush()  # residue at end of stream
     return out
@@ -247,7 +262,7 @@ def parse_actions(raw_actions: list[dict]) -> list[Action]:
     last_click_pos = None
     mouse_activity_since_typing = False
 
-    modifier_keys = {"ctrl": False, "alt": False, "shift": False}
+    modifier_keys = {"ctrl": False, "alt": False, "shift": False, "cmd": False}
     lock_keys = {
         SpecialKeys.CAPSLOCK: LockState(),
         SpecialKeys.NUMLOCK: LockState(),
@@ -264,6 +279,9 @@ def parse_actions(raw_actions: list[dict]) -> list[Action]:
     # last_scroll_pos = None
 
     enter_pressed_before_shift_up = False
+
+    def get_modifiers():
+        return {k for k, v in modifier_keys.items() if v}
 
     def add_parsed_action(action_instance, timestamp, end_timestamp):
         """Add a parsed action with the given timestamp"""
@@ -327,6 +345,7 @@ def parse_actions(raw_actions: list[dict]) -> list[Action]:
                                     x=mouse_down_pos[0], y=mouse_down_pos[1]
                                 ),
                                 end_point=Point(x=up_pos[0], y=up_pos[1]),
+                                modifiers=get_modifiers(),
                             )
                             add_parsed_action(drag_action, mouse_down_time, timestamp)
                         else:
@@ -347,7 +366,8 @@ def parse_actions(raw_actions: list[dict]) -> list[Action]:
                                 ):
                                     # Replace the last action with a double click
                                     double_click_action = LeftDoubleAction(
-                                        point=Point(x=up_pos[0], y=up_pos[1])
+                                        point=Point(x=up_pos[0], y=up_pos[1]),
+                                        modifiers=get_modifiers(),
                                     )
                                     parsed_actions[-1] = Action(
                                         action=double_click_action,
@@ -356,15 +376,18 @@ def parse_actions(raw_actions: list[dict]) -> list[Action]:
                                     )
                                 else:
                                     double_click_action = LeftDoubleAction(
-                                        point=Point(x=up_pos[0], y=up_pos[1])
+                                        point=Point(x=up_pos[0], y=up_pos[1]),
+                                        modifiers=get_modifiers(),
                                     )
                                     add_parsed_action(
                                         double_click_action, mouse_down_time, timestamp
                                     )
                             else:
                                 # Single click
+
                                 click_action = ClickAction(
-                                    point=Point(x=up_pos[0], y=up_pos[1])
+                                    point=Point(x=up_pos[0], y=up_pos[1]),
+                                    modifiers=get_modifiers(),
                                 )
                                 add_parsed_action(
                                     click_action, mouse_down_time, timestamp
@@ -377,8 +400,10 @@ def parse_actions(raw_actions: list[dict]) -> list[Action]:
 
             elif action["button"] == "right" and action["is_down"]:
                 # Right click (only care about mouse up)
+
                 right_click_action = RightSingleAction(
-                    point=Point(x=action["x"], y=action["y"])
+                    point=Point(x=action["x"], y=action["y"]),
+                    modifiers=get_modifiers(),
                 )
                 add_parsed_action(right_click_action, timestamp, timestamp)
 
@@ -438,29 +463,25 @@ def parse_actions(raw_actions: list[dict]) -> list[Action]:
                         typing_buffer = []
                         typing_start_time = None
 
-                    all_modifiers = [k for k, v in modifier_keys.items() if v]
-                    hotkey_combo = [*all_modifiers, key]
-                    hotkey_action = HotkeyAction(key=hotkey_combo)
-                    lookahead_modifier_keys_future = []
+                    modifiers = {k for k, v in modifier_keys.items() if v}
+                    hotkey_action = HotkeyAction(key=key, modifiers=modifiers)
+                    hotkey_endtime = None
+
                     lookahead_i = i
-                    while (
-                        lookahead_i + 1 < len(actions)
-                        and actions[lookahead_i + 1]["action"]["action"] == "key_button"
-                        and not actions[lookahead_i + 1]["action"]["is_down"]
-                    ):
+                    while lookahead_i + 1 < len(actions):
                         lookahead_i += 1
-                        next_key = actions[lookahead_i]["action"]["key"].lower()
-                        if modifier_keys.get(next_key):
-                            lookahead_modifier_keys_future.append(
-                                actions[lookahead_i]["timestamp"]
-                            )
-                        else:
-                            if lookahead_i != i + 1:
-                                break
+                        action = actions[lookahead_i]["action"]
+                        if action["action"] not in {"key_button", "mouse_button"}:
+                            continue
+
+                        hotkey_endtime = actions[lookahead_i]["timestamp"]
+                        break
+
+                    # print(f"{lookahead_modifier_keys_future=}")
                     add_parsed_action(
                         hotkey_action,
-                        modifier_start_time,
-                        max(lookahead_modifier_keys_future),
+                        timestamp,
+                        hotkey_endtime if hotkey_endtime else timestamp,
                     )
                     modifier_start_time = None
                     mouse_activity_since_typing = False
@@ -541,6 +562,22 @@ def parse_actions(raw_actions: list[dict]) -> list[Action]:
 
                         typing_buffer.append("\\n")
                         mouse_activity_since_typing = False
+                    elif final_char.lower() in {"left", "right", "up", "down"}:
+                        if typing_buffer:
+                            content = "".join(typing_buffer)
+                            type_action = TypeAction(content=content)
+                            add_parsed_action(
+                                type_action, key_timestamp(), last_key_time_cosmetic
+                            )
+                            typing_buffer = []
+                        typing_start_time = None
+                        arrow_action = HotkeyAction(
+                            key=final_char.lower(),
+                            modifiers=get_modifiers(),
+                        )
+                        if timestamp == 1754667368.8691633:
+                            print(f"Arrow action at {timestamp}: {arrow_action}")
+                        add_parsed_action(arrow_action, timestamp, timestamp)
                     elif len(final_char) == 1:  # Single character
                         typing_buffer.append(final_char)
                         mouse_activity_since_typing = False

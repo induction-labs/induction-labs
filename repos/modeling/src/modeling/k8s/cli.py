@@ -480,6 +480,13 @@ def eve(
             # If --output not found, add it
             modified_eval_cmd.extend(["--output", output_path])
 
+        for i, arg in enumerate(modified_eval_cmd):
+            if arg == "--checkpoint-dir" and i + 1 < len(modified_eval_cmd):
+                modified_eval_cmd[i + 1] = checkpoint_dir
+                break
+        else:
+            # If --checkpoint-dir not found, add it
+            modified_eval_cmd.extend(["--checkpoint-dir", checkpoint_dir])
         container["args"] = [
             "eve",
             "run-procs",

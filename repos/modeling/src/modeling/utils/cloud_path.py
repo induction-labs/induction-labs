@@ -4,7 +4,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Annotated, Any
 
-from pydantic import BaseModel, BeforeValidator, field_serializer
+from pydantic import BaseModel, BeforeValidator, computed_field, field_serializer
 
 
 def path_validator(path: Any) -> Path:
@@ -40,6 +40,16 @@ class CloudPath(BaseModel):
     cloud: Cloud
     path: Annotated[Path, BeforeValidator(path_validator)]
 
+    @computed_field
+    @property
+    def uri(self) -> str:
+        """
+        Return the full URI as a string.
+        """
+        if self.cloud == "file":
+            return self.path.as_posix()
+        return f"{self.cloud}://{self.path.as_posix()}"
+
     @classmethod
     def from_str(cls: type[CloudPath], uri: str) -> CloudPath:
         """
@@ -54,14 +64,6 @@ class CloudPath(BaseModel):
             cloud = CloudPath.Cloud.FILE
             path = Path(uri)
         return cls(cloud=cloud, path=path)
-
-    def to_str(self) -> str:
-        """
-        Render back to a URI string.
-        """
-        if self.cloud == "file":
-            return self.path.as_posix()
-        return f"{self.cloud}://{self.path.as_posix()}"
 
     @property
     def bucket_and_path(self) -> tuple[str, Path]:
@@ -93,7 +95,7 @@ class CloudPath(BaseModel):
         return CloudPath(cloud=self.cloud, path=new_path)
 
     def __str__(self) -> str:
-        return self.to_str()
+        return self.uri
 
     def __repr__(self) -> str:
         return f"CloudPath(cloud={self.cloud!r}, path={str(self.path)!r})"
@@ -104,7 +106,7 @@ if __name__ == "__main__":
     cp = CloudPath.from_str("gs://mybucket/folder")
     print(cp)  # gs://mybucket/folder
     cp2 = cp / "subdir" / "file.txt"
-    print(cp2.to_str())  # gs://mybucket/folder/subdir/file.txt
+    print(cp2.uri)  # gs://mybucket/folder/subdir/file.txt
     local = CloudPath.from_str("/tmp/data")
     print(local)  # /tmp/data
     print(local / "notes.md")  # /tmp/data/notes.md
