@@ -1,38 +1,61 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from modeling.config import (
     DistributedConfig,
     ExperimentConfig,
     ExperimentMetadata,
+    GCSCheckpointConfig,
+    LinearLRSchedule,
     RunConfig,
     WandbConfig,
 )
 from modeling.data.text_train import TextPretrainDatapackConfig
-
+from modeling.modules.base_module import CompileConfig
 from modeling.modules.text_pretrain.qwen3 import Qwen3LITConfig
-from modeling.types import AttentionImplementation
+from modeling.types import Accelerator, AttentionImplementation
+from modeling.utils.cloud_path import CloudPath
 
+# from modeling.config.distributed import DistributedConfig, ShardingConfig
+run_name = "qwen3_4B_text_pretrain"
 Qwen3PretrainExperimentConfig = ExperimentConfig(
     metadata=ExperimentMetadata(
-        wandb=WandbConfig(project="testing", name="qwen3_4B_text_pretrain"),
-        output_dir="output/text_pretrain",
+        wandb=WandbConfig(project="testing", name=run_name),
+        output_dir=Path("./output/qwen3_text_pretrain"),
+        checkpoint=GCSCheckpointConfig(
+            checkpoint_prefix=CloudPath.from_str(
+                f"gs://induction-labs/checkpoints/{run_name}",
+            ),
+            checkpoint_frequency=0,  # Save every 10 steps
+            checkpoint_first_step=False,  # Save the first step
+            checkpoint_last_step=True,  # Save the last step
+        ),
     ),
     module=Qwen3LITConfig(
         model_name="Qwen/Qwen3-4B",
         tokenizer_name="Qwen/Qwen3-4B",
+        # activation_checkpointing=None,  # Optional activation checkpointing config
+        compile=CompileConfig(),  # Uncomment if you want to use compilation
     ),
-    datapack=TextPretrainDatapackConfig(),
+    train_datapack=TextPretrainDatapackConfig(),
+    validation_datapack=TextPretrainDatapackConfig(),
     run=RunConfig(
-        lr=1e-3,
-        attn_impl=AttentionImplementation.FLASH_ATTENTION_2,
-        sequence_length=1024,  # Default sequence length
-        batch_size=2,
-        steps_per_epoch=1000,  # Number of steps per epoch
+        lr=LinearLRSchedule.constant_lr(1e-5),
+        sequence_length=4096,
+        batch_size=1,
+        num_steps=5000,
         distributed=DistributedConfig(
-            devices_per_node=2,
-            num_nodes=1,
+            devices_per_node=1,
         ),
+        attn_impl=AttentionImplementation.FLASH_ATTENTION_2,
+        accelerator=Accelerator.CUDA,
+        # profile=ProfileConfig(),
     ),
+)
+Qwen3PretrainTest = Qwen3PretrainExperimentConfig.testing_config(
+    num_steps=5, enable_wandb=False
 )
 
 # mdl export modeling.experiments.text_pretrain.qwen3.Qwen3PretrainExperimentConfig
+# mdl export modeling.experiments.text_pretrain.qwen3.Qwen3PretrainTest

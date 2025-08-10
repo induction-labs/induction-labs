@@ -1,7 +1,11 @@
-{ pkgs, lib, config, inputs, ... }:
-
 {
-  packages = [ 
+  pkgs,
+  lib,
+  config,
+  inputs,
+  ...
+}: {
+  packages = [
     pkgs.zlib
   ];
 

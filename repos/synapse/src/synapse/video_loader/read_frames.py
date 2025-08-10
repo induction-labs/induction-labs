@@ -136,6 +136,59 @@ async def get_frame_cursor_array(
     return pts_array, frames_per_action
 
 
+async def get_frame_keyboard_tokens(
+    zarr_path: str,
+) -> np.ndarray:
+    """
+    Get the keyboard tokens array from a tensorstore zarr file.
+
+    Args:
+        zarr_path: Path to the tensorstore zarr file (supports local paths, gs://, and s3://)
+
+    Returns:
+        Numpy array of timestamps
+    """
+    timestamps_path = zarr_path + "/keyboard_tokens"
+    timestamps_kvstore_config = get_kvstore_config(timestamps_path)
+
+    pts_zarr = await ts.open({"driver": "zarr3", "kvstore": timestamps_kvstore_config})
+
+    keyboard_token_array: np.ndarray = await pts_zarr.read()
+    assert keyboard_token_array.ndim == 2, (
+        f"Expected 2D array for tokens, got {keyboard_token_array.ndim}D array with shape {keyboard_token_array.shape}"
+    )
+    assert keyboard_token_array.dtype == np.uint16, (
+        f"Expected tokens to be in uint16 format, got {keyboard_token_array.dtype}"
+    )
+    return keyboard_token_array
+
+async def get_frame_keyboard_mask(
+    zarr_path: str,
+) -> np.ndarray:
+    """
+    Get the keyboard mask array from a tensorstore zarr file.
+
+    Args:
+        zarr_path: Path to the tensorstore zarr file (supports local paths, gs://, and s3://)
+
+    Returns:
+        Numpy array of keyboard mask
+    """
+    timestamps_path = zarr_path + "/keyboard_tokens_mask"
+    timestamps_kvstore_config = get_kvstore_config(timestamps_path)
+
+    pts_zarr = await ts.open({"driver": "zarr3", "kvstore": timestamps_kvstore_config})
+
+    keyboard_mask_array: np.ndarray = await pts_zarr.read()
+    assert keyboard_mask_array.ndim == 2, (
+        f"Expected 2D array for tokens, got {keyboard_mask_array.ndim}D array with shape {keyboard_mask_array.shape}"
+    )
+    assert keyboard_mask_array.dtype == np.bool, (
+        f"Expected tokens to be in bool format, got {keyboard_mask_array.dtype}"
+    )
+    return keyboard_mask_array
+
+
 def convert_pts_array_to_timestamps(
     pts_array: PTSArray, time_base: Fraction
 ) -> TimestampsArray:

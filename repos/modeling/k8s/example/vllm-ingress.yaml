@@ -1,0 +1,26 @@
+# vllm-ingress.yaml
+#
+# Ingress resource for exposing the vLLM service externally via the NGINX
+# ingress controller.
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: vllm-ingress
+  namespace: mk8s-docs-examples
+spec:
+  ingressClassName: nginx-public
+  rules:
+    - host: vllm.nextaction-onecc-mk8s01.clusters.gpus.com
+      http:
+        paths:
+          - backend:
+              service:
+                name: vllm-service
+                port:
+                  name: http
+            path: /
+            pathType: Prefix
+  tls:
+    - hosts:
+        - vllm.nextaction-onecc-mk8s01.clusters.gpus.com

@@ -1,0 +1,18 @@
+# huggingface-cache.yaml
+#
+# PersistentVolumeClaim for caching model downloads from Hugging Face. This
+# volume uses a Lambda Filesystem so it's accessible from all nodes in the
+# cluster.
+
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: huggingface-cache
+  namespace: mk8s-docs-examples
+spec:
+  storageClassName: lambda-shared
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 400Gi

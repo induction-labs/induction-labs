@@ -98,6 +98,7 @@ class VideoResolution(BaseModel):
 
 
 resolution_480p = VideoResolution(width=854, height=480)
+resolution_1080p = VideoResolution(width=1920, height=1080)
 
 
 class VideoProcessArgs(BaseModel):

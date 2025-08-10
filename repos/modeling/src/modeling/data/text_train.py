@@ -1,128 +1,159 @@
 from __future__ import annotations
 
-import multiprocessing
-import tempfile
-import weakref
-from itertools import chain
-from pathlib import Path
-from typing import Any
+import functools
+from typing import Any, Self
 
 import datasets
-import lightning as L
-from modeling.config import DatapackConfig, ExperimentConfig, ModuleConfig
-from modeling.modules.text_module import TextLITConfig
+import torch
 from pydantic import BaseModel, ConfigDict
-from torch.utils.data import DataLoader
-from transformers.data.data_collator import default_data_collator
+from synapse.utils.logging import configure_logging
+from transformers import AutoTokenizer
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 
-
-def _cleanup_temp_dir(temp_dir: tempfile.TemporaryDirectory, path: str):
-    """Function to clean up temp directory - called by finalizer."""
-    # print(f"Finalizer cleaning up: {path}")
-    temp_dir.cleanup()
+from modeling.config import DatapackConfig, ExperimentConfig, ModuleConfig
+from modeling.config.data import BaseDataSample, BaseDataset
+from modeling.modules.text_module import TextLITConfig
 
 
-class TextPretrainDataModule(L.LightningDataModule):
-    def __init__(
-        self,
-        config: TextPretrainDatapackConfig,
-        extra_args: TextPretrainDataModuleExtraArgs,
-    ):
-        super().__init__()
-        self.config = config
-        self.extra_args = extra_args
-        self._temp_dir = "/tmp/tmpstut1ibm"
-        self.temp_path = Path(self._temp_dir)
-        self._finalizer = weakref.finalize(
-            self, _cleanup_temp_dir, self._temp_dir, str(self.temp_path)
-        )
-
-    def setup(self, stage: str | None = None) -> None:
-        # This method is used to download the dataset if it is not already present.
-        train_data = datasets.load_from_disk(self.temp_path / "train_data")
-        assert isinstance(train_data, datasets.Dataset), (
-            "Expected train_data to be a Dataset"
-        )
-        self.train_data = train_data
-
-    def prepare_data(self):
-        """
-        Function created using code found in
-        https://github.com/huggingface/transformers/blob/v4.45.1/examples/pytorch/language-modeling/run_clm_no_trainer.py
-        """
-        # This method is used to set up the dataset for training.
-        data = datasets.load_dataset(self.config.dataset_name, trust_remote_code=True)
-        column_names = data["train"].column_names  # type: ignore # noqa: PGH003
-        text_column_name = "text" if "text" in column_names else column_names[0]
-
-        def tokenize_function(examples):
-            return self.extra_args.tokenizer(examples[text_column_name])
-
-        tokenized_datasets = data.map(
-            tokenize_function,
-            batched=True,
-            remove_columns=column_names,
-            num_proc=1,  # type: ignore  # noqa: PGH003
-            load_from_cache_file=True,  # type: ignore  # noqa: PGH003
-            desc="Running tokenizer on dataset",  # type: ignore  # noqa: PGH003
-        )
-        seq_length = self.extra_args.seq_length
-
-        # Main data processing function that will concatenate all texts from our dataset and generate chunks of block_size.
-        def group_texts(examples):
-            # Concatenate all texts.
-            concatenated_examples = {k: list(chain(*examples[k])) for k in examples}
-            total_length = len(concatenated_examples[next(iter(examples.keys()))])
-            # We drop the small remainder, and if the total_length < block_size  we exclude this batch and return an empty dict.
-            # We could add padding if the model supported it instead of this drop, you can customize this part to your needs.
-            if total_length > seq_length:
-                total_length = (total_length // seq_length) * seq_length
-            # Split by chunks of max_len.
-            result = {
-                k: [t[i : i + seq_length] for i in range(0, total_length, seq_length)]
-                for k, t in concatenated_examples.items()
-            }
-            result["labels"] = result["input_ids"].copy()
-            return result
-
-        lm_datasets = tokenized_datasets.map(
-            group_texts,
-            batched=True,
-            num_proc=multiprocessing.cpu_count(),
-            load_from_cache_file=True,
-            desc=f"Grouping texts in chunks of {seq_length}",
-        )
-        train_data = lm_datasets["train"]
-        assert isinstance(train_data, datasets.Dataset)
-        print("Saving train data to disk at", self.temp_path / "train_data")
-        train_data.save_to_disk(self.temp_path / "train_data")
-
-    def train_dataloader(self) -> DataLoader:
-        return DataLoader(
-            self.train_data,  # type: ignore # noqa: PGH003
-            batch_size=self.extra_args.batch_size,
-            shuffle=True,
-            drop_last=True,
-            collate_fn=default_data_collator,
-        )
+@functools.lru_cache(maxsize=1)
+def get_tokenizer(tokenizer_name: str) -> PreTrainedTokenizerBase:
+    """
+    Lazy load the tokenizer from the Hugging Face model hub.
+    This function caches the tokenizer to avoid loading it multiple times.
+    """
+    return AutoTokenizer.from_pretrained(tokenizer_name)
 
 
-class TextPretrainDataModuleExtraArgs(BaseModel):
+logger = configure_logging(__name__)
+
+
+class TextPretrainDataSample(BaseDataSample):
+    """
+    A data sample for text pretraining tasks.
+    This class extends BaseDataSample to include input IDs and labels.
+    """
+
     model_config = ConfigDict(arbitrary_types_allowed=True)
-    seq_length: int = 1024  # Default sequence length
-    tokenizer: PreTrainedTokenizerBase
-    batch_size: int
+
+    input_ids: torch.Tensor
+    labels: torch.Tensor
+
+    def to_device(
+        self, device: torch.device, non_blocking: bool = False
+    ) -> TextPretrainDataSample:
+        """
+        Move the data sample to the specified device.
+        This is used to ensure that the data is on the correct device for training or evaluation.
+        """
+        return TextPretrainDataSample(
+            input_ids=self.input_ids.to(device, non_blocking=non_blocking),
+            labels=self.labels.to(device, non_blocking=non_blocking),
+        )
+
+    @classmethod
+    def combine_batch(  # type: ignore[override]
+        cls, batch: list[TextPretrainDataSample]
+    ) -> TextPretrainDataSample:
+        """
+        Combine a batch of TextPretrainDataSamples into a single TextPretrainDataSample.
+        This is used to prepare the data for training or evaluation.
+        """
+        input_ids = torch.stack([sample.input_ids for sample in batch])
+        labels = torch.stack([sample.labels for sample in batch])
+        return TextPretrainDataSample(input_ids=input_ids, labels=labels)
 
 
-class TextPretrainDatapackConfig(DatapackConfig[TextPretrainDataModule]):
+class TextDatasetArgs(BaseModel):
+    dataset_path: str
+    dataset_name: str
+    seq_len: int
+    tokenizer_name: str
+    stride: int | None = None
+
+
+class TextDataset(BaseDataset[TextPretrainDataSample, TextDatasetArgs]):
+    """
+    A PyTorch Dataset for text pretraining tasks.
+    """
+
+    examples: list[list[int]]
+
+    @classmethod
+    def data_cls(cls) -> type[TextPretrainDataSample]:
+        """
+        Class property that should return the data class type.
+        This is used to ensure that the dataset is compatible with the data class.
+        """
+        return TextPretrainDataSample
+
+    @classmethod
+    async def constructor(cls, args: TextDatasetArgs) -> Self:
+        """
+        Asynchronous constructor for the dataset.
+        This allows for any necessary asynchronous setup before the dataset is used.
+        """
+        logger.info(f"Loading {args.dataset_name} dataset...")
+        dataset = datasets.load_dataset(
+            args.dataset_path, args.dataset_name, split="train"
+        )
+        assert isinstance(dataset, datasets.Dataset), (
+            f"Expected Dataset, got {type(dataset)}"
+        )
+        logger.info(f"Dataset loaded with {len(dataset)} examples")
+
+        # Extract text from the dataset
+        texts = [example["text"] for example in dataset if example["text"].strip()]
+        logger.info(f"Filtered to {len(texts)} non-empty text examples")
+
+        seq_len = args.seq_len
+        stride = args.stride or seq_len
+        tokenizer = get_tokenizer(args.tokenizer_name)
+
+        # Create temporary instance to access tokenizer property
+
+        # Tokenize and flatten all texts into a single list of token IDs
+        all_ids = []
+        for txt in texts:
+            tokens = tokenizer(txt, return_tensors=None)
+            if "input_ids" not in tokens:
+                raise ValueError("Tokenizer output must contain 'input_ids'")
+            all_ids.extend(tokens["input_ids"])
+
+        # Calculate number of chunks
+        examples = []
+        for start_idx in range(0, len(all_ids) - seq_len + 1, stride):
+            chunk = all_ids[start_idx : start_idx + seq_len]
+            examples.append(chunk)
+
+        return cls(
+            args=args,
+            length=len(examples),
+            examples=examples,
+        )
+
+    async def get_item(self, idx: int) -> TextPretrainDataSample:
+        """
+        Asynchronously fetch a data sample.
+        This method should be implemented to load the actual data from the paths.
+        """
+        input_ids = self.examples[idx]
+        # For SFT, labels are the same as inputs (language modeling)
+        labels = input_ids.copy()
+        return TextPretrainDataSample(
+            input_ids=torch.tensor(input_ids, dtype=torch.long),
+            labels=torch.tensor(labels, dtype=torch.long),
+        )
+
+
+class TextPretrainDatapackConfig(DatapackConfig[TextPretrainDataSample]):
     """
     Configuration class for the Text Pretraining Data Module.
     This class is used to configure the data module for text pretraining tasks.
     """
 
     config_path: str = "modeling.data.text_train.TextPretrainDatapackConfig"
-    dataset_name: str = "tatsu-lab/alpaca"
+    dataset_path: str = "wikitext"
+    dataset_name: str = "wikitext-2-raw-v1"
     num_workers: int = 2
 
     def validate_module_compatibility(
@@ -137,16 +168,16 @@ class TextPretrainDatapackConfig(DatapackConfig[TextPretrainDataModule]):
         )
         return module_config
 
-    def create_datapack(
-        self, full_config: ExperimentConfig[TextPretrainDataModule]
-    ) -> TextPretrainDataModule:
+    async def _init_dataset(self, full_config: ExperimentConfig) -> TextDataset:
         module_config = self.validate_module_compatibility(full_config.module)
-        extra_args = TextPretrainDataModuleExtraArgs(
-            seq_length=full_config.run.sequence_length,
-            tokenizer=module_config.get_tokenizer,
-            batch_size=full_config.run.batch_size,
+        return await TextDataset.constructor(
+            TextDatasetArgs(
+                dataset_path=self.dataset_path,
+                dataset_name=self.dataset_name,
+                seq_len=full_config.run.sequence_length,
+                tokenizer_name=module_config.get_tokenizer.name_or_path,
+            )
         )
-        return TextPretrainDataModule(self, extra_args)
 
 
-__all__ = ["TextPretrainDataModule", "TextPretrainDatapackConfig"]
+__all__ = ["TextPretrainDatapackConfig"]

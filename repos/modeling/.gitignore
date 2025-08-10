@@ -8,3 +8,8 @@ devenv.local.nix
 # pre-commit
 .pre-commit-config.yaml
 wandb/
+output/
+
+# SA key
+induction-labs-28a77e4c0896.json
+**/eve-outputs/

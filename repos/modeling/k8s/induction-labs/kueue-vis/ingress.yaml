@@ -1,0 +1,70 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  annotations:
+    field.cattle.io/publicEndpoints: >-
+      [{"addresses":["192.222.55.11","192.222.55.132","192.222.55.178"],"port":443,"protocol":"HTTPS","serviceName":"kueue-system:kueue-kueueviz-frontend","ingressName":"kueue-system:kueue-frontend-ingress","hostname":"kueueviz-frontend.nextaction-onecc-mk8s01.clusters.gpus.com","path":"/","allNodes":false}]
+    kubectl.kubernetes.io/last-applied-configuration: >
+      {"apiVersion":"networking.k8s.io/v1","kind":"Ingress","metadata":{"annotations":{},"name":"kueue-frontend-ingress","namespace":"kueue-system"},"spec":{"ingressClassName":"nginx-public","rules":[{"host":"kueueviz-frontend.nextaction-onecc-mk8s01.clusters.gpus.com","http":{"paths":[{"backend":{"service":{"name":"kueue-kueueviz-frontend","port":{"number":8080}}},"path":"/","pathType":"Prefix"}]}}],"tls":[{"hosts":["kueueviz-frontend.nextaction-onecc-mk8s01.clusters.gpus.com"]}]}}
+  creationTimestamp: "2025-07-21T14:17:32Z"
+  generation: 3
+  managedFields:
+    - apiVersion: networking.k8s.io/v1
+      fieldsType: FieldsV1
+      fieldsV1:
+        f:metadata:
+          f:annotations:
+            .: {}
+            f:kubectl.kubernetes.io/last-applied-configuration: {}
+        f:spec:
+          f:ingressClassName: {}
+          f:rules: {}
+          f:tls: {}
+      manager: kubectl-client-side-apply
+      operation: Update
+      time: "2025-07-21T14:19:23Z"
+    - apiVersion: networking.k8s.io/v1
+      fieldsType: FieldsV1
+      fieldsV1:
+        f:status:
+          f:loadBalancer:
+            f:ingress: {}
+      manager: nginx-ingress-controller
+      operation: Update
+      subresource: status
+      time: "2025-07-21T14:20:04Z"
+    - apiVersion: networking.k8s.io/v1
+      fieldsType: FieldsV1
+      fieldsV1:
+        f:metadata:
+          f:annotations:
+            f:field.cattle.io/publicEndpoints: {}
+      manager: rancher
+      operation: Update
+      time: "2025-07-21T14:20:04Z"
+  name: kueue-frontend-ingress
+  namespace: kueue-system
+  resourceVersion: "2080711"
+  uid: a8a33098-5f04-4d85-8fb9-2fd668086696
+spec:
+  ingressClassName: nginx-public
+  rules:
+    - host: kueueviz-frontend.nextaction-onecc-mk8s01.clusters.gpus.com
+      http:
+        paths:
+          - backend:
+              service:
+                name: kueue-kueueviz-frontend
+                port:
+                  number: 8080
+            path: /
+            pathType: Prefix
+  tls:
+    - hosts:
+        - kueueviz-frontend.nextaction-onecc-mk8s01.clusters.gpus.com
+status:
+  loadBalancer:
+    ingress:
+      - ip: 192.222.55.11
+      - ip: 192.222.55.132
+      - ip: 192.222.55.178

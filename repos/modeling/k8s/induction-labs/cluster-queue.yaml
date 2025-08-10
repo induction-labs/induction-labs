@@ -1,0 +1,21 @@
+apiVersion: kueue.x-k8s.io/v1beta1
+kind: ClusterQueue
+metadata:
+  name: cluster-queue
+spec:
+  namespaceSelector: {}
+  resourceGroups:
+    - coveredResources: ["cpu", "memory"]
+      flavors:
+        - name: cpu-flavor
+          resources:
+            - name: cpu
+              nominalQuota: 416 # 208 per node
+            - name: memory
+              nominalQuota: 5600Gi # 2854.5Gi per node
+    - coveredResources: ["nvidia.com/gpu"]
+      flavors:
+        - name: gpu-flavor
+          resources:
+            - name: nvidia.com/gpu
+              nominalQuota: 16

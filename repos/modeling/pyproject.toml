@@ -8,7 +8,7 @@ requires-python = ">=3.12"
 dependencies = [
   "datasets>=3.6.0",
   "numpy>=2.2.6",
-  "ray>=2.45.0",
+  "ray[client]>=2.47.1",
   "torch==2.7.1",
   "torchvision>=0.22.1",
   "torchaudio>=2.7.1",
@@ -18,18 +18,26 @@ dependencies = [
   "wandb>=0.19.11",
   "accelerate>=1.7.0",
   "pillow>=11.2.1",
-  "lightning>=2.5.1.post0",
   "pydantic>=2.11.5",
+  "tomli",
   "tomli-w>=1.2.0",
   "typer>=0.16.0",
   "einops>=0.8.1",
   "synapse",
+  "nvidia-cutlass-dsl>=4.1.0",
+  "qwen-vl-utils>=0.0.11",
+  "fsspec[gcs]>=2025.3.0",
+  "google-cloud-storage>=3.2.0",
+  "liger-kernel>=0.6.1",
 ]
 [project.scripts]
 mdl = "modeling.main:app"
+eve = "modeling.eve.cli:app"
 
 
 [dependency-groups]
+# Pin k8s to v32 to match `Kubernetes 1.32` - use `kubectl version` to get server version
+k8s = ["kubernetes>=32.0.0,<33.0.0"]
 dev = [
   "huggingface-hub[cli]>=0.32.4",
   "ipython>=9.3.0",
@@ -41,20 +49,35 @@ dev = [
   "ipynb>=0.5.1",
   "jupyter>=1.1.1",
   "pyzmq>=27.0.0",
+  "tensorboard>=2.19.0",
+  "tensorboard-plugin-profile>=2.20.1",
+  "torch-tb-profiler>=0.4.3",
+  "expecttest>=0.3.0",
+]
+ssh-required = [
+  # Split deps that require ssh github auth because they require always rebuilding in docker
 ]
 # TODO: Validate that this is always correct version of torch + other deps
 flash-attn = [
-  "flash-attn @ https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.3.9/flash_attn-2.6.3+cu128torch2.7-cp312-cp312-linux_x86_64.whl ; sys_platform == 'linux' and platform_machine == 'x86_64'",
+  # "flash-attn @ https://github.com/Dao-AILab/flash-attention/releases/download/v2.8.2/flash_attn-2.8.2+cu12torch2.7cxx11abiTRUE-cp312-cp312-linux_x86_64.whl ; sys_platform == 'linux' and platform_machine == 'x86_64'",
+  "flash-attn-local ; sys_platform == 'linux' and platform_machine == 'x86_64'",
 ]
-qwen-omni-utils = [
-  "requests>=2.32.3",
-  "av>=14.4.0",
-  "librosa>=0.11.0",
-  "decord>=0.6.0",
+evals = [
+  "qwen-vl-utils>=0.0.11",
+  "fastapi[standard]>=0.116.1",
+  "vllm>=0.10.0",
+  "google-cloud-compute>=1.33.0",
+  "clicks",
 ]
-
+head = ["ray[default,client]"]
 [tool.uv]
-default-groups = ["dev", "qwen-omni-utils"]
+default-groups = ["dev", "head", "k8s", "ssh-required"]
+
+# Needs to be in workspace root
+# https://github.com/pytorch/pytorch/issues/153401#issuecomment-2881445494
+# override-dependencies = ["nvidia-nccl-cu12==2.26.5"]
+
+
 # TODO: figure out how to only support linux aarch64/x86, and ban windows + darwin
 
 [tool.uv.sources]
@@ -64,6 +87,13 @@ triton = [{ index = "torch_general" }]
 torchvision = [{ index = "torch_12.8", marker = "sys_platform == 'linux'" }]
 torchaudio = [{ index = "torch_12.8", marker = "sys_platform == 'linux'" }]
 synapse = { workspace = true }
+tomli-w = { git = "https://github.com/induction-labs/tomli-w-none.git" }
+tomli = { git = "https://github.com/induction-labs/tomli-none.git" }
+transformers = { git = "https://github.com/induction-labs/transformers.git", branch = "qwen25_compile_break" }
+clicks = { workspace = true }
+# This is so troll - we need to use local path package instead of workspace because we need to rewuv syrite 
+# `flash_attn` -> `flash_attn_local` https://github.com/pfmoore/editables/issues/20
+flash-attn-local = { path = "../flash-attention-local", editable = false }
 
 [[tool.uv.index]]
 name = "torch_general"
@@ -75,8 +105,32 @@ url = "https://download.pytorch.org/whl/cu128"
 explicit = true
 
 [tool.ruff]
-extend-exclude = ["tests/flash_attention.py"]
+extend-exclude = ["tests/*", "*.ipynb"]
+fix = true
 
+[tool.ruff.lint]
+select = [
+  "E",   # pycodestyle (error)
+  "F",   # pyflakesi
+  "B",   # bugbear
+  "B9",
+  "C4",  # flake8-comprehensions
+  "SIM", # flake8-simplify
+  "I",   # isort
+  "UP",  # pyupgrade
+  "PIE", # flake8-pie
+  "PGH", # pygrep-hooks
+  "PYI", # flake8-pyi
+  "RUF",
+]
+ignore = [
+  # only relevant if you run a script with `python -0`,
+  # which seems unlikely for any of the scripts in this repo
+  "B011",
+  # Leave it to the formatter to split long lines and
+  # the judgement of all of us.
+  "E501",
+]
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

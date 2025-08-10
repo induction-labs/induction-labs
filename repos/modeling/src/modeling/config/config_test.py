@@ -3,10 +3,10 @@ from __future__ import annotations
 import tempfile
 import textwrap
 from pathlib import Path
-from tomllib import TOMLDecodeError
 from unittest.mock import patch
 
 import pytest
+import tomli
 from pydantic import BaseModel, ValidationError
 
 from modeling.config import (
@@ -20,7 +20,6 @@ from modeling.experiments.text_pretrain.default import TextPretrainExperimentCon
 from modeling.modules.text_pretrain.default import TextPretrainLIT
 
 
-# from modeling.utils.
 @pytest.fixture
 def temp_toml_file():
     """Create a temporary TOML file for testing."""
@@ -50,13 +49,13 @@ def invalid_toml_file(temp_toml_file: Path):
     """Create an invalid TOML file for testing error cases."""
     toml_content = textwrap.dedent("""
     [metadata]
-    output_dir = "/tmp/experiments/test_run"
+    output_dir="/tmp/experiments/test_run"
     # Missing wandb config - should cause validation error
     
     [distributed]
     
     [module_config]
-    config_path = "nonexistent.module.Config"
+    config_path="nonexistent.module.Config"
     """)
 
     temp_toml_file.write_text(toml_content)
@@ -121,9 +120,11 @@ class TestBuildExperimentConfig:
             config,
             basic_experiment_config,
         )
-
-        module = config.module.create_module()
-        assert isinstance(module, TextPretrainLIT)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            working_dir = Path(tmpdir)
+            # Ensure the working directory is set correctly
+            module = config.module.create_module(config.run, working_dir)
+            assert isinstance(module, TextPretrainLIT)
 
     def test_build_experiment_config_file_not_found(self):
         """Test error handling when TOML file doesn't exist."""
@@ -137,7 +138,9 @@ class TestBuildExperimentConfig:
         # Write invalid TOML syntax
         temp_toml_file.write_text("invalid toml content [[[")
 
-        with pytest.raises(TOMLDecodeError):  # Should raise tomllib parsing error
+        with pytest.raises(
+            tomli._parser.TOMLDecodeError
+        ):  # Should raise tomllib parsing error
             build_experiment_config(temp_toml_file)
 
     def test_build_experiment_config_missing_required_fields(self, invalid_toml_file):

@@ -1,0 +1,278 @@
+from __future__ import annotations
+
+import asyncio
+import random
+from fractions import Fraction
+from functools import partial
+from multiprocessing import Pool, set_start_method
+from pathlib import Path
+
+import numpy as np
+import tensorstore as ts
+import torch
+from PIL import Image
+from synapse import Cubic
+from synapse.actions.mouse_movements import (
+    cubics_to_points,
+    generate_image_from_segments,
+)
+from synapse.video_loader.typess import (
+    FramesMetadata,
+    StreamMetadata,
+    VideoMetadata,
+    VideoResolution,
+)
+from synapse.video_loader.video import smart_resize
+from synapse.video_loader.zarr_utils import (
+    ZarrArrayAttributes,
+    append_batch,
+    create_zarr_array,
+)
+from tqdm.auto import tqdm  # one bar in the main process
+
+OVERLAY = Image.open(
+    Path(__file__).parent / ".." / ".." / "assets" / "default.png"
+).convert("RGBA")
+
+
+def sample_cubics(n: int, delta: float) -> tuple[float, list[Cubic]]:
+    num_cubics = n
+    start_position = random.uniform(0, 1)
+    current_position = start_position
+    current_cubics = []
+    for _ in range(num_cubics):
+        permissible_range = [-current_position, 1 - current_position]
+
+        def generate_cubic():
+            return Cubic(
+                m=random.uniform(-delta, delta),
+                n=random.uniform(-delta, delta),
+                a=random.uniform(*permissible_range),  # noqa: B023
+            )
+
+        cubic = generate_cubic()
+        results = cubic(np.linspace(0, 1, 10))
+        min_results = np.min(results)
+        max_results = np.max(results)
+
+        while min_results + current_position < 0 or max_results + current_position > 1:
+            cubic = generate_cubic()
+            results = cubic(np.linspace(0, 1, 10))
+            min_results = np.min(results)
+            max_results = np.max(results)
+
+        current_position += cubic(1)
+        current_cubics.append(cubic)
+
+    return start_position, current_cubics
+
+
+def create_video_array(
+    x_start: float,
+    y_start: float,
+    x_cubics: list[Cubic],
+    y_cubics: list[Cubic],
+    garbage: bool = False,
+):
+    ts, all_poly_x, all_poly_y = cubics_to_points(x_start, y_start, x_cubics, y_cubics)
+    base_image = generate_image_from_segments(ts, all_poly_x, all_poly_y, SCREEN_SIZE)
+
+    ts, all_poly_x, all_poly_y = cubics_to_points(
+        x_start, y_start, x_cubics, y_cubics, fps=4, x_points=np.array([0, 0.5])
+    )
+    imgs = []
+    timestamps = []
+    for time, x, y in zip(ts, all_poly_x, all_poly_y, strict=False):
+        new_img = base_image.copy()
+        new_img.paste(
+            OVERLAY, (int(x * SCREEN_SIZE[0]), int(y * SCREEN_SIZE[1])), OVERLAY
+        )
+        imgs.append(new_img)
+        timestamps.append(time)
+
+    img_array = np.array([imgs[0], *imgs])[:, :, :, :3]
+    time_array = np.array(timestamps)
+
+    if garbage:
+        img_array = np.zeros_like(img_array)
+        # actually generate just noise
+        noise = np.random.randint(0, 256, img_array.shape, dtype=np.uint8)
+        img_array = noise
+
+    return time_array, img_array, x_cubics, y_cubics
+
+
+SCREEN_SIZE = smart_resize(854, 480, factor=28, min_pixels=0, max_pixels=854 * 480)
+
+
+def create_video(
+    n_segments: int, delta: float, garbage: bool = False
+) -> tuple[np.ndarray, np.ndarray, list[Cubic], list[Cubic]]:
+    (x_start, x_cubics), (y_start, y_cubics) = (
+        sample_cubics(n_segments, delta),
+        sample_cubics(n_segments, delta),
+    )
+
+    time, imgs, x_cubics, y_cubics = create_video_array(
+        x_start, y_start, x_cubics, y_cubics, garbage=garbage
+    )
+
+    return time, imgs, x_cubics, y_cubics
+
+
+async def upload_sample(
+    time: np.ndarray,
+    imgs: np.ndarray,
+    x_cubics: list[Cubic],
+    y_cubics: list[Cubic],
+    output_path: str,
+):
+    output_meta = FramesMetadata(
+        fps=Fraction(4),
+        total_frames=imgs.shape[0],
+        resolution=VideoResolution(
+            width=SCREEN_SIZE[0],
+            height=SCREEN_SIZE[1],
+        ),
+    )
+    input_meta = VideoMetadata(
+        start_pts=0,
+        duration=imgs.shape[0],
+        time_base=Fraction(1, 4),
+        **output_meta.model_dump(),
+    )
+    stream_metadata = StreamMetadata(
+        input_video=input_meta,
+        output_video=output_meta,
+        output_frames_per_chunk=imgs.shape[0],
+    )
+
+    shape = (
+        output_meta.total_frames,
+        3,
+        output_meta.resolution.height,
+        output_meta.resolution.width,
+    )
+    zarr_array = await create_zarr_array(
+        ZarrArrayAttributes(
+            chunk_shape=shape,
+            shape=shape,
+            dtype=ts.uint8,
+            path=output_path,
+            metadata={
+                "stream": stream_metadata.model_dump(),
+            },
+        ),
+    )
+
+    timestamps_array = await create_zarr_array(
+        ZarrArrayAttributes(
+            chunk_shape=(stream_metadata.output_video.total_frames,),
+            shape=(
+                stream_metadata.output_video.total_frames,
+            ),  # Start with 0 timestamps
+            dtype=ts.uint64,
+            path=output_path + "/timestamps",
+        ),
+    )
+
+    assert len(x_cubics) == len(y_cubics), (
+        "x_cubics and y_cubics must have the same length"
+    )
+
+    cursor_actions_array = await create_zarr_array(
+        ZarrArrayAttributes(
+            chunk_shape=(len(x_cubics), 2, 3),
+            shape=(
+                len(x_cubics),
+                2,
+                3,
+            ),
+            dtype=ts.float32,
+            path=output_path + "/cursor_action",
+            metadata={
+                "frames_per_action_step": 2,
+            },
+        ),
+    )
+
+    cursor_actions = torch.Tensor(
+        np.array(
+            [
+                [x.to_ndarray(), y.to_ndarray()]
+                for x, y in zip(x_cubics, y_cubics, strict=False)
+            ]
+        )
+    )
+
+    imgs_zarr_trans = torch.from_numpy(imgs).permute(0, 3, 1, 2)
+    await asyncio.gather(
+        *[
+            append_batch(zarr_array, imgs_zarr_trans, 0),
+            append_batch(
+                timestamps_array, torch.arange(imgs.shape[0]).to(torch.uint64), 0
+            ),
+            append_batch(cursor_actions_array, cursor_actions, 0),
+        ]
+    )
+
+
+async def create_sample(
+    sem: asyncio.Semaphore, i: int, path_template: str, garbage: bool = False
+):
+    async with sem:
+        segments = random.randrange(5, 12)
+        delta = random.uniform(0.1, 1)
+        await upload_sample(
+            *create_video(n_segments=segments, delta=delta, garbage=garbage),
+            path_template.format(i=i),
+        )
+
+
+async def _batch(start: int, tpl: str, garbage: bool = False, width: int = 4):
+    sem = asyncio.Semaphore(width)  # 4 concurrent tasks *inside* one process
+    await asyncio.gather(
+        *(
+            create_sample(sem, i, tpl, garbage=garbage)
+            for i in range(start, start + width)
+        )
+    )
+
+
+def worker(start: int, tpl: str, garbage: bool = False, width: int = 4):
+    asyncio.run(
+        _batch(start, tpl, garbage=garbage, width=width)
+    )  # each process owns its own loop
+
+
+# ── driver ───────────────────────────────────────────────────────────
+def run_all(
+    total: int, tpl: str, n_proc: int = 6, garbage: bool = False, width: int = 4
+):
+    starts = range(0, total, width)  # one “batch” every <width> indices
+    with Pool(n_proc) as pool:
+        for _ in tqdm(
+            pool.imap_unordered(
+                partial(worker, tpl=tpl, garbage=garbage, width=width), starts
+            ),
+            total=len(starts),
+        ):
+            pass
+
+
+# ── entry-point ──────────────────────────────────────────────────────
+if __name__ == "__main__":
+    import contextlib
+
+    with contextlib.suppress(
+        RuntimeError
+    ):  # makes the script work on Windows & macOS ≥3.8 too
+        set_start_method("spawn")
+
+    run_all(
+        64000,
+        "gs://induction-labs/jonathan/synth/cursor_follow_v3/sample_{i}.zarr",
+        n_proc=12,
+        garbage=False,
+        width=2,
+    )

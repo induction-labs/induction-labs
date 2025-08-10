@@ -1,55 +1,202 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from modeling.config import (
+    AttentionImplementation,
     DistributedConfig,
     ExperimentConfig,
     ExperimentMetadata,
+    GCSCheckpointConfig,
+    LinearLRSchedule,
     RunConfig,
     WandbConfig,
 )
-from modeling.types import Accelerator, DType
-from modeling.data.video_action import ActionDatapackConfig
+from modeling.config.sweep import Sweep
+from modeling.data.video_action import (
+    RangeActionDatapackConfig,
+    VideoProcessorConfig,
+    make_raw_prompt,
+)
 from modeling.modules.action_instruct.qwen_25o import Qwen25OActionLITConfig
+from modeling.modules.base_module import CompileConfig, OptimizerType
+from modeling.types import Accelerator, DType
+from modeling.utils.cloud_path import CloudPath
 
-Qwen25OActionExperimentConfig_CPU = ExperimentConfig(
+CompileConfig()
+raw_prompt = make_raw_prompt(
+    VideoProcessorConfig.Qwen25O(),
+    prefix="",
+    suffix="",
+)
+run_name = "typing_with_mouse"
+num_devices = 1
+Qwen25OActionExperimentConfig_GPU = ExperimentConfig(
     metadata=ExperimentMetadata(
-        wandb=WandbConfig(project="mouse_following", name="qwen25o_mouse_follow"),
-        output_dir="output/mouse_following",
+        wandb=WandbConfig(project="qwen25o_7B_lr_sweep", name=run_name),
+        # wandb=None,
+        output_dir=Path("./output") / run_name,
+        # checkpoint=None,
+        checkpoint=GCSCheckpointConfig(
+            checkpoint_prefix=CloudPath.from_str(
+                f"gs://induction-labs/checkpoints/{run_name}",
+            ),
+            checkpoint_frequency=1000,  # Save every 1000 steps
+            checkpoint_first_step=False,  # Save the first step
+            checkpoint_last_step=False,  # Save the last step
+        ),
     ),
-    module=Qwen25OActionLITConfig(),
-    datapack=ActionDatapackConfig(
-        processed_data_paths=[
-            f"gs://induction-labs/jonathan/synth/cursor_follow_v2/sample_{i}.zarr"
-            for i in range(0, 64)
-        ]
+    module=Qwen25OActionLITConfig(
+        # checkpoint_path=CloudPath.from_str(
+        #     "gs://induction-labs/checkpoints/keyboard_typing/2025-07-25T06-21-34.e3nDlMeg/step_50"
+        # ),
+        # model_name="Qwen/Qwen2.5-Omni-3B",
+        freeze_vision=False,
+        freeze_network=False,
+        freeze_action_embedding=False,
+        freeze_action_head=False,
+        freeze_keyboard_embedding=False,
+        freeze_keyboard_head=False,
+        use_fun_mask=False,
+        loss_type=Qwen25OActionLITConfig.CursorPredictionLoss.L2_DISTANCE,
+        optimizer=OptimizerType.ADAMW,
+        # compile=None,
+        # compile=CompileConfig(),
+    ),
+    train_datapack=RangeActionDatapackConfig(
+        # prefix="gs://induction-labs/jonathan/synth/garbage_cursor_follow_v1/sample_",
+        # prefix="gs://induction-labs/jonathan/synth/cursor_follow_v3/sample_",
+        # prefix="gs://induction-labs/jonathan/synth/typing_with_keyboard_v3/sample_",
+        prefix="gs://induction-labs/jonathan/synth/typing_with_mouse_paths_v0/sample_",
+        processor_config=VideoProcessorConfig.Qwen25O(),
+        # prefix="gs://induction-labs/jonathan/synth/noise_cursor_follow_v1/sample_",
+        raw_prompt=raw_prompt,
+        end_index=3000,  # 60k samples
+        load_keyboard_actions=False,
+        load_cursor_path=True,
+    ),
+    validation_datapack=RangeActionDatapackConfig(
+        # prefix="gs://induction-labs/jonathan/synth/garbage_cursor_follow_v1/sample_",
+        # prefix="gs://induction-labs/jonathan/synth/cursor_follow_v3/sample_",
+        # prefix="gs://induction-labs/jonathan/synth/typing_with_keyboard_v3/sample_",
+        prefix="gs://induction-labs/jonathan/synth/typing_with_mouse_paths_v0/sample_",
+        processor_config=VideoProcessorConfig.Qwen25O(),
+        # prefix="gs://induction-labs/jonathan/synth/noise_cursor_follow_v1/sample_",
+        raw_prompt=raw_prompt,
+        start_index=3000,  # 60k samples
+        end_index=3100,  # 60k samples
+        load_keyboard_actions=False,
+        load_cursor_path=True,
     ),
     run=RunConfig(
-        lr=1e-3,
-        sequence_length=1026,
-        batch_size=1,
-        steps_per_epoch=64,
-        distributed=DistributedConfig(
-            devices_per_node=1,
+        lr=LinearLRSchedule(
+            peak_lr=5e-5,
+            end_lr=1e-5,
+            warmup_steps=5,
+            end_step=2000,  # 10k steps
         ),
-        accelerator=Accelerator.CPU,
-        precision=DType.fp32,
+        batch_size=num_devices,
+        # sequence_length=calc_min_num_tokens_for_n_actions(
+        #     840 * 476, 8, raw_prompt, VideoProcessorConfig.Qwen25O()
+        # ),
+        sequence_length=8192,  # calc_min_num_tokens_for_n_actions(840 * 476, 8, raw_prompt),
+        num_steps=3000,
+        validation_every_n_steps=5,
+        distributed=DistributedConfig(
+            devices_per_node=num_devices,
+        ),
+        attn_impl=AttentionImplementation.SDPA,
+        accelerator=Accelerator.CUDA,
+        precision=DType.bf16,
+        seed=1,
     ),
 )
 
-
-Qwen25OActionExperimentConfig_GPU = Qwen25OActionExperimentConfig_CPU.model_copy(
-    update={
-        "run": Qwen25OActionExperimentConfig_CPU.run.model_copy(
-            update={
-                "accelerator": Accelerator.CUDA,
-                "precision": DType.fp32,  # Using mixed precision for GPU training
-                # TODO: Fix this - attn_impl is currently bugged for Qwen2.5O
-                # "attn_impl": AttentionImplementation.FLASH_ATTENTION_2,
-            }
-        )
-    }
+Qwen25OActionGPU_Test = Qwen25OActionExperimentConfig_GPU.testing_config(
+    num_steps=5,
+    enable_wandb=True,
+    with_val=False,
+    profile=False,
 )
+
+Qwen25OActionExperimentConfig_CPU = Qwen25OActionExperimentConfig_GPU.model_copy(
+    update={"run": Qwen25OActionExperimentConfig_GPU.run.cpu_config()}
+)
+Qwen25oActionSweep = (
+    Sweep(Qwen25OActionExperimentConfig_GPU)
+    # .sweep(
+    #     [True, False],
+    #     lambda freeze_vision, exp: (
+    #         exp.module.__setattr__("freeze_vision", freeze_vision),
+    #         exp,
+    #     )[-1],
+    # )
+    # .sweep(
+    #     [
+    #         None,
+    #         CloudPath.from_str(
+    #             "gs://induction-labs/checkpoints/qwen25o_7B_uninitialized/2025-07-17T23-05-38/step_100"
+    #         ),
+    #         CloudPath.from_str(
+    #             "gs://induction-labs/checkpoints/sweeps_optimizer/2025-07-22T17-28-51.iGEDRrvU/step_-1"
+    #         ),
+    #     ],
+    #     lambda checkpoint, exp: (
+    #         exp.module.__setattr__("checkpoint_path", checkpoint),
+    #         exp,
+    #     )[-1],
+    # )
+    .sweep(range(1, 5), Sweep.S.seed)
+    # .sweep(
+    #     [
+    #         # Qwen25OActionLITConfig.CursorPredictionLoss.L2_DISTANCE,
+    #         (Qwen25OActionLITConfig.CursorPredictionLoss.ANALYTICAL_DISTANCE, 50),
+    #         (Qwen25OActionLITConfig.CursorPredictionLoss.COEFFICIENTS_DISTANCE, 300),
+    #         (Qwen25OActionLITConfig.CursorPredictionLoss.ANALYTICAL_DISTANCE, None),
+    #         (Qwen25OActionLITConfig.CursorPredictionLoss.COEFFICIENTS_DISTANCE, None),
+    #     ],
+    #     lambda loss, exp: (
+    #         exp.module.__setattr__("loss_type", loss[0]),
+    #         exp.run.__setattr__("grad_clip", loss[1]),
+    #         exp,
+    #     )[-1],
+    # )
+    # .sweep(
+    #     [
+    #         # OptimizerType.ADAMW,
+    #         OptimizerType.ADAGRAD,
+    #         OptimizerType.SGD,
+    #     ],
+    #     lambda optimizer, exp: (
+    #         exp.module.__setattr__("optimizer", optimizer),
+    #         exp,
+    #     )[-1],
+    # )
+    .sweep(
+        [
+            LinearLRSchedule(
+                peak_lr=1e-5,
+                end_lr=1e-5,
+                warmup_steps=0,
+                end_step=3_000,
+            ),
+            *(
+                LinearLRSchedule(
+                    peak_lr=peak_lr,
+                    end_lr=1e-5,
+                    warmup_steps=warmup_steps,
+                    end_step=3_000,
+                )
+                for peak_lr, warmup_steps in Sweep.S.product([5e-5], [0])
+            ),
+        ],
+        Sweep.S.lr,
+    )
+)
+# 0.0005
 
 
 # mdl export modeling.experiments.action_instruct.qwen_25o.Qwen25OActionExperimentConfig_CPU
 # mdl export modeling.experiments.action_instruct.qwen_25o.Qwen25OActionExperimentConfig_GPU
+# mdl export modeling.experiments.action_instruct.qwen_25o.Qwen25OActionGPU_Test
+# mdl sweep modeling.experiments.action_instruct.qwen_25o.Qwen25oActionSweep

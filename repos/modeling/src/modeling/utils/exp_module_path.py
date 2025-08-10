@@ -27,7 +27,8 @@ def exp_module_path(module_path: str, file_extension=".toml"):
         f"Module path '{module_path}' should start with 'modeling.experiments'"
     )
 
-    # Build new path: everything before experiments + exp_configs + everything after experiments
+    # Build new path:
+    # everything before experiments + exp_configs + everything after experiments
     suffix_parts = parts[2:]  # everything after 'experiments'
 
     # Replace 'experiments' with 'exp_configs'

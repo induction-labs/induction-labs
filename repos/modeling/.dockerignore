@@ -1,1 +1,15 @@
 wandb/
+k8s/
+embedding_dict*.pt
+output_head*.pt
+solveable_tasks.json
+train_dumb_hf.ipynb
+**/output/
+**/osworld_uitars_testing_old/
+**/osworld_uitars_testing/
+**/step_300/
+
+**/docker/
+
+
+**/eve-outputs/

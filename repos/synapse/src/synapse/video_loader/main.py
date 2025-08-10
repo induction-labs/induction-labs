@@ -1,13 +1,10 @@
 from __future__ import annotations
 
-import asyncio
 from datetime import UTC, datetime
 from fractions import Fraction
-from functools import wraps
 from pathlib import Path
 
 import gcsfs
-import typer
 
 from synapse.elapsed_timer import elapsed_timer
 from synapse.redis.main import (
@@ -16,20 +13,7 @@ from synapse.redis.main import (
     get_video_next_unprocessed,
     put_video_in_queue,
 )
-
-
-class AsyncTyper(typer.Typer):
-    def async_command(self, *args, **kwargs):
-        def decorator(async_func):
-            @wraps(async_func)
-            def sync_func(*_args, **_kwargs):
-                return asyncio.run(async_func(*_args, **_kwargs))
-
-            self.command(*args, **kwargs)(sync_func)
-            return async_func
-
-        return decorator
-
+from synapse.utils.async_typer import AsyncTyper
 
 app = AsyncTyper()
 

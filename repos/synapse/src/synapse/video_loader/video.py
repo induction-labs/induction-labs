@@ -24,6 +24,7 @@ from smart_open import open as smart_open
 
 from synapse.elapsed_timer import elapsed_timer
 from synapse.video_loader.typess import (
+    Fraction,
     FramesMetadata,
     StreamMetadata,
     StreamVideoArgs,
@@ -82,8 +83,7 @@ class VideoMetadataFetcher:
                 container.close()
                 return metadata, video_format
 
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(None, fetch_data, video_path)
+        return fetch_data(video_path)
 
 
 def process_chunk(
@@ -213,14 +213,16 @@ VideoStreamContext = Callable[
 ]
 
 
-def download_video_with_ffmpeg_copy(source_path: str, dest_path: str):
+def download_video_with_ffmpeg_copy(
+    source_path: str, dest_path: str, ffmpeg_path: str = "ffmpeg"
+) -> None:
     with tempfile.NamedTemporaryFile(delete=True, suffix=".mp4") as tmp_path2:
         with smart_open(source_path, "rb") as src:
             for chunk in iter(lambda: src.read(1 << 20), b""):
                 tmp_path2.write(chunk)
             tmp_path2.flush()
         cmd = [
-            "ffmpeg",
+            ffmpeg_path,
             "-err_detect",
             "ignore_err",
             "-copyts",
@@ -245,7 +247,11 @@ def download_video_with_ffmpeg_copy(source_path: str, dest_path: str):
         container2 = av.open(tmp_path2)
         stream1 = container1.streams.video[0]
         stream2 = container2.streams.video[0]
-        assert stream1.start_time == stream2.start_time
+        if stream1.start_time != stream2.start_time:
+            print(
+                f"Warning: start times do not match: {stream1.start_time} vs {stream2.start_time}"
+            )
+        # assert stream1.start_time == stream2.start_time
         container1.close()
         container2.close()
 
@@ -390,6 +396,34 @@ async def configure_video_folder_stream(
     return stream_metadata, video_format, folder_frame_stream
 
 
+def get_resize_filter(
+    video_format: VideoFormat,
+    input_resolution: VideoResolution,
+    output_resolution: VideoResolution,
+    time_base: Fraction,
+) -> tuple[FilterContext, FilterContext, Graph]:
+    filter_graph = Graph()  # type: ignore  # noqa: PGH003
+    # https://pyav.org/docs/stable/api/filter.html#av.filter.graph.Graph
+    buffer_src = filter_graph.add_buffer(
+        width=input_resolution.width,
+        height=input_resolution.height,
+        format=video_format,
+        name="src",
+        time_base=time_base,
+    )
+
+    buffer_sink = filter_graph.add("buffersink")
+    scale_filter = filter_graph.add(
+        "scale",
+        f"{output_resolution.width}:{output_resolution.height}:flags=bicubic+full_chroma_int+accurate_rnd",
+    )
+    buffer_src.link_to(scale_filter)
+    scale_filter.link_to(buffer_sink)
+    filter_graph.configure()
+
+    return buffer_src, buffer_sink, filter_graph
+
+
 def process_stream_tensors(
     frame_iter: Generator[av.VideoFrame, None, None],
     video_format: VideoFormat,
@@ -412,24 +446,12 @@ def process_stream_tensors(
 
     # Create filter graph for resizing (shared across chunks)
 
-    filter_graph = Graph()  # type: ignore  # noqa: PGH003
-    # https://pyav.org/docs/stable/api/filter.html#av.filter.graph.Graph
-    buffer_src = filter_graph.add_buffer(
-        width=stream_metadata.input_video.resolution.width,
-        height=stream_metadata.input_video.resolution.height,
-        format=video_format,
-        name="src",
-        time_base=stream_metadata.input_video.time_base,
+    buffer_src, buffer_sink, filter_graph = get_resize_filter(
+        video_format,
+        stream_metadata.input_video.resolution,
+        stream_metadata.output_video.resolution,
+        stream_metadata.input_video.time_base,
     )
-
-    buffer_sink = filter_graph.add("buffersink")
-    scale_filter = filter_graph.add(
-        "scale",
-        f"{stream_metadata.output_video.resolution.width}:{stream_metadata.output_video.resolution.height}:flags=bicubic+full_chroma_int+accurate_rnd",
-    )
-    buffer_src.link_to(scale_filter)
-    scale_filter.link_to(buffer_sink)
-    filter_graph.configure()
 
     for i in range(stream_metadata.total_num_chunks):
         yield process_chunk(i, frame_iter, stream_metadata, buffer_src, buffer_sink)

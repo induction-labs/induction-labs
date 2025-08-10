@@ -1,40 +1,77 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Self
-
-import lightning as L
-from modeling.config import DatapackConfig, ExperimentConfig, ModuleConfig
-from modeling.modules.action_module import ActionLITConfig
-from pydantic import BaseModel, ConfigDict, model_validator
-from synapse.video_loader.read_frames import fetch_metadata_from_zarr
-from synapse.video_loader.typess import StreamMetadata
-from torch.utils.data import DataLoader, Dataset
-from synapse.combined.combined_loader import combined_loader, CombinedLoaderArgs
-import numpy as np
-from typing import Literal
-
-from transformers.models.qwen2_5_omni import (
-    Qwen2_5OmniProcessor,
-)
-
 import functools
+import logging
+from abc import abstractmethod
+from collections.abc import Callable
+from math import ceil
+from typing import Any, Generic, Literal, Self, TypeVar, cast
+
+import numpy as np
 import torch
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
+from synapse.combined.combined_loader import CombinedLoaderArgs, combined_loader
+from synapse.utils.logging import configure_logging
+from synapse.video_loader.read_frames import (
+    fetch_metadata_from_zarr,
+    get_frame_keyboard_mask,
+)
+from synapse.video_loader.typess import StreamMetadata
+from transformers import AutoProcessor
+from transformers.processing_utils import ProcessorMixin
+
+from modeling.config import DatapackConfig, ExperimentConfig, ModuleConfig
+from modeling.config.data import BaseDataSample, BaseDataset
+
+logger = configure_logging(__name__, level=logging.INFO)
 
 
-VIDEO_TOKEN_ID = 151656
-PATCH_SIZE = 14
-MERGE_SIZE = 2
-ACTION_TOKEN_ID = 151643
+R = TypeVar("R")
 
 
-@functools.lru_cache(maxsize=1)
-def qwen_processor() -> Qwen2_5OmniProcessor:
+class RemoveKwargProxy(Generic[R]):
+    """
+    Proxy that wraps any callable (or callable-like object) and strips
+    a specified keyword from **kwargs before delegating.
+    """
+
+    _target: Callable[..., R]
+    _kw_to_strip: str
+
+    def __init__(self, target: Callable[..., R], kw_to_strip: str) -> None:
+        self._target = target
+        self._kw_to_strip = kw_to_strip
+
+    def __call__(self, *args: Any, **kwargs: Any) -> R:
+        # Drop the unwanted kwarg if present
+        kwargs.pop(self._kw_to_strip, None)
+        return self._target(*args, **kwargs)
+
+    def __getattr__(self, name: str) -> Any:
+        # Forward attribute access to the wrapped object
+        # (e.g. methods, properties, etc.)
+        return getattr(self._target, name)
+
+
+# Example usage:
+
+
+# TODO: Make this depend on the model loll
+@functools.lru_cache
+def qwen_processor(processor_name: str) -> ProcessorMixin:
     """
     Returns a cached instance of the Qwen2_5OmniProcessor.
     This is used to avoid reloading the processor multiple times.
     """
-    return Qwen2_5OmniProcessor.from_pretrained("Qwen/Qwen2.5-Omni-3B")
+    processor = AutoProcessor.from_pretrained(processor_name, use_fast=True)
+    if hasattr(processor, "video_processor"):
+        processor.video_processor = RemoveKwargProxy(
+            processor.video_processor, "images"
+        )  # type: ignore[assignment]
+    # Otherwise everytime we call it it prints "Unused or unrecognized kwargs: images." kms
+
+    return processor
 
 
 type CursorPathArray = np.ndarray[
@@ -48,16 +85,38 @@ type FramesArray = np.ndarray[
 type PaddingArray = np.ndarray[tuple[int], np.dtype[np.bool]]
 
 
-class ActionDataSample(BaseModel):
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-
-    class QwenInputs(BaseModel):
+class ActionDataSample(BaseDataSample):
+    class QwenInputs(BaseDataSample):
         model_config = ConfigDict(arbitrary_types_allowed=True)
         input_ids: torch.Tensor  # [batch, seq_length, ]
         attention_mask: torch.Tensor  # [batch, seq_length, ]
         pixel_values_videos: torch.Tensor  # [num_video_patches, 1176]
         video_grid_thw: torch.Tensor  # [num_videos, 3]
-        video_second_per_grid: torch.Tensor  # [nun_videos,]
+        video_second_per_grid: torch.Tensor = Field(
+            validation_alias=AliasChoices("video_second_per_grid", "second_per_grid_ts")
+        )
+
+        def to_device(
+            self, device: torch.device | str, non_blocking: bool = False
+        ) -> Self:
+            """
+            Move the QwenInputs to the specified device.
+            This method is used to ensure that the inputs are on the correct device for training.
+            """
+            self.input_ids = self.input_ids.to(device, non_blocking=non_blocking)
+            self.attention_mask = self.attention_mask.to(
+                device, non_blocking=non_blocking
+            )
+            self.pixel_values_videos = self.pixel_values_videos.to(
+                device, non_blocking=non_blocking
+            )
+            self.video_grid_thw = self.video_grid_thw.to(
+                device, non_blocking=non_blocking
+            )
+            self.video_second_per_grid = self.video_second_per_grid.to(
+                device, non_blocking=non_blocking
+            )
+            return self
 
         @model_validator(mode="after")
         def check_dimensions(self) -> Self:
@@ -68,12 +127,58 @@ class ActionDataSample(BaseModel):
             assert self.input_ids.shape[0] == self.attention_mask.shape[0]
             return self
 
+        @classmethod
+        def combine_batch(cls: type[Self], batch: list[Self]) -> Self:  # type: ignore[override]
+            """
+            Combine a batch of QwenInputs into a single QwenInputs.
+            This is used to prepare the inputs for training or evaluation.
+            """
+            input_ids = torch.stack([sample.input_ids for sample in batch])
+            attention_mask = torch.stack([sample.attention_mask for sample in batch])
+            pixel_values_videos = torch.concat(
+                [sample.pixel_values_videos for sample in batch], dim=0
+            )
+            video_grid_thw = torch.concat(
+                [sample.video_grid_thw for sample in batch], dim=0
+            )
+            video_second_per_grid = torch.concat(
+                [sample.video_second_per_grid for sample in batch], dim=0
+            )
+
+            return cls(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                pixel_values_videos=pixel_values_videos,
+                video_grid_thw=video_grid_thw,
+                video_second_per_grid=video_second_per_grid,
+            )
+
     qwen_inputs: QwenInputs
-    cursor_path: torch.Tensor  # [seq_length, (x,y), (m,n,a)]
-    action_tokens: torch.Tensor  # [seq_length], dtype=bool
+    keyboard_tokens_mask: None | torch.Tensor  # [seq_length], dtype=bool
+    cursor_path: None | torch.Tensor  # [seq_length, (x,y), (m,n,a)]
+    action_tokens: None | torch.Tensor  # [seq_length], dtype=bool
+
+    def to_device(self, device: torch.device | str, non_blocking: bool = False) -> Self:
+        """
+        Move the ActionDataSample to the specified device.
+        This method is used to ensure that the sample is on the correct device for training.
+        """
+        self.qwen_inputs = self.qwen_inputs.to_device(device, non_blocking)
+        if self.cursor_path is not None:
+            self.cursor_path = self.cursor_path.to(device, non_blocking=non_blocking)
+        if self.action_tokens is not None:
+            self.action_tokens = self.action_tokens.to(
+                device, non_blocking=non_blocking
+            )
+
+        if self.keyboard_tokens_mask is not None:
+            self.keyboard_tokens_mask = self.keyboard_tokens_mask.to(
+                device, non_blocking=non_blocking
+            )
+        return self
 
     @classmethod
-    def combine_batch(cls, batch: list[ActionDataSample]) -> ActionDataSample:
+    def combine_batch(cls, batch: list[Self]) -> Self:  # type: ignore[override]
         """
         Combine a batch of ActionDataSamples into a single ActionDataSample.
         This is used to prepare the data for training or evaluation.
@@ -87,105 +192,205 @@ class ActionDataSample(BaseModel):
             f"All samples in the batch must have the same sequence length, "
             f"but got {[sample.qwen_inputs.input_ids.shape[0] for sample in batch]}."
         )
+        load_keyboard_actions = batch[0].keyboard_tokens_mask is not None
+        load_cursor_actions = batch[0].cursor_path is not None
 
-        qwen_inputs = ActionDataSample.QwenInputs(
-            input_ids=torch.stack([sample.qwen_inputs.input_ids for sample in batch]),
-            attention_mask=torch.stack(
-                [sample.qwen_inputs.attention_mask for sample in batch]
-            ),
-            pixel_values_videos=torch.concat(
-                [sample.qwen_inputs.pixel_values_videos for sample in batch],
-                dim=0,
-            ),
-            video_grid_thw=torch.concat(
-                [sample.qwen_inputs.video_grid_thw for sample in batch],
-                dim=0,
-            ),
-            video_second_per_grid=torch.concat(
-                [sample.qwen_inputs.video_second_per_grid for sample in batch],
-                dim=0,
-            ),
+        qwen_inputs = ActionDataSample.QwenInputs.combine_batch(
+            [sample.qwen_inputs for sample in batch]
         )
-        cursor_path = torch.stack([sample.cursor_path for sample in batch])
-        action_tokens = torch.stack([sample.action_tokens for sample in batch])
+        keyboard_tokens_mask = (
+            torch.stack([sample.keyboard_tokens_mask for sample in batch])
+            if load_keyboard_actions
+            else None
+        )
+        cursor_path = (
+            torch.stack([sample.cursor_path for sample in batch])
+            if load_cursor_actions
+            else None
+        )
+        action_tokens = (
+            torch.stack([sample.action_tokens for sample in batch]).bool()
+            if load_cursor_actions
+            else None
+        )
 
         return cls(
             qwen_inputs=qwen_inputs,
+            keyboard_tokens_mask=keyboard_tokens_mask,
             cursor_path=cursor_path,
             action_tokens=action_tokens,
         )
 
 
+class VideoProcessorConfig(BaseModel):
+    model_config = {"frozen": True}
+    processor_name: str = "Qwen/Qwen2.5-Omni-7B"
+    video_pad_token: str = "<|VIDEO|>"
+    video_token_id: int = 151656
+    action_token: str = "<|endoftext|>"
+    vision_pad_token: str = "<|vision_pad|>"
+    vision_pad_id: int = 151654
+    action_token_id: int = 151643
+    patch_size: int = 14
+    merge_size: int = 2
+    frames_per_action: int = 2
+
+    @staticmethod
+    def Qwen25O():
+        return VideoProcessorConfig()
+
+    @staticmethod
+    def Qwen25VL(name: str = "Qwen/Qwen2.5-VL-7B") -> VideoProcessorConfig:
+        return VideoProcessorConfig(
+            processor_name=name,
+            video_pad_token="<|video_pad|>",
+            video_token_id=151656,
+        )
+
+
 # <|im_start|>system\nYou are a helpful voice chat bot, and please respond to me in a casual conversation manner using random voice.<|im_end|>\n<|im_start|>user\n<|vision_bos|><|IMAGE|><|vision_eos|><|vision_bos|><|VIDEO|><|vision_eos|><|vision_bos|><|VIDEO|><|vision_eos|><|im_end|>\n<|im_start|>assistant\n
-def calc_tokens_per_frame(image_pixels: int) -> int:
+def calc_tokens_per_action(image_pixels: int, config: VideoProcessorConfig) -> int:
     """
     Compute the number of tokens per frame based on the image pixels and patch size.
     This is a placeholder function and should be replaced with actual logic.
+
+    THIS IS ACTUALLY THE NUMBER OF VIDEO TOKENS PER ACTION
     """
     # For now, we assume each frame corresponds to a fixed number of tokens.
     # This can be adjusted based on the actual dataset and requirements.
-    tokens_per_frame = image_pixels / ((PATCH_SIZE * MERGE_SIZE) ** 2)
+    tokens_per_frame = image_pixels / ((config.patch_size * config.merge_size) ** 2)
     assert tokens_per_frame.is_integer(), (
-        f"Expected tokens_per_frame to be an integer, got {tokens_per_frame}. {image_pixels=}, {PATCH_SIZE=}"
+        f"Expected tokens_per_frame to be an integer, got {tokens_per_frame}. {image_pixels=}, {config.patch_size=}"
     )
     return int(tokens_per_frame)
 
 
-def calc_frames_per_sequence(image_pixels: int, max_seq: int) -> int:
-    """
-    Compute the number of frames per sequence based on the frames_per_action.
-    This is a placeholder function and should be replaced with actual logic.
-    """
-    max_video_tokens = max_seq - default_preamble_token_len()
-    return max_video_tokens // (calc_tokens_per_frame(image_pixels) + 1)
-
-
 def calc_num_actions_per_sequence(
-    stream_metadata: StreamMetadata, max_seq: int, frames_per_action: int
+    stream_metadata: StreamMetadata,
+    max_seq: int,
+    raw_prompt: str,
+    config: VideoProcessorConfig,
+    keyboard_token_lengths: list[int] | None,
+    model_cursor_path: bool = False,
 ) -> int:
     """
     Calculate the number of actions per sequence based on the image pixels, max sequence length, and frames per action.
     This is a placeholder function and should be replaced with actual logic.
     """
-    max_fittable_frames = calc_frames_per_sequence(
+
+    def max_actions_per_sequence(image_pixels: int, max_seq: int) -> int:
+        """
+        Compute the number of frames per sequence based on the frames_per_action.
+        This is a placeholder function and should be replaced with actual logic.
+        """
+        max_video_tokens = max_seq - prompt_token_len(raw_prompt, config)
+        modifier = 1 if model_cursor_path else 0
+        if keyboard_token_lengths is None:
+            return max_video_tokens // (
+                calc_tokens_per_action(image_pixels, config) + modifier
+            )
+
+        video_tokens_per_action = calc_tokens_per_action(image_pixels, config)
+        number_actions = 0
+        current_tokens = 0
+        while current_tokens < max_video_tokens and number_actions < len(
+            keyboard_token_lengths
+        ):
+            current_tokens += (
+                keyboard_token_lengths[number_actions]
+                + video_tokens_per_action
+                + modifier
+            )
+            number_actions += 1
+
+        return number_actions - 1
+
+    max_fittable_frames = max_actions_per_sequence(
         stream_metadata.output_video.resolution.pixels, max_seq
     )
-    num_frames = min(max_fittable_frames, stream_metadata.output_video.total_frames)
 
-    return num_frames // frames_per_action
+    total_actions_in_stream = (
+        stream_metadata.output_video.total_frames // config.frames_per_action
+    )
+    num_actions = min(max_fittable_frames, total_actions_in_stream)
+
+    return num_actions
 
 
-DEFAULT_PREAMBLE = "You are Qwen, a helpful video processing assistant."
-# RAW_DEFAULT_PREAMBLE = f"<|im_start|>system\n{DEFAULT_PREAMBLE}<|im_end|>\n<|im_start|>user\n<|vision_bos|><|VIDEO|>"
-RAW_DEFAULT_PREAMBLE = "<|im_start|>user\n<|vision_bos|><|VIDEO|>"
+def calc_min_num_tokens_for_n_actions(
+    resolution_pixels: int,
+    num_actions: int,
+    raw_prompt: str,
+    config: VideoProcessorConfig,
+) -> int:
+    """
+    Calculate the minimum number of tokens required for a given number of actions.
+    This is a placeholder function and should be replaced with actual logic.
+    """
+    tokens_per_action = (
+        calc_tokens_per_action(resolution_pixels, config) + 1
+    )  # # +1 for the action token
+    return prompt_token_len(raw_prompt, config) + num_actions * (tokens_per_action)
 
 
-@functools.lru_cache(maxsize=1)
-def default_preamble_token_len() -> int:
+DEFAULT_PREAMBLE = "You are a GUI agent. Find the cursor at the end of video."
+RAW_DEFAULT_PREAMBLE = f"<|im_start|>system\n{DEFAULT_PREAMBLE}<|im_end|>\n"
+RAW_PREAMBLE_SUFFIX = "<|vision_eos|><|im_end|>\n<|im_start|>assistant\n"
+# RAW_DEFAULT_PREAMBLE = ""<|vision_start|><|video_pad|><|vision_end|>
+
+
+def make_raw_prompt(
+    config: VideoProcessorConfig,
+    prefix=RAW_DEFAULT_PREAMBLE,
+    suffix=RAW_PREAMBLE_SUFFIX,
+) -> str:
+    """
+    Create a raw prompt for the Qwen model.
+    This is used to ensure that the preamble is correctly formatted and included in the input sequence.
+    """
+    # XXX: qwen 2.5 omni is <|vision_bos|>
+    # ui tars (qwen 2.5 vl) is <|vision_start|>
+    return f"{prefix}<|im_start|>user\n<|vision_start|>{config.video_pad_token}{suffix}"
+
+
+@functools.lru_cache
+def prompt_token_len(raw_prompt: str, config: VideoProcessorConfig) -> int:
     """
     Returns the length of the default preamble in tokens.
     This is used to ensure that the preamble is correctly tokenized and included in the input sequence.
     """
-    processor = qwen_processor()
-    preamble_without_video = RAW_DEFAULT_PREAMBLE.replace("<|VIDEO|>", "")
+    processor = qwen_processor(config.processor_name)
+    assert config.video_pad_token in raw_prompt, (
+        f"Expected raw_prompt to contain video_pad_token {config.video_pad_token}, "
+        f"but got {raw_prompt}."
+    )
+    # NOTE: Qwen you can't get rid of VIDEO_PAD entirely because otherwise `\n<|vision_bos|>` will be tokenized differently
+    # But we can't use VIDEO_PAD directly otherwise qwen processor tries to calculate how many video tokens it needs
+    # but we don't want to pass in video_thw
+    # So instead we use vision_bos as a placeholder.
+    preamble_without_video = raw_prompt.replace(
+        config.video_pad_token, config.vision_pad_token
+    )
     inputs = processor(
         text=[preamble_without_video],
         return_tensors="pt",
         padding=False,
     )
     # Assert no video tokens are present in the input_ids
-    assert inputs.input_ids.ne(VIDEO_TOKEN_ID).all(), (
+    assert inputs.input_ids[0].eq(config.vision_pad_id).sum() == 1, (
+        f"Expected input_ids to contain exactly one video_token_id {config.video_token_id}, "
+        f"but got {inputs.input_ids[0]}."
+    )
+    assert inputs.input_ids.ne(config.video_token_id).all(), (
         f"Expected input_ids to not contain VIDEO_TOKEN_ID, but got {inputs.input_ids}."
     )
-    # assert inputs.input_ids.shape[1] == 34
-
-    return inputs.input_ids.shape[1]
+    return inputs.input_ids.shape[1] - 1
 
 
 def insert_every_n(t: torch.Tensor, n: int, fill_value=0) -> torch.Tensor:
     assert t.ndim == 1
     L = t.numel()
-    # how many zeros we’ll end up inserting
+    # how many zeros we'll end up inserting
     num_insert = L // n
 
     # new length = original + inserted zeros
@@ -208,25 +413,110 @@ def insert_every_n(t: torch.Tensor, n: int, fill_value=0) -> torch.Tensor:
     return out
 
 
+def interleave_every_k_vec(
+    base: torch.Tensor,  # (M,)
+    rows: torch.Tensor,  # (N, T)
+    row_mask: torch.Tensor,  # (N, T) bool / 0-1
+    k: int,
+):
+    """
+    After every `k` tokens of `base`, splice-in the masked tokens from the next
+    row of `rows`.  Returns (out, out_mask) where `out_mask` marks the injected
+    elements (True = came from `rows`).
+    """
+    device = base.device
+    M = base.size(0)
+    N, T = rows.shape
+
+    # ── only need as many rows as there are k-sized blocks ───────────────────────
+    n_blocks = ceil(M / k)
+    N_eff = min(N, n_blocks)
+    rows = rows[:N_eff]
+    row_mask = row_mask[:N_eff]
+
+    # ── how many tokens we will really insert from each row (after masking) ─────
+    per_row_cnt = row_mask.sum(1)  # (N_eff,)
+    cumsum_before = torch.cat(
+        [
+            torch.zeros(1, device=device, dtype=per_row_cnt.dtype),
+            per_row_cnt.cumsum(0)[:-1],
+        ]
+    )  # shift right
+
+    # ── absolute index where each row's first injected token should land ────────
+    start = k * (torch.arange(N_eff, device=device) + 1) + cumsum_before  # (N_eff,)
+
+    # ── build a matrix of candidate positions for all T columns ─────────────────
+    pos_matrix = start.unsqueeze(1) + torch.arange(T, device=device)  # (N_eff, T)
+    insert_pos = pos_matrix[row_mask]  # (total_insert,)
+    insert_vals = rows[row_mask]  # (total_insert,)
+
+    # ── allocate output and its origin-mask ─────────────────────────────────────
+    total_len = M + insert_pos.numel()
+    out = torch.empty(total_len, dtype=base.dtype, device=device)
+    out_mask = torch.zeros(total_len, dtype=torch.bool, device=device)
+
+    # place the injected tokens
+    out[insert_pos] = insert_vals
+    out_mask[insert_pos] = True
+
+    # the remaining slots belong to `base`
+    base_pos = (~out_mask).nonzero(as_tuple=True)[0]
+    out[base_pos] = base
+
+    return out, out_mask
+
+
 async def fetch_data(
     path: str,
-    num_actions: int,
     seq_length: int,
-    frames_per_action: int = 2,
-) -> ActionDataSample:
+    raw_prompt: str,
+    config: VideoProcessorConfig,
+    start: int = 0,
+    load_keyboard_actions: bool = False,
+    load_cursor_path: bool = False,
+) -> tuple[ActionDataSample, FramesArray]:
     """
     Asynchronously fetch data from the given path and metadata.
     This is a placeholder implementation and should be replaced with actual data loading logic.
     """
+    stream_metadata = await fetch_metadata_from_zarr(path)
+
+    keyboard_mask = None
+    if load_keyboard_actions:
+        keyboard_mask = await get_frame_keyboard_mask(path)
+
+    num_actions = calc_num_actions_per_sequence(
+        stream_metadata,
+        seq_length,
+        config=config,
+        raw_prompt=raw_prompt,
+        keyboard_token_lengths=keyboard_mask.sum(axis=1).tolist()
+        if keyboard_mask is not None
+        else None,
+        model_cursor_path=load_cursor_path,
+    )
+
     combined_loader_args = CombinedLoaderArgs(
         frames_zarr_path=path,
-        actions_range=(0, num_actions),
-        frames_per_action=frames_per_action,
+        actions_range=(start, start + num_actions),
+        load_cursor_path=load_cursor_path,
+        load_keyboard_actions=load_keyboard_actions,
+        frames_per_action=config.frames_per_action,
     )
-    (frames, cursor_path), stream_metadata = await combined_loader(combined_loader_args)
-    assert len(frames) == len(cursor_path) == num_actions, (
-        f"Frames and mouse movements length mismatch: {len(frames)} != {len(cursor_path)}"
-    )
+
+    (
+        (frames, cursor_path, keyboard_tokens, keyboard_mask),
+        stream_metadata,
+    ) = await combined_loader(combined_loader_args)
+    if load_keyboard_actions and keyboard_tokens is not None:
+        assert len(frames) == len(keyboard_tokens) == num_actions, (
+            f"Frames and keyboard tokens length mismatch: {len(frames)} != {len(keyboard_tokens)}"
+        )
+    if load_cursor_path and cursor_path is not None:
+        assert len(frames) == len(cursor_path) == num_actions, (
+            f"Frames and cursor path length mismatch: {len(frames)} != {len(cursor_path)}"
+        )
 
     assert frames.ndim == 5
     frames = frames.reshape(
@@ -235,79 +525,131 @@ async def fetch_data(
         frames.shape[3],
         frames.shape[4],
     )
+    # frames[:, :, 0::96] = 0  # Set every 48th pixel to 0
 
-    # template to chat
-
-    processor = qwen_processor()
+    processor = qwen_processor(config.processor_name)
     # processor takes videos as inpuit as a list of videos as [frames, channels, height, width]
     # where frames = actions_per_sequence * frames_per_action
     inputs = processor(
-        text=[RAW_DEFAULT_PREAMBLE],
+        text=[raw_prompt],
         videos=[frames],
         return_tensors="pt",
         padding=False,
     )
     qwen_inputs = ActionDataSample.QwenInputs(**inputs)
+    # qwen_inputs.attention_mask = qwen_inputs.attention_mask[0]
+    # qwen_inputs.input_ids = qwen_inputs.input_ids[0]
+    # return ActionDataSample(
+    #     qwen_inputs=qwen_inputs,
+    #     cursor_path=torch.tensor(
+    #         cursor_path, dtype=torch.float32
+    #     ),  # [seq_length, (x,y), (m,n,a)]
+    #     action_tokens=torch.zeros((seq_length, 1), dtype=torch.float32),
+    # ), frames
 
     # Insert 0 on every action prediction event in input_ids and attention_mask
-    tokens_per_frame = calc_tokens_per_frame(
-        stream_metadata.output_video.resolution.pixels
+    tokens_per_action = calc_tokens_per_action(
+        stream_metadata.output_video.resolution.pixels, config
     )
-    num_video_tokens = tokens_per_frame * num_actions
+    num_video_tokens = tokens_per_action * num_actions
     assert (
         qwen_inputs.pixel_values_videos.shape[0]
-        == num_video_tokens * MERGE_SIZE * MERGE_SIZE
+        == num_video_tokens * config.merge_size * config.merge_size
     ), (
         f"Expected pixel_values_videos to have {num_video_tokens} frames, "
         f"but got {qwen_inputs.pixel_values_videos.shape[0]}."
     )
     # pixel_values_videos.shape =
     # (batch_size,
-    # grid_t * grid_h * grid_w,
+    # grid_t * grid_h * MERGE_SIZE * grid_w * MERGE_SIZE,
     # channel * temporal_patch_size * patch_size * patch_size) (1176)
+    # num_video_tokens = grid_t * grid_h * grid_w
     assert qwen_inputs.input_ids.shape[0] == 1
-
-    non_video_input_ids, video_input_ids = (
-        qwen_inputs.input_ids[0][:-num_video_tokens],
-        qwen_inputs.input_ids[0][-num_video_tokens:],
-    )
     assert qwen_inputs.attention_mask.eq(1).all(), (
         f"Expected attention_mask to be all ones, but got {qwen_inputs.attention_mask}."
     )
-    assert video_input_ids.eq(VIDEO_TOKEN_ID).all(), (
-        f"Expected input_ids to have {num_video_tokens} VIDEO_TOKEN_IDs at the end, "
+    is_video_token = qwen_inputs.input_ids[0].eq(config.video_token_id)
+    first_video_token_index = torch.where(is_video_token)[0][0].item()
+
+    non_video_input_ids, video_input_ids, post_video_input_ids = (
+        qwen_inputs.input_ids[0][:first_video_token_index],
+        qwen_inputs.input_ids[0][
+            first_video_token_index : first_video_token_index + num_video_tokens
+        ],
+        qwen_inputs.input_ids[0][first_video_token_index + num_video_tokens :],
+    )
+
+    assert video_input_ids.eq(config.video_token_id).all(), (
+        f"Expected input_ids to have {num_video_tokens} config.video_token_ids at the end, "
         f"but got {video_input_ids}."
     )
-    assert non_video_input_ids.ne(VIDEO_TOKEN_ID).all(), (
-        f"Expected input_ids to have {num_video_tokens} VIDEO_TOKEN_IDs at the end, "
+    assert non_video_input_ids.ne(config.video_token_id).all(), (
+        f"Expected input_ids to have {num_video_tokens} config.video_token_ids at the end, "
         f"but got {non_video_input_ids}."
     )
-    print(f"{len(non_video_input_ids)=}, {len(video_input_ids)=}, {num_video_tokens=}")
+    assert post_video_input_ids.ne(config.video_token_id).all()
+    # logger.debug(
+    #     f"{len(non_video_input_ids)=}, {len(video_input_ids)=}, {num_video_tokens=}"
+    #     f"{seq_length=} {num_actions=} {tokens_per_action=}"
+    # )
 
-    assert (num_video_tokens / (tokens_per_frame)) == num_actions, (
-        f"Expected num_video_tokens {num_video_tokens/ (tokens_per_frame )=} to be divisible equal to {num_actions=}"
-    )
-    expanded_video_input_ids = insert_every_n(
-        video_input_ids, tokens_per_frame, ACTION_TOKEN_ID
-    )
-    assert len(expanded_video_input_ids) - len(video_input_ids) == num_actions, (
-        f"Expected expanded_video_input_ids length to be {len(video_input_ids) + num_actions}, "
-        f"but got {len(expanded_video_input_ids)}."
+    if load_cursor_path:
+        expanded_video_input_ids = insert_every_n(
+            video_input_ids, tokens_per_action, config.action_token_id
+        )
+        video_input_ids = expanded_video_input_ids
+
+    keyboard_tokens_mask = None
+    if load_keyboard_actions:
+        adjusted_tokens_per_action = tokens_per_action
+        if load_cursor_path:
+            adjusted_tokens_per_action += 1
+
+        expanded_video_input_ids, keyboard_tokens_mask = interleave_every_k_vec(
+            video_input_ids,
+            torch.Tensor(keyboard_tokens).to(video_input_ids.dtype),
+            torch.Tensor(keyboard_mask).bool(),
+            k=adjusted_tokens_per_action,
+        )
+
+        assert len(expanded_video_input_ids) - len(video_input_ids) == sum(
+            keyboard_tokens_mask
+        ), (
+            f"Expected expanded_video_input_ids length to be {len(video_input_ids) + num_actions}, "
+            f"but got {len(expanded_video_input_ids)}."
+        )
+
+        keyboard_tokens_mask = torch.cat(
+            (
+                torch.zeros(len(non_video_input_ids), dtype=torch.bool),
+                keyboard_tokens_mask,
+                torch.zeros(len(post_video_input_ids), dtype=torch.bool),
+            ),
+            dim=0,
+        )
+
+        video_input_ids = expanded_video_input_ids
+
+    real_input_ids = torch.cat(
+        (non_video_input_ids, video_input_ids, post_video_input_ids), dim=0
     )
 
-    real_input_ids = torch.cat((non_video_input_ids, expanded_video_input_ids), dim=0)
     real_attention_mask = torch.ones_like(
         real_input_ids
     )  # .ne(ACTION_TOKEN_ID).to(qwen_inputs.attention_mask.dtype)
-    action_tokens = real_input_ids.eq(ACTION_TOKEN_ID)
-    input_cursor_path = torch.zeros(
-        (len(real_input_ids), 2, 3), dtype=torch.float32
-    )  # [seq_length, (x,y), (m,n,a)]
-    input_cursor_path[action_tokens] = torch.tensor(cursor_path)
+
+    action_tokens = None
+    input_cursor_path = None
+    if load_cursor_path:
+        action_tokens = real_input_ids.eq(config.action_token_id)
+        input_cursor_path = torch.zeros(
+            (len(real_input_ids), 2, 3), dtype=torch.float32
+        )  # [seq_length, (x,y), (m,n,a)]
+        input_cursor_path[action_tokens] = torch.tensor(cursor_path)
 
     assert len(real_input_ids) <= seq_length, (
         f"Expected input_ids length {len(real_input_ids)} to be less than or equal to seq_length {seq_length}, "
-        f"but got {real_input_ids}."
+        f"but got {len(non_video_input_ids)=}, {len(post_video_input_ids)=}, "
     )
     if len(real_input_ids) < seq_length:
         padding_len = seq_length - len(real_input_ids)
@@ -323,12 +665,28 @@ async def fetch_data(
                 torch.zeros(padding_len, dtype=qwen_inputs.attention_mask.dtype),
             )
         )
-        action_tokens = torch.cat(
-            (action_tokens, torch.zeros(padding_len, dtype=torch.bool))
-        )
-        input_cursor_path = torch.cat(
-            (input_cursor_path, torch.zeros((padding_len, 2, 3), dtype=torch.float32))
-        )
+        if load_keyboard_actions and keyboard_tokens_mask is not None:
+            keyboard_tokens_mask = torch.cat(
+                (
+                    keyboard_tokens_mask.to(dtype=torch.bool),
+                    torch.zeros(padding_len, dtype=torch.bool),
+                )
+            )
+
+        if (
+            load_cursor_path
+            and input_cursor_path is not None
+            and action_tokens is not None
+        ):
+            action_tokens = torch.cat(
+                (action_tokens, torch.zeros(padding_len, dtype=torch.bool))
+            )
+            input_cursor_path = torch.cat(
+                (
+                    input_cursor_path,
+                    torch.zeros((padding_len, 2, 3), dtype=torch.float32),
+                )
+            )
 
     return ActionDataSample(
         qwen_inputs=ActionDataSample.QwenInputs(
@@ -338,39 +696,31 @@ async def fetch_data(
             video_grid_thw=qwen_inputs.video_grid_thw,
             video_second_per_grid=qwen_inputs.video_second_per_grid,
         ),
+        keyboard_tokens_mask=keyboard_tokens_mask,
         cursor_path=input_cursor_path,
         action_tokens=action_tokens,
-    )
+    ), cast(FramesArray, frames)
 
 
 class ActionDatasetArgs(BaseModel):
     data_paths: list[str]
     max_seq_length: int
-    frames_per_action: int
+    raw_prompt: str
+    processor_config: VideoProcessorConfig
+
+    load_keyboard_actions: bool
+    load_cursor_path: bool
 
 
-class ActionDataset(Dataset[ActionDataSample]):
-    @property
-    def data_paths(self) -> list[str]:
-        return self.config.data_paths
-
-    def __init__(
-        self,
-        config: ActionDatasetArgs,
-    ):
-        super().__init__()
-        self.config = config
-
-        # TODO: get rid of running asyncio run in sync functions :///
-        stream_metadatas: list[StreamMetadata] = asyncio.run(
-            self._fetch_metadatas(self.data_paths)
-        )
-
-        self.datas = list(zip(self.data_paths, stream_metadatas, strict=True))
-
-    def __getitem__(self, index) -> ActionDataSample:
-        # TODO: Make everything async native
-        return asyncio.run(self.get_item(index))
+class ActionDataset(BaseDataset[ActionDataSample, ActionDatasetArgs]):
+    # @class_property
+    @classmethod
+    def data_cls(cls) -> type[ActionDataSample]:
+        """
+        Class property that should return the data class type.
+        This is used to ensure that the dataset is compatible with the data class.
+        """
+        return ActionDataSample
 
     @staticmethod
     async def _fetch_metadatas(metadata_paths: list[str]) -> list[StreamMetadata]:
@@ -383,101 +733,141 @@ class ActionDataset(Dataset[ActionDataSample]):
             *[fetch_metadata_from_zarr(path) for path in metadata_paths]
         )
 
-    async def get_item(self, index: int) -> ActionDataSample:
+    async def get_item(self, idx: int) -> ActionDataSample:
         """
         Asynchronously fetch a batch of data samples.
         This method should be implemented to load the actual data from the paths.
         """
+
         # TODO: Handle case where index is out of bounds by returning a 0 sample and emitting a warning
-        path, stream_metadata = self.datas[index]
+        path = self.args.data_paths[idx]
 
-        # Placeholder implementation, replace with actual data loading logic
-        # For now, we just return empty samples
-        return await fetch_data(
+        sample, _ = await fetch_data(
             path=path,
-            num_actions=calc_num_actions_per_sequence(
-                stream_metadata,
-                self.config.max_seq_length,
-                self.config.frames_per_action,
-            ),
-            seq_length=self.config.max_seq_length,
+            raw_prompt=self.args.raw_prompt,
+            seq_length=self.args.max_seq_length,
+            config=self.args.processor_config,
+            load_keyboard_actions=self.args.load_keyboard_actions,
+            load_cursor_path=self.args.load_cursor_path,
+        )
+        assert sample.qwen_inputs.input_ids.shape[0] <= self.args.max_seq_length, (
+            f"Expected input_ids length {sample.qwen_inputs.input_ids.shape[0]} to be less than or equal to max_seq_length {self.args.max_seq_length}, "
+            f"but got {sample.qwen_inputs.input_ids}."
         )
 
-    def __len__(self) -> int:
-        # For now only pull the first sequence from each.
-        # TODO: Worry about randomization and shit.
-        return len(self.datas)
-
-
-class ActionDataModule(L.LightningDataModule):
-    def __init__(
-        self,
-        config: ActionDatapackConfig,
-        extra_args: ActionDataModuleExtraArgs,
-    ):
-        super().__init__()
-        self.config = config
-        self.extra_args = extra_args
-
-    def setup(self, stage: str | None = None) -> None:
-        # This method is used to download the dataset if it is not already present.
-
-        self.train_data = ActionDataset(
-            ActionDatasetArgs(
-                data_paths=self.config.processed_data_paths,
-                max_seq_length=self.extra_args.seq_length,
-                frames_per_action=self.config.frames_per_action,
+        if self.args.load_keyboard_actions:
+            assert sample.keyboard_tokens_mask is not None
+            assert sample.keyboard_tokens_mask.shape[0] <= self.args.max_seq_length, (
+                f"Expected input_ids length {sample.keyboard_tokens_mask.shape[0]} to be less than or equal to max_seq_length {self.args.max_seq_length}, "
+                f"but got {sample.qwen_inputs.input_ids}."
             )
+        if self.args.load_cursor_path:
+            assert sample.cursor_path is not None
+            assert sample.cursor_path.shape[0] <= self.args.max_seq_length, (
+                f"Expected cursor_path length {sample.cursor_path.shape[0]} to be less than or equal to max_seq_length {self.args.max_seq_length}, "
+                f"but got {sample.cursor_path}."
+            )
+
+        assert self.args.max_seq_length <= self.args.max_seq_length, (
+            f"Expected max_seq_length {self.args.max_seq_length} to be less than or equal to {self.args.max_seq_length}, "
+            f"but got {self.args.max_seq_length}."
         )
 
-    def train_dataloader(self) -> DataLoader[ActionDataSample]:
-        return DataLoader(
-            self.train_data,
-            batch_size=self.extra_args.batch_size,
-            shuffle=True,
-            drop_last=True,
-            collate_fn=ActionDataSample.combine_batch,
+        return sample
+
+    @classmethod
+    async def constructor(cls, args: ActionDatasetArgs) -> Self:
+        # For now we are not going to do stream preprocessing and we are just going to trust that
+        # the data is already in the correct format.
+
+        # TODO: Later maybe do initialization / preprocessing to do dynamic length calcs?
+        # stream_metadatas: list[StreamMetadata] = await (
+        #     self._fetch_metadatas(self.data_paths)
+        # )
+        return cls(
+            args=args,
+            length=len(args.data_paths),
         )
 
 
-class ActionDataModuleExtraArgs(BaseModel):
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-    seq_length: int = 1024  # Default sequence length
-    batch_size: int
-
-
-class ActionDatapackConfig(DatapackConfig[ActionDataModule]):
+class ActionDatapackConfig(DatapackConfig[ActionDataSample]):
     """
     Configuration class for the Text Pretraining Data Module.
     This class is used to configure the data module for text pretraining tasks.
     """
 
     config_path: str = "modeling.data.video_action.ActionDatapackConfig"
-    processed_data_paths: list[str]
+    raw_prompt: str
+
+    @property
+    @abstractmethod
+    def data_paths(self) -> list[str]:
+        """
+        List of paths to the processed data files.
+        This should be implemented by subclasses to provide the actual data paths.
+        """
+        raise NotImplementedError("Subclasses must implement data_paths.")
+
     frames_per_action: int = 2
-    patch_size: int = PATCH_SIZE
+    processor_config: VideoProcessorConfig
+
+    load_keyboard_actions: bool = False
+    load_cursor_path: bool = False
 
     def validate_module_compatibility(
         self, module_config: ModuleConfig[Any]
-    ) -> ActionLITConfig[Any]:
+    ) -> ModuleConfig[Any]:
         """
         Validate that the Lightning module is compatible with the data module.
         This method should be implemented by subclasses to perform any necessary checks.
         """
-        assert isinstance(module_config, ActionLITConfig), (
-            "ActionDatapackConfig can only be used with ActionLITConfig."
-        )
         return module_config
 
-    def create_datapack(
-        self, full_config: ExperimentConfig[ActionDataModule]
-    ) -> ActionDataModule:
-        self.validate_module_compatibility(full_config.module)
-        extra_args = ActionDataModuleExtraArgs(
-            seq_length=full_config.run.sequence_length,
-            batch_size=full_config.run.batch_size,
+    async def _init_dataset(self, full_config: ExperimentConfig) -> ActionDataset:
+        return await ActionDataset.constructor(
+            ActionDatasetArgs(
+                data_paths=self.data_paths,
+                max_seq_length=full_config.run.sequence_length,
+                processor_config=self.processor_config,
+                raw_prompt=self.raw_prompt,
+                load_keyboard_actions=self.load_keyboard_actions,
+                load_cursor_path=self.load_cursor_path,
+            )
         )
-        return ActionDataModule(self, extra_args)
 
 
-__all__ = ["ActionDataModule", "ActionDatapackConfig"]
+class ListActionDatapackConfig(ActionDatapackConfig):
+    """
+    A specific implementation of ActionDatapackConfig that uses a list of data paths.
+    This is useful for scenarios where the data paths are provided as a list.
+    """
+
+    config_path: str = "modeling.data.video_action.ListActionDatapackConfig"
+    data_paths_list: list[str] = Field(
+        default_factory=list,
+    )
+
+    @property
+    def data_paths(self) -> list[str]:
+        return self.data_paths_list
+
+
+class RangeActionDatapackConfig(ActionDatapackConfig):
+    """
+    A specific implementation of ActionDatapackConfig that uses a range of data paths.
+    This is useful for scenarios where the data paths are generated based on a range.
+    """
+
+    config_path: str = "modeling.data.video_action.RangeActionDatapackConfig"
+    prefix: str = "gs://induction-labs/jonathan/synth/cursor_follow_v2/sample_"
+    start_index: int = 0
+    end_index: int
+
+    @property
+    def data_paths(self) -> list[str]:
+        return [
+            f"{self.prefix}{i}.zarr" for i in range(self.start_index, self.end_index)
+        ]
+
+
+__all__ = ["ActionDatapackConfig"]

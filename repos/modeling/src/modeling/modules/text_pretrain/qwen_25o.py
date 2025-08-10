@@ -1,38 +1,34 @@
 from __future__ import annotations
 
-from typing import Any
-
-from modeling.config import DatapackConfig, RunConfig
-from modeling.data.text_train import TextPretrainDatapackConfig
-from modeling.modules.text_module import TextLIT, TextLITConfig
 from transformers.models.qwen2_5_omni import (
     Qwen2_5OmniProcessor,
     Qwen2_5OmniThinkerForConditionalGeneration,
 )
 
+from modeling.config import InstanceConfig, RunConfig
+from modeling.modules.text_pretrain.default import (
+    TextPretrainLIT,
+    TextPretrainLITConfig,
+)
+from modeling.utils.class_property import class_property
 
-class Qwen25OLIT(TextLIT):
-    """
-    Qwen-2.5O Lightning Module for text pretraining.
-    Inherits from TextPretrainLIT and uses the Qwen-2.5O model.
-    """
 
-    def __init__(
-        self,
-        config: Qwen25OLITConfig,
-        run_config: RunConfig,
-    ):
-        super().__init__(config=config, run_config=run_config)
+class Qwen25OLIT(
+    TextPretrainLIT[Qwen2_5OmniThinkerForConditionalGeneration, "Qwen25OLITConfig"]
+):
+    @class_property
+    def model_cls(cls) -> type[Qwen2_5OmniThinkerForConditionalGeneration]:
+        return Qwen2_5OmniThinkerForConditionalGeneration
 
-        self.model = Qwen2_5OmniThinkerForConditionalGeneration.from_pretrained(
-            config.model_name,
+    def init_model_meta(self, *args) -> Qwen2_5OmniThinkerForConditionalGeneration:
+        return Qwen2_5OmniThinkerForConditionalGeneration.from_pretrained(
+            self.module_config.model_name,
             torch_dtype=self.dtype,
             attn_implementation=self.attn_impl,
-        ).train()
-        self.model_config = self.model.config
+        )
 
 
-class Qwen25OLITConfig(TextLITConfig):
+class Qwen25OLITConfig(TextPretrainLITConfig):
     """
     Configuration class for Qwen-2.5O Lightning Module.
     Inherits from TextPretrainLITConfig and sets the model name.
@@ -46,16 +42,12 @@ class Qwen25OLITConfig(TextLITConfig):
     def get_tokenizer(self):
         processor = Qwen2_5OmniProcessor.from_pretrained(self.model_name)
         assert isinstance(processor, Qwen2_5OmniProcessor)
-        tokenizer = processor.tokenizer
+        tokenizer = processor.tokenizer  # type: ignore[attr-defined]
         return tokenizer
 
-    def validate_datapack_compatibility(
-        self, datapack_config: DatapackConfig[Any]
-    ) -> TextPretrainDatapackConfig:
-        assert isinstance(datapack_config, TextPretrainDatapackConfig), (
-            f"Expected {datapack_config=} to be of type TextPretrainDatapackConfig"
-        )
-        return datapack_config
-
-    def create_module(self, run_config: RunConfig) -> Qwen25OLIT:
-        return Qwen25OLIT(self, run_config)
+    def create_module(
+        self,
+        run_config: RunConfig,
+        instance_config: InstanceConfig,
+    ) -> Qwen25OLIT:
+        return Qwen25OLIT(self, run_config, instance_config)

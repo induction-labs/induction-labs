@@ -36,7 +36,7 @@ yarn-error.log*
 __pycache__/
 *.py[cod]
 *$py.class
-.pytest_cache/
+**/.pytest_cache/
 *.egg-info/
 
 # Temporary files
@@ -87,3 +87,4 @@ MANIFEST
 **/outputs/
 **/secrets/
 **/.pytest_cache/
+**/.ruff_cache/

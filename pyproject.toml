@@ -8,15 +8,40 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = []
 [tool.uv]
+# For modeling. See note there
+# https://github.com/pytorch/pytorch/issues/153401#issuecomment-2881445494
+override-dependencies = ["nvidia-nccl-cu12==2.26.2.post1"]
 package = true
 
+no-build-isolation-package = ["flash-attn"]
+
 [tool.uv.workspace]
-members = ["repos/*"]
+members = ["repos/*", "repos/showdown/clicks"]
 # We need to exclude vllm as a workspace dep because it is dynamically versioned :/
-exclude = ["repos/vllm"]
+exclude = [
+    "repos/vllm",
+    "repos/output",
+    "repos/lingua",
+    "k8s/",
+    "repos/cue",
+    "repos/flash-attention-local",
+    "repos/showdown",
+    "repos/osworld",
+]
 
 [dependency-groups]
 dev = ["pre-commit>=4.2.0", "ruff>=0.11.8"]
+
+
+[tool.ruff]
+fix = true
+extend-exclude = [
+    "repos/osworld",
+    "repos/pynput",
+    "repos/cue",
+    "*.ipynb",
+    "repos/modeling/tests",
+]
 
 [tool.ruff.lint]
 select = [
@@ -32,7 +57,8 @@ select = [
     "PGH", # pygrep-hooks
     "PYI", # flake8-pyi
     "RUF",
-]
+] # Enable isort rules
+
 
 ignore = [
     # only relevant if you run a script with `python -0`,
@@ -46,8 +72,8 @@ ignore = [
 [tool.ruff.lint.isort]
 required-imports = ["from __future__ import annotations"]
 
-[tool.ruff]
-extend-exclude = ["repos/osworld", "repos/pynput", "*.ipynb"]
-
 [project.scripts]
 collect = "actioncollector.main:app"
+
+[tool.setuptools.packages.find]
+include = ["repos*"] # Only repos* are actually repos

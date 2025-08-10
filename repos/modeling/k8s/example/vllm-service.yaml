@@ -1,0 +1,18 @@
+# vllm-service.yaml
+#
+# Service definition for the vLLM server. Exposes port 80 internally within the
+# cluster and routes traffic to pods labeled `app: vllm-server` on port 8000.
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: vllm-service
+  namespace: mk8s-docs-examples
+spec:
+  selector:
+    app: vllm-server
+  ports:
+    - name: http
+      port: 80
+      protocol: TCP
+      targetPort: 8000

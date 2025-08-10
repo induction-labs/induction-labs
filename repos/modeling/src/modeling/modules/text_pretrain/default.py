@@ -1,76 +1,128 @@
 from __future__ import annotations
 
-from typing import Any
+import logging
+from typing import Any, TypeVar, cast
 
-from modeling.config import DatapackConfig, RunConfig
-from modeling.data.text_train import TextPretrainDatapackConfig
-from modeling.modules.text_module import TextLIT, TextLITConfig
+import torch
+from accelerate import init_empty_weights
+from synapse.utils.logging import configure_logging
+from torch import nn
+from torch.distributed.device_mesh import DeviceMesh
+from torch.distributed.fsdp import MixedPrecisionPolicy, fully_shard
 from transformers import (
     AutoConfig,
     AutoModelForCausalLM,
     AutoTokenizer,
 )
 from transformers.modeling_utils import PreTrainedModel
-from accelerate import init_empty_weights, load_checkpoint_and_dispatch
-import torch
-from torch.distributed.device_mesh import DeviceMesh
-from huggingface_hub import snapshot_download
+
+from modeling.config import (
+    DatapackConfig,
+    InstanceConfig,
+    RunConfig,
+)
+from modeling.config.distributed import MeshAxis
+from modeling.data.text_train import TextPretrainDatapackConfig, TextPretrainDataSample
+from modeling.modules.text_module import MODEL_TYPE, TextLIT, TextLITConfig
+from modeling.utils.class_property import class_property
+
+logger = configure_logging(__name__, level=logging.DEBUG)
 
 
-class TextPretrainLIT(TextLIT):
-    def __init__(self, config: TextPretrainLITConfig, run_config: RunConfig):
-        super().__init__(config, run_config)
+ConfigType = TypeVar("ConfigType", bound="TextPretrainLITConfig")
 
-        self.model_config = AutoConfig.from_pretrained(
-            self.config.model_name, trust_remote_code=True
+
+class TextPretrainLIT(TextLIT[MODEL_TYPE, TextPretrainDataSample, ConfigType]):
+    @class_property
+    def model_cls(cls) -> type[PreTrainedModel]:
+        """
+        Return the class of the model that this module will use.
+        This should be overridden in subclasses to return the specific model class.
+        """
+        return PreTrainedModel
+
+    def init_model_meta(self, *args) -> MODEL_TYPE:
+        model_config = AutoConfig.from_pretrained(
+            self.module_config.model_name, trust_remote_code=True
         )
-        self.ckpt_dir = snapshot_download(  # downloads all shards & index
-            repo_id=self.config.model_name,
-        )
 
-        with init_empty_weights():  # ① on meta
+        logger.debug(f"Initializing model {self.module_config.model_name}")
+
+        with init_empty_weights():
             model = AutoModelForCausalLM.from_config(
-                self.model_config, torch_dtype=self.dtype
+                model_config, trust_remote_code=True
             )
+
+        logger.debug(
+            f"Initialized model {self.module_config.model_name} with dtype {self.dtype}"
+        )
         assert isinstance(model, PreTrainedModel)
         assert model.device.type == "meta", (
             f"Expected model to be on meta device, got {model.device.type}"
         )
-        self.model = model
+        return cast(MODEL_TYPE, model)
 
-    def configure_model(self) -> None:
-        # TODO(jl): make this work with cpu device (e.g. just skip it)
-        if self.model.device.type != "meta":
-            return  # already configured
-        assert isinstance(self.device_mesh, DeviceMesh), (
-            f"Expected device_mesh to be a DeviceMesh, got {type(self.device_mesh)}"
+    def shard_model(
+        self,
+        *,
+        mp_policy: MixedPrecisionPolicy,
+        device_mesh: DeviceMesh,
+    ):
+        """
+        Shard the model using Fully Sharded Data Parallel (FSDP).
+        This method is called during the model configuration phase.
+        (HSDP) with ``(Replicate(), Shard(0))``
+        ! TODO(jl): Currently broken - DP=1 just takes more memory with HSDP even though it should be a no-op
+        """
+        fsdp_config = {
+            "mesh": device_mesh[MeshAxis.FSDP],
+            "mp_policy": mp_policy,
+        }
+        assert isinstance(self.model.model, PreTrainedModel) and isinstance(
+            self.model.model.layers, nn.ModuleList
         )
-        _dp_mesh = self.device_mesh[
-            "data_parallel"
-        ]  # provided by ModelParallelStrategy
+        for layer_id, transformer_block in enumerate(self.model.model.layers):
+            reshard_after_forward = int(layer_id) < len(self.model.model.layers) - 1
+            fully_shard(
+                transformer_block,
+                **fsdp_config,
+                reshard_after_forward=reshard_after_forward,
+            )
+            self.model.model.layers[layer_id] = transformer_block
+        return fully_shard(self.model, **fsdp_config)
 
-        self.model.to_empty(device=torch.cuda.current_device())
-        load_checkpoint_and_dispatch(
-            self.model,
-            checkpoint=self.ckpt_dir,  # hub ID or local folder
-            device_map={"": torch.cuda.current_device()},
-            dtype=self.model.dtype,
+    def run_training_step(
+        self, inputs: TextPretrainDataSample
+    ) -> tuple[torch.Tensor, dict]:
+        """
+        Run a training step with the provided inputs.
+        The inputs should be a dictionary containing the necessary data for the model.
+        """
+        # Forward pass through the model
+        outputs = self.model(
+            **inputs.model_dump(),  # inputs should contain the necessary model inputs
         )
-        from accelerate import (
-            FullyShardedDataParallelPlugin,
-            Accelerator,
+        assert isinstance(outputs.loss, torch.Tensor), (
+            f"Expected outputs.loss to be a Tensor, got {type(outputs.loss)}"
         )
-        from accelerate.utils.fsdp_utils import (
-            fsdp2_prepare_model,
+        return outputs.loss, {}
+
+    def run_validation_step(
+        self, inputs: TextPretrainDataSample, global_step: int
+    ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
+        """
+        Run a training step with the provided inputs.
+        The inputs should be a dictionary containing the necessary data for the model.
+        """
+        # Forward pass through the model
+        outputs = self.model(
+            **inputs.model_dump(),  # inputs should contain the necessary model inputs
         )
 
-        fsdp_plugin = FullyShardedDataParallelPlugin(fsdp_version=2)
-        accelerator = Accelerator(fsdp_plugin=fsdp_plugin)
-        # TODO: This doesn't fully work yet because it doens't handle the device mesh correctly
-        self.model = fsdp2_prepare_model(
-            accelerator=accelerator,
-            model=self.model,
+        assert isinstance(outputs.loss, torch.Tensor), (
+            f"Expected outputs.loss to be a Tensor, got {type(outputs.loss)}"
         )
+        return outputs.loss, {}
 
 
 class TextPretrainLITConfig(TextLITConfig):
@@ -90,5 +142,9 @@ class TextPretrainLITConfig(TextLITConfig):
         )
         return datapack_config
 
-    def create_module(self, run_config: RunConfig) -> TextPretrainLIT:
-        return TextPretrainLIT(self, run_config)
+    def create_module(
+        self,
+        run_config: RunConfig,
+        instance_config: InstanceConfig,
+    ) -> TextPretrainLIT:
+        return TextPretrainLIT(self, run_config, instance_config)

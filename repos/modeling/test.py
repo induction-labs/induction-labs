@@ -19,6 +19,20 @@ if torch.cuda.is_available():
     print(f"Device count: {torch.cuda.device_count()}")
     print(f"Current device: {torch.cuda.current_device()}")
     print(f"Device name: {torch.cuda.get_device_name()}")
+
+    torch.distributed.init_process_group(
+        init_method="tcp://127.0.0.1:29500",
+        backend="nccl",
+        device_id=torch.device("cuda:0"),
+        rank=0,
+        world_size=1,
+    )
+    assert torch.distributed.is_initialized(), "Distributed training is not initialized"
+    torch.distributed.barrier()
+    print("Distributed training initialized successfully.")
+    torch.distributed.destroy_process_group()
+
+
 else:
     print("CUDA not available - checking why...")
     try:

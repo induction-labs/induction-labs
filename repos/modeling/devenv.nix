@@ -17,49 +17,73 @@
   # Allow buildx bake by default to access ../../ context
   env.BUILDX_BAKE_ENTITLEMENTS_FS = "0";
 
+  # Need to set up LD_PRELOAD and LD_LIBRARY_PATH on linux machines:
+  # export LD_PRELOAD="/usr/lib/x86_64-linux-gnu/libcuda.so:/usr/lib/x86_64-linux-gnu/libnvidia-ml.so.1:/lib/x86_64-linux-gnu/libnvidia-ptxjitcompiler.so.1"
+  # export LD_LIBRARY_PATH="/usr/local/cuda/lib64"
+
   # https://devenv.sh/packages/
-  packages = with pkgs; [
-    # Keep these here so it is easier to debug the docker image.
-    kmod # for lsmod
-    strace
-    vim
-    ffmpeg-full
-  ];
+  packages = with pkgs;
+    [
+      # Keep these here so it is easier to debug the docker image.
+    ]
+    ++ lib.optionals pkgs.stdenv.isLinux [
+      kmod # for lsmod
+      strace
+      vim
+      ffmpeg-full
+      (
+        pkgs.google-cloud-sdk.withExtraComponents [
+          pkgs.google-cloud-sdk.components.gke-gcloud-auth-plugin
+        ]
+      )
+
+      # TODO: Build depot for all platforms (mac)
+      # TODO: Put depot in its own nix flake
+      # For now just curl -L https://depot.dev/install-cli.sh | sh
+      (let
+        version = "2.95.0";
+        pname = "depot";
+      in
+        pkgs.stdenv.mkDerivation rec {
+          inherit pname version;
+
+          src = fetchurl {
+            url = "https://github.com/depot/cli/releases/download/v${version}/depot_${version}_linux_amd64.tar.gz";
+            # You can prefetch to get the right hash, then paste it here:
+            sha256 = "sha256-LuFqYtduqFpvaV9xQlKfKPrCuyv0LiMP+9WHIZ8pQQQ=";
+          };
+
+          dontBuild = true;
+          unpackPhase = ''
+            tar xzf $src
+            mv bin source
+          '';
+          # Convert the install script logic here
+          installPhase = ''
+            mkdir -p $out/bin
+            install -m755 source/depot $out/bin/depot
+          '';
+        })
+    ];
 
   # https://devenv.sh/languages/
   languages.python = {
     libraries = [
-      # pkgs.cmake
     ];
     enable = true;
     uv = {
       enable = true;
     };
     venv.enable = true;
+    package = pkgs.python312;
   };
   # languages.rust.enable = true;
 
-  # https://devenv.sh/processes/
-  # processes.cargo-watch.exec = "cargo-watch";
-
-  # https://devenv.sh/services/
-  # services.postgres.enable = true;
-
-  # https://devenv.sh/scripts/
-  scripts.hello.exec = ''
-    echo hello from $GREET
-  '';
-
   enterShell = ''
     # We need to set this manually otherwise triton tries to call `ldconfig` which is UB in nix.
-    export TRITON_LIBCUDA_PATH="$LD_LIBRARY_PATH";
+    # export TRITON_LIBCUDA_PATH="$LD_LIBRARY_PATH";
+    # Only do this on nixos - see https://www.notion.so/Stupid-LD_LIBRARY_PATH-stuffs-248dd1a72b6a80b5b3dcd9cf5da60188?source=copy_link
   '';
-
-  # https://devenv.sh/tasks/
-  # tasks = {
-  #   "myproj:setup".exec = "mytool build";
-  #   "devenv:enterShell".after = [ "myproj:setup" ];
-  # };
 
   # https://devenv.sh/tests/
   enterTest = ''
@@ -67,9 +91,4 @@
     uv sync --all-extras
     pytest
   '';
-
-  # https://devenv.sh/git-hooks/
-  # git-hooks.hooks.shellcheck.enable = true;
-
-  # See full reference at https://devenv.sh/reference/options/
 }

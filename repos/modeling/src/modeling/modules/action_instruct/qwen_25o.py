@@ -1,135 +1,153 @@
 from __future__ import annotations
 
-from typing import Any
+from dataclasses import dataclass
+from typing import Any, TypeVar
 
-from modeling.config import DatapackConfig, RunConfig
-from modeling.data.video_action import ActionDataSample, ActionDatapackConfig
-from modeling.modules.action_module import ActionLIT, ActionLITConfig
-from modeling.utils.elapsed_timer import elapsed_timer
-from .qwen_25o_actions import Qwen2_5OmniThinkerForActionModelling
-
-from torch.distributed.fsdp import fully_shard
-from torch.distributed.device_mesh import DeviceMesh
+import numpy as np
 import torch
+from synapse.actions.keyboard_tokenizer import Tokenizer
+from synapse.utils.logging import configure_logging, logging
+from torch import nn
+from torch.distributed.device_mesh import DeviceMesh
+from torch.distributed.fsdp import MixedPrecisionPolicy, fully_shard
+
+from modeling.config import (
+    DatapackConfig,
+    InstanceConfig,
+    RunConfig,
+)
+from modeling.config.distributed import MeshAxis
+from modeling.data.video_action import ActionDatapackConfig, ActionDataSample
+from modeling.utils.class_property import class_property
+
+from .base_action import BaseActiionLIT, BaseActionLITConfig
+from .qwen_25o_actions import (
+    Qwen2_5OmniActionCausalLMOutputWithPast,
+    Qwen2_5OmniActionModel,
+    Qwen2_5OmniThinkerActionConfig,
+)
+
+logger = configure_logging(__name__, level=logging.DEBUG)
+
+MODEL_TYPE = Qwen2_5OmniActionModel
+l2_loss = nn.MSELoss(reduce=False)
+
+T = TypeVar("T")
+
+TOKENIZER = Tokenizer.load("gs://induction-labs/common/keyboard_tokenizer_v0.0.1.json")
 
 
-class Qwen25OActionLIT(ActionLIT):
+def to_numpy_clean(tensor: torch.Tensor, dtype=torch.float32) -> np.ndarray:
+    """
+    Convert a PyTorch tensor to a NumPy array, ensuring it is on CPU and detached.
+    """
+    return tensor.to(dtype=dtype, device="cpu").detach().numpy()
+
+
+@dataclass
+class CursorLossOutput:
+    predicted_xs: torch.Tensor | None
+    predicted_ys: torch.Tensor | None
+    actual_xs: torch.Tensor | None
+    actual_ys: torch.Tensor | None
+    output_actions: torch.Tensor | None
+    cursor_path: torch.Tensor | None
+
+    analytical_loss: torch.Tensor | None
+    l2_points_loss: torch.Tensor | None
+    coefficients_loss: torch.Tensor | None
+
+
+@dataclass
+class LossOutput:
+    loss: torch.Tensor
+    cursor_aux: CursorLossOutput | None = None
+
+
+class Qwen25OActionLIT(BaseActiionLIT[MODEL_TYPE, "Qwen25OActionLITConfig"]):
     """
     Qwen-2.5O Lightning Module for text pretraining.
     Inherits from TextPretrainLIT and uses the Qwen-2.5O model.
     """
 
-    model: Qwen2_5OmniThinkerForActionModelling
+    model: MODEL_TYPE
 
-    def __init__(
+    @class_property
+    def model_cls(cls) -> type[MODEL_TYPE]:
+        return MODEL_TYPE
+
+    def call_model(
+        self, inputs: ActionDataSample
+    ) -> Qwen2_5OmniActionCausalLMOutputWithPast:
+        """Call the model with the given inputs.
+        This method should be implemented by subclasses.
+        """
+        return self.model(
+            action_tokens=inputs.action_tokens,
+            keyboard_token_mask=inputs.keyboard_tokens_mask,
+            **inputs.qwen_inputs.model_dump(),
+        )
+
+    def init_model_meta(
         self,
-        config: Qwen25OActionLITConfig,
-        run_config: RunConfig,
     ):
-        super().__init__(config=config, run_config=run_config)
+        module_config = self.module_config
+        config = Qwen2_5OmniThinkerActionConfig.from_pretrained(
+            module_config.model_name,
+            freeze_network=module_config.freeze_network,
+            freeze_vision=module_config.freeze_vision,
+            freeze_action_head=module_config.freeze_action_head,
+            freeze_action_embedding=module_config.freeze_action_embedding,
+            freeze_keyboard_embedding=module_config.freeze_keyboard_embedding,
+            freeze_keyboard_head=module_config.freeze_keyboard_head,
+            use_fun_mask=module_config.use_fun_mask,
+        )
 
-        model = Qwen2_5OmniThinkerForActionModelling.from_pretrained(
-            config.model_name,
-            torch_dtype=self.dtype,
-            attn_implementation=self.attn_impl,
-        ).train()
-        assert isinstance(model, Qwen2_5OmniThinkerForActionModelling), (
+        model = MODEL_TYPE(config)
+        assert isinstance(model, MODEL_TYPE), (
             f"Expected model to be of type Qwen2_5OmniThinkerForActionModelling, "
             f"got {type(model)}"
         )
-        self.model = model
-        self.model_config = self.model.config
+        return model
 
-    def training_step(self, inputs: ActionDataSample):
-        # Forward pass through the model
+    def shard_model(
+        self,
+        *,
+        mp_policy: MixedPrecisionPolicy,
+        device_mesh: DeviceMesh,
+    ):
+        """
+        Shard the model using Fully Sharded Data Parallel (FSDP).
+        This method is called during the model configuration phase.
+        """
 
-        with elapsed_timer() as timer:
-            # Note: You CANT call self.model.forward here because it fucking doesn't trigger the FSDP hooks so weights dont gather
-            outputs = self.model(
-                cursor_path=inputs.cursor_path,
-                action_tokens=inputs.action_tokens,
-                **inputs.qwen_inputs.model_dump(),
-            )
-            elapsed = timer()
-
-        assert isinstance(outputs.loss, torch.Tensor), (
-            f"Expected outputs.loss to be a Tensor, got {type(outputs.loss)}"
-        )
-        # Assert that the loss is a scalar tensor
-        assert outputs.loss.ndim == 0, (
-            f"Expected outputs.loss to be a scalar tensor, got {outputs.loss.ndim}"
-        )
-
-        # Assert loss is not NaN or Inf
-        assert not torch.isnan(outputs.loss), "Loss is NaN"
-        assert not torch.isinf(outputs.loss), "Loss is Inf"
-        # TODO: Add more metrics and logging (steptime, tok/s, etc.)
-
-        if self.run_config.accelerator == "cuda":
-            torch.cuda.synchronize()
-
-            allocated_memory = torch.cuda.memory_allocated(
-                device=torch.cuda.current_device()
-            )
-            reserved_memory = torch.cuda.memory_reserved(
-                device=torch.cuda.current_device()
-            )
-            memory_metrics = {
-                "train/allocated_memory": allocated_memory / 1e9,  # in GB
-                "train/reserved_memory": reserved_memory / 1e9,  # in GB
-            }
-
-        metrics = {
-            "train/step_time": elapsed,
-            "train/tokens_per_second": inputs.qwen_inputs.input_ids.numel() / elapsed,
-            "train/loss": outputs.loss,
-            **memory_metrics,
-        }
-
-        self.log_dict(
-            metrics,
-            logger=True,
-            on_step=True,  # Log on every step
-        )
-        return outputs.loss
-
-    def configure_model(self) -> None:
-        # if self.model.device.type != "meta":
-        #     return  # already configured
-        assert isinstance(self.device_mesh, DeviceMesh), (
-            f"Expected device_mesh to be a DeviceMesh, got {type(self.device_mesh)}"
-        )
-
-        dp_mesh = self.device_mesh["data_parallel"]  # provided by ModelParallelStrategy
-        # mp_policy = MixedPrecisionPolicy(
-        #     param_dtype=torch.bfloat16, reduce_dtype=torch.float32
-        # )
-
-        # fsdp_config = {"mesh": dp_mesh, "mp_policy": mp_policy}
         fsdp_config = {
-            "mesh": dp_mesh,
+            "mesh": device_mesh[MeshAxis.FSDP],
+            "mp_policy": mp_policy,
         }
+        fully_shard(self.model.thinker.visual, **fsdp_config)
 
-        # for layer_id, transformer_block in enumerate(self.model.model.layers):
-        #     # Apply activation checkpointing
+        for layer_id, transformer_block in enumerate(self.model.thinker.model.layers):
+            # Activation checkpointing kinda broken
+            # For now this is broken with HF models https://github.com/huggingface/transformers/issues/34928
 
-        #     # For now this is broken with HF models https://github.com/huggingface/transformers/issues/34928
-        #     #             from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
-        #     #     checkpoint_wrapper,
-        #     # )
-        #     # transformer_block = checkpoint_wrapper(transformer_block)
+            reshard_after_forward = (
+                int(layer_id) < len(self.model.thinker.model.layers) - 1
+            )
+            fully_shard(
+                transformer_block,
+                **fsdp_config,
+                reshard_after_forward=reshard_after_forward,
+            )
+            self.model.thinker.model.layers[layer_id] = transformer_block
 
-        #     reshard_after_forward = int(layer_id) < len(self.model.model.layers) - 1
-        #     fully_shard(
-        #         transformer_block,
-        #         **fsdp_config,
-        #         reshard_after_forward=reshard_after_forward,
-        #     )
-        #     self.model.model.layers[layer_id] = transformer_block
-        fully_shard(self.model, **fsdp_config)
+        return fully_shard(
+            self.model,
+            **fsdp_config,
+        )
 
 
-class Qwen25OActionLITConfig(ActionLITConfig):
+class Qwen25OActionLITConfig(BaseActionLITConfig):
     """
     Configuration class for Qwen-2.5O Lightning Module.
     Inherits from TextPretrainLITConfig and sets the model name.
@@ -139,7 +157,6 @@ class Qwen25OActionLITConfig(ActionLITConfig):
         "modeling.modules.action_instruct.qwen_25o.Qwen25OActionLITConfig"
     )
     model_name: str = "Qwen/Qwen2.5-Omni-3B"
-    tokenizer_name: str = "Qwen/Qwen2.5-Omni-3B"
 
     def validate_datapack_compatibility(
         self, datapack_config: DatapackConfig[Any]
@@ -149,5 +166,13 @@ class Qwen25OActionLITConfig(ActionLITConfig):
         )
         return datapack_config
 
-    def create_module(self, run_config: RunConfig) -> Qwen25OActionLIT:
-        return Qwen25OActionLIT(self, run_config)
+    def create_module(
+        self,
+        run_config: RunConfig,
+        instance_config: InstanceConfig,
+    ) -> Qwen25OActionLIT:
+        return Qwen25OActionLIT(self, run_config, instance_config)
+
+    @classmethod
+    def module_cls(cls) -> type[Qwen25OActionLIT]:
+        return Qwen25OActionLIT
