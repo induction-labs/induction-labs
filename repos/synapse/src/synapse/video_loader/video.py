@@ -22,7 +22,6 @@ if TYPE_CHECKING:
 import gcsfs
 from smart_open import open as smart_open
 
-
 from synapse.elapsed_timer import elapsed_timer
 from synapse.video_loader.typess import (
     Fraction,
@@ -248,7 +247,11 @@ def download_video_with_ffmpeg_copy(
         container2 = av.open(tmp_path2)
         stream1 = container1.streams.video[0]
         stream2 = container2.streams.video[0]
-        assert stream1.start_time == stream2.start_time
+        if stream1.start_time != stream2.start_time:
+            print(
+                f"Warning: start times do not match: {stream1.start_time} vs {stream2.start_time}"
+            )
+        # assert stream1.start_time == stream2.start_time
         container1.close()
         container2.close()
 

@@ -2,12 +2,17 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 import multiprocessing
 import re
 import secrets
 import string
 import tempfile
+import threading
+import traceback
 from abc import abstractmethod
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from multiprocessing import Manager, Process
 from pathlib import Path
 from typing import Protocol
 
@@ -39,6 +44,8 @@ from synth.recordings.synth_captions_generated_samples import (
 
 dotenv.load_dotenv()
 
+# Set up logging
+logger = logging.getLogger(__name__)
 
 gem_client = genai.Client()
 
@@ -329,22 +336,36 @@ def process_single_action_range(
 
     frame_buffers = [pil_to_bytes(frame, format="PNG") for frame in frames]
     print(f"Extracted {len(frames)} frames for video {video_path}")
-    video_instruction = get_video_instruction(
-        frame_buffers[0],
-        frame_buffers[1:],
-        actions_to_process,
-    )
-    if video_instruction is None:
-        return None
-    instruction_text, instruction = video_instruction
 
-    # print(f"Generated instruction: {instruction_text}")
-    thinking_texts = get_thinking_texts(
-        frame_buffers[0],
-        frame_buffers[1:],
-        actions_to_process,
-        instruction_text,
-    )
+    try:
+        video_instruction = get_video_instruction(
+            frame_buffers[0],
+            frame_buffers[1:],
+            actions_to_process,
+        )
+        if video_instruction is None:
+            logger.warning(f"Failed to generate video instruction for {video_path}")
+            return None
+        instruction_text, instruction = video_instruction
+    except Exception as e:
+        logger.error(
+            f"Error generating video instruction for {video_path}: {e}", exc_info=True
+        )
+        return None
+
+    try:
+        # print(f"Generated instruction: {instruction_text}")
+        thinking_texts = get_thinking_texts(
+            frame_buffers[0],
+            frame_buffers[1:],
+            actions_to_process,
+            instruction_text,
+        )
+    except Exception as e:
+        logger.error(
+            f"Error generating thinking texts for {video_path}: {e}", exc_info=True
+        )
+        return None
     b64_images = [base64.b64encode(bytes).decode("utf-8") for bytes in frame_buffers]
     save_actions = [
         SaveAction(
@@ -439,20 +460,27 @@ def video_process(
                     )
                 print(f"Processing action range {i + 1}/{len(selected_action_ranges)}")
 
-                train_sample = process_single_action_range(
-                    video_container,
-                    video_metadata,
-                    selected_actions,
-                    metadata,
-                    video_path,
-                )
-
-                if train_sample is not None:
-                    train_samples.append(train_sample)
-                else:
-                    print(
-                        f"Failed to process action range {i + 1} for video {video_path}"
+                try:
+                    train_sample = process_single_action_range(
+                        video_container,
+                        video_metadata,
+                        selected_actions,
+                        metadata,
+                        video_path,
                     )
+
+                    if train_sample is not None:
+                        train_samples.append(train_sample)
+                    else:
+                        logger.warning(
+                            f"Action range {i + 1}/{len(selected_action_ranges)} returned None for video {video_path}"
+                        )
+                except Exception as e:
+                    logger.error(
+                        f"Error processing action range {i + 1}/{len(selected_action_ranges)} for video {video_path}: {e}",
+                        exc_info=True,
+                    )
+                    # Continue processing other action ranges
 
     return train_samples
 
@@ -642,7 +670,7 @@ def discover_video_files(source_folders: list[str]) -> list[tuple[str, str]]:
 
             # Sort by video number
             def get_video_number(filename):
-                match = video_pattern.search(filename)
+                match = video_pattern.search(filename)  # noqa: B023
                 return int(match.group(1)) if match else 0
 
             video_files_in_dir.sort(key=get_video_number)
@@ -690,7 +718,20 @@ def process_single_video(
         with open(
             f"{output_dir}/metadata/{train_sample_id}.json", "w", encoding="utf-8"
         ) as f:
-            json.dump(train_sample.model_dump(), f, ensure_ascii=False, indent=0)
+            json.dump(
+                train_sample.model_dump()["actions"], f, ensure_ascii=False, indent=0
+            )
+        with open(
+            f"{output_dir}/train_samples/{train_sample_id}.metadata.json",
+            "w",
+            encoding="utf-8",
+        ) as f:
+            json.dump(
+                train_sample.model_dump(exclude={"actions"}),
+                f,
+                ensure_ascii=False,
+                indent=0,
+            )
 
         # Add metadata for the main process to collect
         results.append(
@@ -715,19 +756,75 @@ def process_single_video(
     return results
 
 
+def chunkify(lst, n):
+    """Split list into n roughly equal chunks."""
+    k, m = divmod(len(lst), n)
+    return [lst[i * k + min(i, m) : (i + 1) * k + min(i + 1, m)] for i in range(n)]
+
+
+def thread_worker(video_args, lock):
+    """Thread worker function that processes a single video."""
+    try:
+        results = process_single_video(video_args)
+        return (video_args[0], results, None)  # video_path, results, error
+    except Exception:
+        return (video_args[0], [], traceback.format_exc())
+
+
+def process_worker(video_args_chunk, threads_per_proc, lock, update_queue):
+    """
+    Runs in each separate process. Spins up a thread pool to process its chunk of videos.
+    Reports completion (with error or not) back via update_queue.
+    """
+    with ThreadPoolExecutor(max_workers=threads_per_proc) as executor:
+        futures = {
+            executor.submit(thread_worker, video_args, lock): video_args
+            for video_args in video_args_chunk
+        }
+        for fut in as_completed(futures):
+            video_path, results, err = fut.result()
+            # send results so main can aggregate them
+            update_queue.put((video_path, results, err))
+
+
+def progress_listener(total, update_queue, results_collector):
+    """
+    Runs in a thread in main process to consume updates and show progress bar.
+    Also collects results from all processes.
+    """
+    pbar = tqdm.tqdm(total=total, desc="Processing videos", unit="video")
+    completed = 0
+    while completed < total:
+        try:
+            video_path, results, err = update_queue.get(timeout=1)
+        except Exception:
+            continue
+        if err:
+            tqdm.tqdm.write(f"[!] Error processing {video_path}:\n{err}")
+        else:
+            tqdm.tqdm.write(f"Done processing {video_path} -> {len(results)} samples")
+            results_collector.extend(results)
+        completed += 1
+        pbar.update(1)
+    pbar.close()
+
+
 def process_videos(
     source_folders: list[str],
     output_dir: str,
     num_processes: int | None = None,
+    threads_per_process: int = 12,
     max_video_files: int | None = None,
 ):
     """
-    Process videos in parallel using multiprocessing from multiple source folders.
+    Process videos in parallel using multiprocessing + ThreadPoolExecutor from multiple source folders.
 
     Args:
         source_folders: List of directories containing source videos and actions
         output_dir: Directory to save processed results
         num_processes: Number of processes to use. If None, uses CPU count
+        threads_per_process: Number of threads per process (default: 12)
+        max_video_files: Maximum number of video files to process
     """
     # Discover all video files in the source folders
     video_files = discover_video_files(source_folders)
@@ -751,8 +848,8 @@ def process_videos(
 
     select_policy = DefaultSelectActionPolicy()
 
-    # Prepare arguments for each process
-    process_args = [
+    # Prepare arguments for each video
+    video_args = [
         (
             video_path,
             source_dir,
@@ -768,27 +865,57 @@ def process_videos(
     if num_processes is None:
         num_processes = multiprocessing.cpu_count()
 
-    print(f"Processing {len(video_files)} videos using {num_processes} processes...")
-
-    # Process videos in parallel
-    with multiprocessing.Pool(num_processes) as pool:
-        # Use imap to get progress feedback
-        results = []
-        for result_list in tqdm.tqdm(
-            pool.imap(process_single_video, process_args),
-            total=len(process_args),
-            desc="Processing videos",
-        ):
-            # Each video now returns a list of results (multiple train samples)
-            results.extend(result_list)
-
-    # Save aggregated results
-    train_samples_df = pd.DataFrame(results)
-    train_samples_df.to_json(
-        f"{output_dir}/train_samples.jsonl",
-        orient="records",
-        lines=True,
+    print(
+        f"Processing {len(video_files)} videos using {num_processes} processes x {threads_per_process} threads..."
     )
+
+    # Use multiprocessing + threading pattern
+    manager = Manager()
+    lock = manager.Lock()  # shared across processes
+    update_queue = manager.Queue()
+    results_collector = manager.list()  # shared list to collect results
+
+    # Start progress listener thread
+    listener = threading.Thread(
+        target=progress_listener,
+        args=(len(video_files), update_queue, results_collector),
+        daemon=True,
+    )
+    listener.start()
+
+    # Split video args among processes
+    chunks = chunkify(video_args, num_processes)
+    processes = []
+    for chunk in chunks:
+        if not chunk:
+            continue
+        p = Process(
+            target=process_worker,
+            args=(chunk, threads_per_process, lock, update_queue),
+        )
+        p.start()
+        processes.append(p)
+
+    try:
+        for p in processes:
+            p.join()
+    except KeyboardInterrupt:
+        print("Interrupted, terminating child processes...")
+        for p in processes:
+            p.terminate()
+
+    # Wait until listener sees all updates
+    listener.join()
+
+    # Convert results to regular list and save
+    results = list(results_collector)
+    if results:
+        train_samples_df = pd.DataFrame(results)
+        train_samples_df.to_json(
+            f"{output_dir}/train_samples.jsonl",
+            orient="records",
+            lines=True,
+        )
 
     print(f"Saved {len(results)} train samples to {output_dir}/train_samples.jsonl")
 
@@ -797,8 +924,11 @@ def main() -> None:
     process_videos(
         [
             "gs://induction-labs-data-ext/action_capture/Jarry/2025-07-07_002920_0SPCN",
+            "gs://induction-labs-data-ext/action_capture/aryan_91532/2025-07-07_170814_A2QD2",
+            "gs://induction-labs-data-ext/action_capture/aryan_91532/2025-07-07_143610_SBK20",
+            "gs://induction-labs-data-ext/action_capture/aryan_91532/2025-07-08_160952_VX5RU",
         ],
-        "gs://induction-labs/passive_data/2025-08-09/test_jarry_2",
+        "gs://induction-labs/passive_data/2025-08-09/jarry_aryan_data_2",
         # max_video_files=10,
     )
 
