@@ -45,7 +45,7 @@ class MouseMove(BaseModel):
 
 class MouseButton(BaseModel):
     action: Literal["mouse_button"] = "mouse_button"
-    button: Literal["left", "right", "middle"]
+    button: str #Literal["left", "right", "middle"]
     x: int
     y: int
     is_down: bool

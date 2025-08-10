@@ -52,6 +52,7 @@ def start_screen_record(
         cmd = [
             ffmpeg_path,
             "-f", "gdigrab",                     # <-- Windows screen-capture device
+            #"-init_hw_device", "qsv=hw,child_device_type=dxva2", "-filter_hw_device", "hw", "-f", "lavfi", "-i", "ddagrab",
             "-framerate", str(framerate),
             "-use_wallclock_as_timestamps", "1",
             "-draw_mouse", "1",                 # <-- equivalent to -capture_cursor 1
@@ -60,7 +61,7 @@ def start_screen_record(
             "-c:v", "libx264",
             "-g", "15",
             "-c:a", "aac",                      # harmless if no audio stream is present
-            "-preset", "veryfast",
+            "-preset", "ultrafast",
             "-crf", "17",
             "-copyts",
             "-muxdelay", "0",
@@ -166,7 +167,7 @@ def on_segment_finished(filename: str, gs_file_path: str, callback=None):
 @app.command()
 def run(
     username: str | None = None,
-    output_bucket: str = "induction-labs-data-ext",
+    output_bucket: str = "induction-labs-data-ext-passive-mangodesk",
     video_segment_buffer_length: float = 30,
 ):
     if username is None:
@@ -213,6 +214,7 @@ def run(
         tmp_file_path + "screen_capture_%06d.mp4",
         segment_time=video_segment_buffer_length,
         device_index=device_id,
+        framerate=6,
     )
     print("[info] recording screen now.")
     pat = re.compile(r"\[segment @ [^\]]+\] Opening '([^']+)' for writing")
