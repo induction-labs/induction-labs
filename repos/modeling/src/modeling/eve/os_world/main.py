@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from datetime import timedelta
 from enum import Enum
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 import aiohttp
 import typer
@@ -26,7 +26,6 @@ from modeling.eve.vllm_utils import wait_for_servers_ready
 from modeling.utils.cloud_path import CloudPath
 from modeling.utils.max_timeout import max_timeout
 
-from .create_osworld_vms import AsyncVMRoundRobin, create_vm_pool
 from .osworld_endpoints import (
     end_action_record,
     evaluate,
@@ -101,6 +100,11 @@ class Language(str, Enum):
     EN = "en"
 
 
+class Platform(str, Enum):
+    AZURE = "azure"
+    GCP = "gcp"
+
+
 @dataclass
 class EvalOptions:
     use_thinking: bool = True
@@ -114,6 +118,7 @@ class EvalOptions:
 DEFAULT_TASKS_FILE = "gs://induction-labs/jonathan/osworld/osworld_subset_solved_by_annotators_induction_mirror.json"
 DEFAULT_MODEL_ENDPOINT = "http://localhost:8080/v1/chat/completions"
 DEFAULT_META_ENDPOINT = "http://100.110.93.44"
+# azure meta endpoint = "http://100.118.139.110"
 DEFAULT_LANGUAGE = Language.EN
 DEFAULT_TEMPERATURE = 0.3
 DEFAULT_TOP_P = 0.9
@@ -123,6 +128,15 @@ DEFAULT_PARALLEL_REQUESTS_PER_GPU = 12
 DEFAULT_PARALLEL_VMS = 3
 DEFAULT_TASK_REPEATS = 10
 DEFAULT_OUTPUT_FOLDER = "gs://induction-labs/evals/osworld-evals-testing/"
+
+
+def get_vm_pool(cloud: Platform) -> Any:
+    if cloud == Platform.AZURE:
+        from .create_osworld_vms_azure import create_vm_pool
+    elif cloud == Platform.GCP:
+        from .create_osworld_vms import create_vm_pool
+
+    return create_vm_pool
 
 
 async def evaluate_task(
@@ -243,7 +257,7 @@ async def eval_task_with_semaphore(
     output_folder: str,
     recording_output_folder: str,
     file_lock: asyncio.Lock,
-    vms: AsyncVMRoundRobin,
+    vms: Any,
     task: dict,
     meta_endpoint: str,
     task_index: int = 0,
@@ -297,6 +311,7 @@ async def eval_task_with_semaphore(
 
 async def evaluate_tasks_parallel(
     tasks: list,
+    cloud: Platform,
     eval_options: EvalOptions,
     output_folder: str,
     recording_output_folder: str,
@@ -305,6 +320,7 @@ async def evaluate_tasks_parallel(
     meta_endpoint: str,
     model_endpoint: str = "http://localhost:8080/v1/chat/completions",
 ):
+    create_vm_pool = get_vm_pool(cloud)
     vms = await create_vm_pool(
         num_vms=num_vms,
     )
@@ -365,6 +381,9 @@ async def run_evaluation(
     tasks_file: Annotated[
         str, typer.Argument(help="Path to tasks JSON file")
     ] = DEFAULT_TASKS_FILE,
+    cloud: Annotated[
+        Platform, typer.Option("--cloud", help="Cloud provider")
+    ] = Platform.GCP,
     model_endpoint: Annotated[
         str, typer.Option("--endpoint", help="Model endpoint URL")
     ] = DEFAULT_MODEL_ENDPOINT,
@@ -442,6 +461,8 @@ async def run_evaluation(
             cmd_parts.extend(["--output", output_folder])
         if max_tasks is not None:
             cmd_parts.extend(["--max-tasks", str(max_tasks)])
+        if cloud != Platform.GCP:
+            cmd_parts.extend(["--cloud", cloud.value])
 
         print(str(cmd_parts))
         return str(cmd_parts)
@@ -479,6 +500,7 @@ async def run_evaluation(
         try:
             await evaluate_tasks_parallel(
                 tasks=tasks,
+                cloud=cloud,
                 eval_options=EvalOptions(
                     use_thinking=True,
                     language=language,

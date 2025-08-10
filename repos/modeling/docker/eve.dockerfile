@@ -24,8 +24,10 @@ RUN --mount=type=secret,id=eval_gcp_secret_key \
 
 RUN --mount=type=secret,id=eval_gcp_secret_key \
   cp /run/secrets/eval_gcp_secret_key /secrets/gcp-service-account.json
+RUN --mount=type=secret,id=azure_secret_key \
+  cp /run/secrets/azure_secret_key /secrets/azure-service-account.json
 ENV GOOGLE_APPLICATION_CREDENTIALS=/secrets/gcp-service-account.json
-
+ENV AZURE_SECRET_KEY=/secrets/azure-service-account.json
 
 # # TODO: Make this build depend on vllm build, so we dont do this giant copy and have a huge layer.
 COPY repos/modeling/ /workspace/repos/modeling/
