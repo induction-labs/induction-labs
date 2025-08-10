@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Annotated
 
 import typer
+import wandb
 
 # Import the evaluate_csv function from the showdown clicks package
 from clicks.eval import evaluate_csv
@@ -65,8 +66,8 @@ async def run_clicks_evaluation(
     api_url: Annotated[
         str, typer.Option("--api-url", help="API endpoint for the UI-TARS model")
     ] = DEFAULT_API_URL,
-    ui_tars_model: Annotated[
-        str, typer.Option("--ui-tars-model", help="UI-TARS model name")
+    checkpoint_dir: Annotated[
+        str, typer.Option("--checkpoint-dir", help="UI-TARS model name")
     ] = DEFAULT_UI_TARS_MODEL,
     dataset: Annotated[
         str, typer.Option("--dataset", help="Dataset to evaluate on")
@@ -108,8 +109,8 @@ async def run_clicks_evaluation(
         # Add all options that differ from defaults
         if api_url != DEFAULT_API_URL:
             cmd_parts.extend(["--api-url", api_url])
-        if ui_tars_model != DEFAULT_UI_TARS_MODEL:
-            cmd_parts.extend(["--ui-tars-model", ui_tars_model])
+        if checkpoint_dir != DEFAULT_UI_TARS_MODEL:
+            cmd_parts.extend(["--checkpoint-dir", checkpoint_dir])
         if dataset != DEFAULT_DATASET:
             cmd_parts.extend(["--dataset", dataset])
         if num_workers != DEFAULT_NUM_WORKERS:
@@ -149,6 +150,25 @@ async def run_clicks_evaluation(
     run_output_folder = os.path.join(local_output_folder, run_id)
     os.makedirs(run_output_folder, exist_ok=True)
 
+    # Initialize wandb
+    wandb.init(
+        project="clicks-eval",
+        name=run_id,
+        config={
+            "api_url": api_url,
+            "checkpoint_dir": checkpoint_dir,
+            "dataset": dataset,
+            "num_workers": num_workers,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+            "frequency_penalty": frequency_penalty,
+            "sample_size": sample_size,
+            "output_folder": output_folder,
+            "cloud_output_path": cloud_output_path.uri if cloud_output_path else None,
+        },
+        tags=["clicks", "evaluation", "ui-tars"],
+    )
+
     # Download the dataset from GCS
     print("Downloading clicks dataset from GCS...")
     dataset_tmpdir = tempfile.mkdtemp(prefix="clicks_dataset_")
@@ -161,7 +181,8 @@ async def run_clicks_evaluation(
             max_tokens=max_tokens,
             temperature=temperature,
             frequency_penalty=frequency_penalty,
-            model_name=ui_tars_model,
+            # Model name is always blank because we set blank model name on vllm.
+            model_name="",
         )
 
         await asyncio.to_thread(
@@ -235,6 +256,32 @@ async def run_clicks_evaluation(
                 "sample_size": sample_size,
             }
 
+            # Log metrics to wandb
+            wandb.log(
+                {
+                    "accuracy": accuracy,
+                    "total_processed": total_processed,
+                    "total_in_bbox": total_in_bbox,
+                    "accuracy_percentage": accuracy,
+                    "success_rate": accuracy / 100.0,
+                }
+            )
+
+            # Log the full results as a table for detailed analysis
+            results_table = wandb.Table(
+                columns=["id", "is_in_bbox", "pixel_distance", "bbox_accuracy"],
+                data=[
+                    [
+                        result.get("id", ""),
+                        result.get("is_in_bbox", False),
+                        result.get("pixel_distance", 0),
+                        1.0 if result.get("is_in_bbox", False) else 0.0,
+                    ]
+                    for result in results
+                ],
+            )
+            wandb.log({"results_table": results_table})
+
             import json
 
             with open(os.path.join(run_output_folder, "metrics.json"), "w") as f:
@@ -257,6 +304,9 @@ async def run_clicks_evaluation(
             print("Upload completed!")
 
     finally:
+        # Finish wandb run
+        wandb.finish()
+
         # Clean up dataset temporary directory
         if os.path.exists(dataset_tmpdir):
             shutil.rmtree(dataset_tmpdir)

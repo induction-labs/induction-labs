@@ -400,6 +400,10 @@ async def run_evaluation(
         int | None,
         typer.Option("--max-tasks", help="Maximum number of unique tasks to evaluate"),
     ] = None,
+    checkpoint_dir: Annotated[
+        str, typer.Option("--checkpoint-dir", help="Model checkpoint directory")
+    ] = "",
+    # print_cmd: Annotated[bool, typer.Option("--print-cmd", help="Print command in k8s format and exit")] = False,
     print_cmd: Annotated[
         bool, typer.Option("--print-cmd", help="Print command in k8s format and exit")
     ] = False,
