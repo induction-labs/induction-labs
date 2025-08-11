@@ -10,6 +10,7 @@ from google.cloud import compute_v1
 dotenv.load_dotenv()
 
 # Your existing GCP functions (keeping them for reference)
+# SERVER_TEMPLATE_NAME = "osworld-annotation-server-us-central1-v6o-v2"
 SERVER_TEMPLATE_NAME = "osworld-annotation-server-us-central1-v5-1"
 SERVER_REGION = "us-central1-a"
 PROJECT_ID = "induction-labs"
@@ -302,3 +303,5 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
+# eve-c927v eve-dt6ss eve-mxcl2 eve-dfcq8 eve-9jk6n eve-gv6q6 eve-l9vgm

@@ -296,7 +296,7 @@ def parse_action_to_structure_output(
 
 
 def split_keep_delims(text: str, keep_empty: bool = False) -> list[str]:
-    pattern = r"(\\n|<Backspace>|<Delete>)"
+    pattern = r"(\\n|<Backspace>|<Delete>|\\t)"
 
     parts = re.split(pattern, text)
 
@@ -463,6 +463,8 @@ def parsing_response_to_pyautogui_code(
                         pyautogui_code += "\npyautogui.press('delete')"
                     elif piece == "\\n":
                         pyautogui_code += "\npyautogui.press('enter')"
+                    elif piece == "\\t":
+                        pyautogui_code += "\npyautogui.press('tab')"
                     else:
                         pyautogui_code += f"\npyautogui.write('{piece}', interval=0.1)"
                     pyautogui_code += "\ntime.sleep(0.25)\n"
