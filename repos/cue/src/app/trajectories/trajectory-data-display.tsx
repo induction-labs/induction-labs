@@ -60,7 +60,7 @@ export function TrajectoryDataDisplay({ trajectoryData, gsUrl }: TrajectoryDataD
   const averageReward = useMemo(() => {
     const numericRewards = filteredData.filter(r => typeof r.reward === 'number');
     if (numericRewards.length === 0) return '0.00';
-    const sum = numericRewards.reduce((sum: number, r: { reward: number | string }) => sum + (r.reward as number), 0);
+    const sum = numericRewards.reduce((sum: number, r: { reward?: number | string }) => sum + (typeof r.reward === 'number' ? r.reward : 0), 0);
     return (sum / numericRewards.length).toFixed(2);
   }, [filteredData]);
 

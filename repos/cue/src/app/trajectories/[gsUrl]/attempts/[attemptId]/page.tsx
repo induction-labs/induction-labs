@@ -38,6 +38,12 @@ export default function TrajectoryViewerPage({ params }: TrajectoryViewerPagePro
     { enabled: !!gsUrl && !!decodedAttemptId }
   );
 
+  // Fetch trajectory metadata data
+  const { data: trajectoryMetadata, isLoading: metadataLoading, error: metadataError } = api.trajectory.getTrajectoryMetadata.useQuery(
+    { gsUrl, attemptId: decodedAttemptId },
+    { enabled: !!gsUrl && !!decodedAttemptId }
+  );
+
   if (!attemptId) {
     return <div>Loading...</div>;
   }
@@ -150,10 +156,26 @@ export default function TrajectoryViewerPage({ params }: TrajectoryViewerPagePro
               <CardTitle>Analysis & Insights</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="text-center py-8 text-muted-foreground">
-                <p>Trajectory analysis and insights will be displayed here</p>
-                <p className="text-sm mt-2">This could include performance metrics, decision points, etc.</p>
-              </div>
+              {metadataLoading ? (
+                <div className="text-center py-8 text-muted-foreground">
+                  <p>Loading trajectory metadata...</p>
+                </div>
+              ) : metadataError ? (
+                <div className="text-center py-8 text-destructive">
+                  <p>Failed to load trajectory metadata: {metadataError.message}</p>
+                </div>
+              ) : trajectoryMetadata ? (
+                <div className="space-y-4">
+                  <h4 className="text-sm font-medium">Trajectory Metadata</h4>
+                  <pre className="bg-muted p-3 rounded text-xs overflow-auto">
+                    {JSON.stringify(trajectoryMetadata, null, 2)}
+                  </pre>
+                </div>
+              ) : (
+                <div className="text-center py-8 text-muted-foreground">
+                  <p>No metadata found for trajectory</p>
+                </div>
+              )}
             </CardContent>
           </Card>
         </div>

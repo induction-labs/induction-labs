@@ -1,6 +1,8 @@
+/* eslint-disable @typescript-eslint/no-unsafe-call */
 "use client";
 
 import { useState } from "react";
+import { useKeyPress } from 'ahooks';
 import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
 import { Button } from "~/components/ui/button";
 import { Badge } from "~/components/ui/badge";
@@ -15,6 +17,31 @@ interface TrajectoryStepViewerProps {
 export function TrajectoryStepViewer({ steps }: TrajectoryStepViewerProps) {
   const [currentStepIndex, setCurrentStepIndex] = useState(0);
 
+
+  const currentStep = steps[currentStepIndex];
+  const canGoPrevious = currentStepIndex > 0;
+  const canGoNext = currentStepIndex < steps.length - 1;
+
+  const handlePrevious = () => {
+    if (canGoPrevious) {
+      setCurrentStepIndex(currentStepIndex - 1);
+    }
+  };
+
+  const handleNext = () => {
+    if (canGoNext) {
+      setCurrentStepIndex(currentStepIndex + 1);
+    }
+  };
+
+  // Add keyboard navigation
+  useKeyPress('leftarrow', () => {
+    handlePrevious();
+  });
+
+  useKeyPress('rightarrow', () => {
+    handleNext();
+  });
   if (!steps || steps.length === 0) {
     return (
       <Card>
@@ -33,25 +60,11 @@ export function TrajectoryStepViewer({ steps }: TrajectoryStepViewerProps) {
     );
   }
 
-  const currentStep = steps[currentStepIndex];
-  const canGoPrevious = currentStepIndex > 0;
-  const canGoNext = currentStepIndex < steps.length - 1;
-
-  const handlePrevious = () => {
-    if (canGoPrevious) {
-      setCurrentStepIndex(currentStepIndex - 1);
-    }
-  };
-
-  const handleNext = () => {
-    if (canGoNext) {
-      setCurrentStepIndex(currentStepIndex + 1);
-    }
-  };
 
   if (!currentStep) {
     return null;
   }
+
 
   return (
     <Card>
@@ -78,11 +91,11 @@ export function TrajectoryStepViewer({ steps }: TrajectoryStepViewerProps) {
             <ChevronLeft className="mr-2 h-4 w-4" />
             Previous
           </Button>
-          
+
           <div className="text-sm text-muted-foreground">
             {currentStepIndex + 1} / {steps.length}
           </div>
-          
+
           <Button
             variant="outline"
             size="sm"

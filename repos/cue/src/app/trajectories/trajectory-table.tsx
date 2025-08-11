@@ -202,7 +202,7 @@ export function TrajectoryTable({ data, gsUrl }: TrajectoryTableProps) {
                   sortedData.map((record, index) => {
                     const encodedAttemptId = encodeURIComponent(record.attempt_id);
                     const trajectoryHref = gsUrl ? `/trajectories/${gsUrl}/attempts/${encodedAttemptId}` : '#';
-                    
+
                     return (
                       <TableRow key={`${record.eval_task_id}-${record.attempt_id}-${index}`}>
                         <TableCell>
@@ -229,9 +229,11 @@ export function TrajectoryTable({ data, gsUrl }: TrajectoryTableProps) {
                           <Badge variant="outline">{record.trajectory_length}</Badge>
                         </TableCell>
                         <TableCell className="text-center">
-                          <Badge variant={getRewardColor(record.reward)}>
-                            {formatReward(record.reward)}
-                          </Badge>
+                          {record.reward && (
+                            <Badge variant={getRewardColor(record.reward)}>
+                              {formatReward(record.reward)}
+                            </Badge>
+                          )}
                         </TableCell>
                       </TableRow>
                     );

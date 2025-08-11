@@ -197,20 +197,12 @@ export default function StatsPage() {
         }
       });
 
-      // Create DataFrame for calculateCIs function
-      // const data = taskRewards.map((reward, index) => ({
-      //   eval_task_id: `task_${index}`,
-      //   reward: reward
-      // }));
-      // const df = new dfd.DataFrame(data);
-
-      // const df = new DataFrame(data);
       return calculateCIs(taskRewards, k);
     };
 
     // Calculate CI for average reward (using all numeric rewards)
     const numericRewards = trajectoryData.records
-      .filter(r => typeof r.reward === 'number');
+      .filter(r => typeof r.reward === 'number') as { eval_task_id: string, reward: number }[];
 
     let avgRewardCI = { mean: 0, std: 0, ciLower: 0, ciUpper: 0 };
     if (numericRewards.length > 0) {
