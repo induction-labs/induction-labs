@@ -8,6 +8,11 @@ from urllib.parse import urlparse
 
 from google.cloud import storage
 
+try:
+    from importlib.metadata import version
+except ImportError:
+    from importlib_metadata import version
+
 
 def get_bundled_credentials_path() -> str:
     """Get path to bundled service account credentials"""
@@ -59,14 +64,26 @@ def upload_to_gcs_and_delete(from_path: str, to_path: str):
     # print(f"Uploaded {from_path} → gs://{bucket_name}/{blob_name} and deleted local file.")
 
 
-def recording_metadata(username: str, video_segment_buffer_length: float) -> dict:
+def recording_metadata(
+    username: str, video_segment_buffer_length: float, gs_file_path: str, framerate: int
+) -> dict:
     from pynput.screen import ScreenInfo
 
     physical_pixel_width, physical_pixel_height = ScreenInfo.get_screen_dimensions()
     logical_pixel_ratio = ScreenInfo.physical_to_logical_ratio()
+
+    # Get the action collector version
+    try:
+        action_collector_version = version("actioncollector")
+    except Exception:
+        action_collector_version = "unknown"
+
     return {
         "timestamp": datetime.datetime.now().isoformat(),
         "username": username,
+        "action_collector_version": action_collector_version,
+        "gs_file_path": gs_file_path,
+        "framerate": framerate,
         "screen_info": {
             "video_width": int(physical_pixel_width),
             "video_height": int(physical_pixel_height),

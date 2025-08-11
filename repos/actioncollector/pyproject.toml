@@ -73,7 +73,10 @@ gooey = { git = "ssh://git@github.com/induction-labs/gooey.git", branch = "pypi_
 synapse = { workspace = true }
 
 [dependency-groups]
-dev = ["ipykernel>=6.29.5", "pyinstaller>=6.14.1"]
+dev = [
+    "ipykernel>=6.29.5",
+    "pyinstaller>=6.14.1",
+]
 
 [project.scripts]
 collect = "actioncollector.main:app"

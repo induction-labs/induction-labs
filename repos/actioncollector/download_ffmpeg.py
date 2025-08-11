@@ -26,7 +26,10 @@ def download_ffmpeg_mac():
 
     # FFmpeg download URL for macOS (Intel)
     # Using a reliable source for ffmpeg binaries
-    ffmpeg_url = "https://evermeet.cx/ffmpeg/ffmpeg-7.1.1.zip"
+    # ffmpeg_url = "https://evermeet.cx/ffmpeg/ffmpeg-7.1.1.zip"
+    ffmpeg_url = (
+        "https://ffmpeg.martin-riedl.de/redirect/latest/macos/arm64/release/ffmpeg.zip"
+    )
 
     try:
         # Download ffmpeg
@@ -71,10 +74,21 @@ def check_ffmpeg_exists():
     """Check if ffmpeg binary already exists"""
     bin_dir = Path("bin")
     ffmpeg_path = bin_dir / "ffmpeg"
-
-    if ffmpeg_path.exists():
-        print(f"FFmpeg binary already exists at {ffmpeg_path}")
+    if not ffmpeg_path.exists():
+        print(f"FFmpeg binary not found at {ffmpeg_path}, downloading...")
+        return False
+    # Check if the file is executable
+    if ffmpeg_path.is_file() and os.access(ffmpeg_path, os.X_OK):
+        print(f"FFmpeg binary exists and is executable at {ffmpeg_path}")
         return True
+    result = subprocess.run(
+        [str(ffmpeg_path), "-version"], capture_output=True, text=True
+    )
+    if result.returncode == 0:
+        print("FFmpeg binary exists and is executable")
+        return True
+    # If the file exists but is not executable, we will download again
+    print(f"FFmpeg binary exists but is not executable at {ffmpeg_path}")
     return False
 
 

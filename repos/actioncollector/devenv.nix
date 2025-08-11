@@ -7,6 +7,7 @@
 }: {
   packages = [
     pkgs.zlib
+    pkgs.ffmpeg.dev
   ];
 
   languages.python = {
