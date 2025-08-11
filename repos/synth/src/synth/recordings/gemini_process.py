@@ -35,7 +35,14 @@ from synapse.video_loader.video import (
 )
 from synth.recordings.action_models import FinishedAction
 from synth.recordings.image_utils import pil_to_bytes
-from synth.recordings.parse_actions import Action, Point, ScrollAction, parse_actions
+from synth.recordings.parse_actions import (
+    Action,
+    HotkeyAction,
+    Point,
+    ScrollAction,
+    TypeAction,
+    parse_actions,
+)
 from synth.recordings.synth_captions_generated_samples import (
     PROMPT_WITHOUT_NEXT,
     extract_frames_by_pts_from_container,
@@ -51,6 +58,19 @@ gem_client = genai.Client()
 
 def is_close(a: Point, b: Point, tol: float = 10) -> bool:
     return abs(a.x - b.x) <= tol and abs(a.y - b.y) <= tol
+
+
+def is_good_action_sequence(actions: list[Action]) -> bool:
+    # Check that there is at least one typing action
+    typing_actions = sum(isinstance(action.action, TypeAction) for action in actions)
+    if typing_actions == 0:
+        return False
+    hotkey_actions = sum(isinstance(action.action, HotkeyAction) for action in actions)
+    if hotkey_actions >= 5:
+        return False
+
+    ""
+    return True
 
 
 def reverse_chunk_actions_to_length(
@@ -72,7 +92,7 @@ def reverse_chunk_actions_to_length(
     action_blocks = [last_block]
     for i in range(len(actions) - length + 1, -1, -length):
         block = actions[i : i + length]
-        if len(block) == length:
+        if len(block) == length and is_good_action_sequence(block):
             action_blocks.append(block)
     return action_blocks
 
@@ -122,6 +142,42 @@ def segment_actions_by_time_gaps(
         segments.append(current_segment)
 
     return segments
+
+
+def is_arrow_action(action: Action) -> bool:
+    return isinstance(action.action, HotkeyAction) and (
+        action.action.key in ["up", "down", "left", "right"]
+    )
+
+
+def combine_arrow_actions(actions: list[Action]) -> list[Action]:
+    new_actions: list[Action] = []
+    i = 0
+    while i < len(actions):
+        action = actions[i]
+        i += 1
+        if (
+            not isinstance(action.action, HotkeyAction)
+            or not is_arrow_action(action)
+            or not action.action.modifiers
+        ):
+            new_actions.append(action)
+            continue
+        combined_arrow_action = action
+        while (
+            i < len(actions)
+            and isinstance(actions[i].action, HotkeyAction)
+            and is_arrow_action(actions[i])
+            and not actions[i].action.modifiers
+            and actions[i].end_timestamp - combined_arrow_action.timestamp < 0.5
+        ):
+            next_action = actions[i]
+            combined_arrow_action.action.key += " " + next_action.action.key
+            combined_arrow_action.end_timestamp = next_action.end_timestamp
+            i += 1
+
+        new_actions.append(combined_arrow_action)
+    return new_actions
 
 
 def combine_scroll_actions(actions: list[Action]) -> list[Action]:
@@ -275,8 +331,9 @@ def get_thinking_texts(
             types.Part.from_bytes(data=all_frames[i], mime_type="image/png"),
             types.Part.from_bytes(data=all_frames[i + 1], mime_type="image/png"),
         ]
-        # model = "gemini-2.5-flash"
-        model = "gemini-2.5-pro"
+        model = "gemini-2.5-flash"
+
+        # model = "gemini-2.5-pro"
         model_response = gem_client.models.generate_content(
             model=model, contents=contents
         )
@@ -896,7 +953,7 @@ def process_videos(
     }
     action_sets = {
         k: transform_action_coords_list(
-            combine_scroll_actions(parse_actions(v)),
+            combine_scroll_actions(combine_arrow_actions(parse_actions(v))),
             target_resolutions[k],
             video_metadatas[k],
         )
