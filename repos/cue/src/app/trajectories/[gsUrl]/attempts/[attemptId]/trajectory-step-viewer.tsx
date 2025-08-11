@@ -1,14 +1,16 @@
 /* eslint-disable @typescript-eslint/no-unsafe-call */
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useKeyPress } from 'ahooks';
 import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
 import { Button } from "~/components/ui/button";
 import { Badge } from "~/components/ui/badge";
-import { ChevronLeft, ChevronRight, Play, Pause } from "lucide-react";
+import { Switch } from "~/components/ui/switch";
+import { Label } from "~/components/ui/label";
+import { ChevronLeft, ChevronRight, Play, } from "lucide-react";
 import { type TrajectorySteps } from "~/lib/schemas/trajectory";
-import Image from "next/image";
+
 
 interface TrajectoryStepViewerProps {
   steps: TrajectorySteps;
@@ -16,11 +18,60 @@ interface TrajectoryStepViewerProps {
 
 export function TrajectoryStepViewer({ steps }: TrajectoryStepViewerProps) {
   const [currentStepIndex, setCurrentStepIndex] = useState(0);
+  const [showClickOverlay, setShowClickOverlay] = useState(true);
+  const [imageDimensions, setImageDimensions] = useState<{ width: number, height: number } | null>(null);
 
+  // Get image dimensions from base64 image data
+  const getImageDimensions = useCallback((base64Data: string) => {
+    return new Promise<{ width: number, height: number }>((resolve, reject) => {
+      const img = document.createElement('img');
+      img.onload = () => {
+        resolve({ width: img.naturalWidth, height: img.naturalHeight });
+      };
+      img.onerror = reject;
+      img.src = `data:image/png;base64,${base64Data}`;
+    });
+  }, []);
+
+  // Extract click coordinates from action field
+  const extractClickCoordinates = (action: string) => {
+    const pointRegex = /<point>(\d+)\s+(\d+)<\/point>/;
+    const match = pointRegex.exec(action);
+    if (match) {
+      return {
+        x: parseInt(match[1]!),
+        y: parseInt(match[2]!)
+      };
+    }
+    return null;
+  };
+
+  // Normalize coordinates to percentage of image dimensions
+  const normalizeCoordinates = (coords: { x: number, y: number }) => {
+    if (!imageDimensions) return null;
+    return {
+      x: (coords.x / imageDimensions.width) * 100,
+      y: (coords.y / imageDimensions.height) * 100
+    };
+  };
 
   const currentStep = steps[currentStepIndex];
   const canGoPrevious = currentStepIndex > 0;
   const canGoNext = currentStepIndex < steps.length - 1;
+
+  // Load image dimensions when step changes
+  useEffect(() => {
+    if (currentStep?.image) {
+      getImageDimensions(currentStep.image)
+        .then(setImageDimensions)
+        .catch((error) => {
+          console.warn('Failed to get image dimensions:', error);
+          setImageDimensions(null);
+        });
+    } else {
+      setImageDimensions(null);
+    }
+  }, [currentStep?.image, getImageDimensions]);
 
   const handlePrevious = () => {
     if (canGoPrevious) {
@@ -92,8 +143,20 @@ export function TrajectoryStepViewer({ steps }: TrajectoryStepViewerProps) {
             Previous
           </Button>
 
-          <div className="text-sm text-muted-foreground">
-            {currentStepIndex + 1} / {steps.length}
+          <div className="flex items-center space-x-4">
+            <div className="text-sm text-muted-foreground">
+              {currentStepIndex + 1} / {steps.length}
+            </div>
+            <div className="flex items-center space-x-2">
+              <Switch
+                id="click-overlay"
+                checked={showClickOverlay}
+                onCheckedChange={setShowClickOverlay}
+              />
+              <Label htmlFor="click-overlay" className="text-sm">
+                Show clicks
+              </Label>
+            </div>
           </div>
 
           <Button
@@ -112,15 +175,46 @@ export function TrajectoryStepViewer({ steps }: TrajectoryStepViewerProps) {
           {/* Screenshot - 2/3 Width */}
           <div className="lg:col-span-2 space-y-2">
             <h3 className="text-sm font-medium text-muted-foreground">Screenshot</h3>
-            <div className="relative border rounded-lg overflow-hidden bg-muted aspect-video">
+            <div className="border rounded-lg overflow-hidden bg-muted aspect-video justify-center flex items-center">
               {currentStep.image ? (
-                <Image
-                  src={`data:image/png;base64,${currentStep.image}`}
-                  alt={`Step ${currentStep.step} screenshot`}
-                  fill
-                  className="object-contain"
-                  unoptimized={true}
-                />
+                <>
+                  <div className="relative h-full">
+                    {
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={`data:image/png;base64,${currentStep.image}`}
+                        alt={`Step ${currentStep.step} screenshot`}
+                        style={{
+                          height: '100%',
+                        }}
+                        className="object-contain"
+
+                      />
+                    }
+                    {/* Click overlay */}
+                    {showClickOverlay && currentStep.action && (() => {
+                      const coords = extractClickCoordinates(currentStep.action);
+                      if (coords) {
+                        const normalizedCoords = normalizeCoordinates(coords);
+                        if (normalizedCoords) {
+                          return (
+                            <div
+                              className="absolute rounded-full border-2 border-red-500 bg-red-500/20 pointer-events-none"
+                              style={{
+                                left: `${normalizedCoords.x}%`,
+                                top: `${normalizedCoords.y}%`,
+                                width: '10px',
+                                height: '10px',
+                                transform: 'translate(-50%, -50%)',
+                              }}
+                            />
+                          );
+                        }
+                      }
+                      return null;
+                    })()}
+                  </div>
+                </>
               ) : (
                 <div className="flex items-center justify-center h-full text-muted-foreground">
                   No image available
