@@ -206,7 +206,7 @@ def download_to_tmp(gs_path: str, tmp_root: str = "/tmp") -> str:
     return local_path
 
 
-def extract_frames_by_pts(video_path, pts_list) -> list[PIL.Image.Image]:
+def extract_frames_by_pts(video_path, pts_list) -> list[tuple[float, PIL.Image.Image]]:
     """
     Extract frames from video at specific PTS timestamps.
 
@@ -231,7 +231,7 @@ def extract_frames_by_pts_from_container(
     timestamps: list[float],
     buffer_src: FilterContext | None = None,
     buffer_sink: FilterContext | None = None,
-) -> list[PIL.Image.Image]:
+) -> list[tuple[float, PIL.Image.Image]]:
     """
     Extract frames from video at specific PTS timestamps.
 
@@ -242,7 +242,7 @@ def extract_frames_by_pts_from_container(
     Returns:
         list: List of PIL Image objects
     """
-    frames = []
+    frames: list[tuple[float, PIL.Image.Image]] = []
 
     stream = container.streams.video[0]
     time_base = stream.time_base
@@ -260,6 +260,7 @@ def extract_frames_by_pts_from_container(
 
         for frame in container.decode(stream):
             last_frame = frame
+            frame_timestamp = float(frame.pts * time_base)
             if frame.pts >= pts:
                 # print(
                 # f"Extracting frame at PTS {float(frame.pts * time_base)} (requested {timestamp})"
@@ -270,10 +271,16 @@ def extract_frames_by_pts_from_container(
                     filtered_frame: av.VideoFrame = cast(
                         av.VideoFrame, buffer_sink.pull()
                     )
-                    frames.append(filtered_frame.to_image())
-                    frame_found = True
-                    break
-                frames.append(frame.to_image())
+                    assert frame.pts == filtered_frame.pts, (
+                        f"{frame.pts=}, {filtered_frame.pts=}"
+                    )
+                    frame = filtered_frame
+                frames.append(
+                    (
+                        frame_timestamp,
+                        frame.to_image(),
+                    )
+                )
                 frame_found = True
                 break
 
@@ -286,9 +293,16 @@ def extract_frames_by_pts_from_container(
                 # If we have a filter graph, push the last frame through it
                 buffer_src.push(last_frame)
                 filtered_frame: av.VideoFrame = cast(av.VideoFrame, buffer_sink.pull())
-                frames.append(filtered_frame.to_image())
-            else:
-                frames.append(last_frame.to_image())
+                assert last_frame.pts == filtered_frame.pts, (
+                    f"{last_frame.pts=}, {filtered_frame.pts=}"
+                )
+
+            frames.append(
+                (
+                    float(last_frame.pts * time_base),
+                    last_frame.to_image(),
+                )
+            )
 
     return frames
 

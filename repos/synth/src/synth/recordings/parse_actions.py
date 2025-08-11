@@ -475,6 +475,8 @@ def parse_actions(raw_actions: list[dict]) -> list[Action]:
                             continue
 
                         hotkey_endtime = actions[lookahead_i]["timestamp"]
+                        if key == "tab" or key == "`":
+                            hotkey_endtime += 0.1
                         break
 
                     # print(f"{lookahead_modifier_keys_future=}")

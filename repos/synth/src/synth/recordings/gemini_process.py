@@ -109,8 +109,8 @@ def combine_scroll_actions(actions: list[Action]) -> list[Action]:
 
 
 MIN_ACTIONS_THRESHOLD = 6
-SS_DELAY = 0.2
-BEFORE_ACTION_BUFFER = 0.05
+SS_DELAY = 0.25
+BEFORE_ACTION_BUFFER = -0.05
 
 
 def get_timesteps_range(actions: list[Action]) -> tuple[float, list[float]]:
@@ -912,23 +912,23 @@ def process_videos(
     if results:
         train_samples_df = pd.DataFrame(results)
         train_samples_df.to_json(
-            f"{output_dir}/train_samples.jsonl",
+            f"{output_dir}/samples.jsonl",
             orient="records",
             lines=True,
         )
 
-    print(f"Saved {len(results)} train samples to {output_dir}/train_samples.jsonl")
+    print(f"Saved {len(results)} train samples to {output_dir}/samples.jsonl")
 
 
 def main() -> None:
     process_videos(
         [
-            "gs://induction-labs-data-ext/action_capture/Jarry/2025-07-07_002920_0SPCN",
-            "gs://induction-labs-data-ext/action_capture/aryan_91532/2025-07-07_170814_A2QD2",
-            "gs://induction-labs-data-ext/action_capture/aryan_91532/2025-07-07_143610_SBK20",
-            "gs://induction-labs-data-ext/action_capture/aryan_91532/2025-07-08_160952_VX5RU",
+            "gs://induction-labs-data-ext/action_capture/jeffrey/2025-08-10_133207_0V8HU",
+            # "gs://induction-labs-data-ext/action_capture/aryan_91532/2025-07-07_170814_A2QD2",
+            # "gs://induction-labs-data-ext/action_capture/aryan_91532/2025-07-07_143610_SBK20",
+            # "gs://induction-labs-data-ext/action_capture/aryan_91532/2025-07-08_160952_VX5RU",
         ],
-        "gs://induction-labs/passive_data/2025-08-09/jarry_aryan_data_2",
+        "gs://induction-labs/passive_data/2025-08-10/jeffrey-lowfps-test",
         # max_video_files=10,
     )
 
