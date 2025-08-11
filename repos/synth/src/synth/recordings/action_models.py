@@ -35,7 +35,7 @@ class ClickAction(ActionBase):
 
     def dump_to_text(self) -> str:
         modifier_part = get_modifiers_str(self.modifiers)
-        return f"click(point='<point>{self.point.x} {self.point.y}</point>'{modifier_part})"
+        return f"click(start_box='({self.point.x},{self.point.y})'{modifier_part})"
 
 
 class LeftDoubleAction(ActionBase):
@@ -48,7 +48,9 @@ class LeftDoubleAction(ActionBase):
 
     def dump_to_text(self) -> str:
         modifier_part = get_modifiers_str(self.modifiers)
-        return f"left_double(point='<point>{self.point.x} {self.point.y}</point>'{modifier_part})"
+        return (
+            f"left_double(start_box='({self.point.x},{self.point.y})'{modifier_part})"
+        )
 
 
 class RightSingleAction(ActionBase):
@@ -61,7 +63,9 @@ class RightSingleAction(ActionBase):
 
     def dump_to_text(self) -> str:
         modifier_part = get_modifiers_str(self.modifiers)
-        return f"right_single(point='<point>{self.point.x} {self.point.y}</point>'{modifier_part})"
+        return (
+            f"right_single(start_box='({self.point.x},{self.point.y})'{modifier_part})"
+        )
 
 
 class DragAction(ActionBase):
@@ -76,8 +80,8 @@ class DragAction(ActionBase):
     def dump_to_text(self) -> str:
         modifier_part = get_modifiers_str(self.modifiers)
         return (
-            f"drag(start_point='<point>{self.start_point.x} {self.start_point.y}</point>', "
-            f"end_point='<point>{self.end_point.x} {self.end_point.y}</point>'{modifier_part})"
+            f"drag(start_box='({self.start_point.x},{self.start_point.y})', "
+            f"end_box='({self.end_point.x},{self.end_point.y})'{modifier_part})"
         )
 
 
@@ -113,10 +117,7 @@ class ScrollAction(ActionBase):
     )
 
     def dump_to_text(self) -> str:
-        return (
-            f"scroll(point='<point>{self.point.x} {self.point.y}</point>', "
-            f"direction='{self.direction}')"
-        )
+        return f"scroll(direction='{self.direction}', start_box='({self.point.x},{self.point.y})')"
 
 
 class WaitAction(ActionBase):

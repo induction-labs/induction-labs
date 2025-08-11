@@ -2,30 +2,30 @@ from __future__ import annotations
 
 import base64
 import json
-import logging
 import multiprocessing
-import re
 import secrets
 import string
 import tempfile
 import threading
 import traceback
-from abc import abstractmethod
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from fractions import Fraction
 from multiprocessing import Manager, Process
-from pathlib import Path
-from typing import Protocol
+from multiprocessing.managers import ListProxy
+from queue import Empty, Queue
 
 import av
 import dotenv
-import fsspec as fs
 import gcsfs
 import pandas as pd
+import PIL
+import PIL.Image
 import tqdm
 from google import genai
 from google.genai import types
 from pydantic import BaseModel
-from smart_open import open
+from smart_open import open as smart_open
+from synapse.utils.logging import configure_logging, logging
 from synapse.video_loader.typess import VideoResolution, resolution_1080p
 from synapse.video_loader.video import (
     VideoMetadataFetcher,
@@ -44,37 +44,84 @@ from synth.recordings.synth_captions_generated_samples import (
 
 dotenv.load_dotenv()
 
-# Set up logging
-logger = logging.getLogger(__name__)
+logger = configure_logging(__file__, logging.INFO)
 
 gem_client = genai.Client()
 
 
-# Make a file a ./a.txt
-
-
-def load_actions(path: Path) -> list[dict]:
-    """
-    Load actions from a given path.
-    """
-    actions: list[dict] = []
-    with fs.open(path, "r") as f:
-        for line in f:
-            action = json.loads(line)
-            actions.append(action)
-    return actions
-
-
-# Example:
-# s, e = get_video_time_bounds_pyav("example.mp4")
-# print(s, e)
-# Example:
-# s, e = get_video_time_bounds("example.mp4")
-# print(s, e)
-
-
 def is_close(a: Point, b: Point, tol: float = 10) -> bool:
     return abs(a.x - b.x) <= tol and abs(a.y - b.y) <= tol
+
+
+def reverse_chunk_actions_to_length(
+    actions: list[Action],
+    length: int = 5,
+) -> list[list[Action]]:
+    if len(actions) < length - 1:
+        return []
+    actions, last_block = actions[: -length + 1], actions[-length + 1 :]
+    last_block.append(
+        Action(
+            action=FinishedAction(),
+            timestamp=last_block[-1].end_timestamp + SS_DELAY + BEFORE_ACTION_BUFFER,
+            end_timestamp=last_block[-1].end_timestamp
+            + SS_DELAY
+            + BEFORE_ACTION_BUFFER,
+        )
+    )
+    action_blocks = [last_block]
+    for i in range(len(actions) - length + 1, -1, -length):
+        block = actions[i : i + length]
+        if len(block) == length:
+            action_blocks.append(block)
+    return action_blocks
+
+
+def segment_actions_by_time_gaps(
+    actions: list[Action],
+    gap_threshold: float = 5.0,
+) -> list[list[Action]]:
+    """
+    Segment actions into chunks based on time gaps between consecutive actions.
+
+    Args:
+        actions: List of actions to segment
+        gap_threshold: Time threshold in seconds for creating new segment (default: 5.0)
+        actions_per_segment: Maximum number of actions per segment (default: 5)
+
+    Returns:
+        List of action chunks, where each chunk is a list of consecutive actions
+        without large time gaps
+    """
+    if not actions:
+        return []
+
+    # Sort actions by timestamp to ensure proper ordering
+    sorted_actions = sorted(actions, key=lambda a: a.timestamp)
+
+    segments = []
+    current_segment = [sorted_actions[0]]
+
+    for i in range(1, len(sorted_actions)):
+        prev_action = sorted_actions[i - 1]
+        current_action = sorted_actions[i]
+
+        # Calculate gap between end of previous action and start of current action
+        time_gap = current_action.timestamp - prev_action.end_timestamp
+
+        if time_gap > gap_threshold:
+            # Gap is too large, start a new segment
+            segments.append(current_segment)
+            current_segment = [current_action]
+        else:
+            # Continue the current segment
+            current_segment.append(current_action)
+
+    # Don't forget the last segment
+    if current_segment:
+        segments.append(current_segment)
+
+    return segments
 
 
 def combine_scroll_actions(actions: list[Action]) -> list[Action]:
@@ -108,9 +155,8 @@ def combine_scroll_actions(actions: list[Action]) -> list[Action]:
     return new_actions
 
 
-MIN_ACTIONS_THRESHOLD = 6
-SS_DELAY = 0.25
-BEFORE_ACTION_BUFFER = -0.05
+SS_DELAY = 0.20
+BEFORE_ACTION_BUFFER = 0.0
 
 
 def get_timesteps_range(actions: list[Action]) -> tuple[float, list[float]]:
@@ -183,7 +229,8 @@ class SaveAction(BaseModel):
     image: str
     action: str
     text: str
-    thinking: str = ""
+    thinking: str
+    frame_metadata: FrameMetadata
 
 
 class ScreenInfo(BaseModel):
@@ -195,10 +242,11 @@ class ScreenInfo(BaseModel):
 
 
 class RecordingMetadata(BaseModel):
-    timestamp: str
+    timestamp: float
     username: str
     screen_info: ScreenInfo
     video_segment_buffer_length: int
+    time_base: Fraction
 
 
 class TrainSample(BaseModel):
@@ -227,144 +275,75 @@ def get_thinking_texts(
             types.Part.from_bytes(data=all_frames[i], mime_type="image/png"),
             types.Part.from_bytes(data=all_frames[i + 1], mime_type="image/png"),
         ]
+        # model = "gemini-2.5-flash"
+        model = "gemini-2.5-pro"
         model_response = gem_client.models.generate_content(
-            model="gemini-2.5-pro", contents=contents
+            model=model, contents=contents
         )
         assert model_response.candidates, "No candidates returned from model"
         assert model_response.candidates[0].content
         assert model_response.candidates[0].content.parts, "No content parts returned"
         model_response_text = model_response.candidates[0].content.parts[0].text
         thinking_texts.append(model_response_text)
+        logger.debug(f"Thinking text for action {i}: {model_response_text}")
         old_turns.append(f"{model_response_text}\n{action.dump_to_text()}")
     return thinking_texts
 
 
-class SelectActionPolicy(Protocol):
-    @abstractmethod
-    def select_actions(self, actions: list[Action]) -> list[list[Action]]:
-        pass
-
-
-class DefaultSelectActionPolicy(SelectActionPolicy):
-    def select_actions(self, actions: list[Action]) -> list[list[Action]]:
-        """
-        Select actions from the list of actions in ranges of 5.
-        Returns multiple ranges of 5 actions until there are no more.
-        """
-        non_scroll_actions = [
-            action for action in actions if action.action.action_type != "scroll"
-        ]
-        if len(non_scroll_actions) < MIN_ACTIONS_THRESHOLD:
-            print(
-                f"Not enough actions to process: {len(non_scroll_actions)} < {MIN_ACTIONS_THRESHOLD}"
-            )
-            # If there are not enough actions, return an empty list
-            # or handle it as needed (e.g., return a default action)
-            return []
-
-        # Create ranges of 5 actions until there are no more
-        action_ranges = []
-        for i in range(0, len(actions), 5):
-            action_range = actions[i : i + 5]
-            if len(action_range) >= 5:  # Only add if we have enough actions
-                action_ranges.append(action_range)
-
-        return action_ranges
-
-
-def process_single_action_range(
-    video_container,
-    video_metadata,
-    selected_actions: list[Action],
-    metadata: RecordingMetadata,
-    video_path: str,
+def process_actions_range(
+    source_dir: str,
+    recording_metadata: RecordingMetadata,
+    target_resolution: VideoResolution,
+    actions: list[Action],
 ) -> TrainSample | None:
     """
-    Process a single range of actions to create one TrainSample.
+    Process a range of actions to create multiple TrainSamples.
 
     Args:
-        video_container: Open video container
-        video_metadata: Video metadata
-        selected_actions: List of actions to process (should be 5 actions)
-        metadata: Recording metadata
-        video_path: Path to the video file
+        source_dir: Source directory path (e.g., gs://bucket/folder)
+        recording_metadata: RecordingMetadata object
+        actions: List of actions to process
 
     Returns:
-        TrainSample or None if processing failed
+        List of TrainSamples created from the actions
     """
-
-    before_timestamp, action_end_timestamps = get_timesteps_range(selected_actions)
-
-    resize_h, resize_w = smart_resize(
-        video_metadata.resolution.height,
-        video_metadata.resolution.width,
-        min_pixels=0,
-        max_pixels=resolution_1080p.pixels,
+    first_t, rest_timestamps = get_timesteps_range(actions)
+    timestamps = [first_t, *rest_timestamps]
+    logger.debug(f"{timestamps=}")
+    frames_with_metadata = get_frames_at_timestamps(
+        source_dir,
+        recording_metadata,
+        timestamps,
+        target_resolution=target_resolution,
     )
-    output_resolution = VideoResolution(width=resize_w, height=resize_h)
-
-    # Transform action coordinates from logical pixel dimensions to resized dimensions
-    logical_width = metadata.screen_info.logical_pixel_width
-    logical_height = metadata.screen_info.logical_pixel_height
-
-    # Transform all actions to match the resized video dimensions
-
-    actions_to_process = [
-        transform_action_coordinates(
-            action, logical_width, logical_height, resize_w, resize_h
-        )
-        for action in selected_actions
-    ]
-
-    buffer_src, buffer_sink, filter_graph = get_resize_filter(
-        video_container.streams.video[0].format,
-        video_metadata.resolution,
-        output_resolution,
-        video_metadata.time_base,
-    )
-
-    frames = extract_frames_by_pts_from_container(
-        video_container,
-        [before_timestamp, *action_end_timestamps],
-        buffer_src,
-        buffer_sink,
-    )
-    assert len(frames) == len(action_end_timestamps) + 1, (
-        f"Expected {len(action_end_timestamps) + 1} frames, "
-        f"but got {len(frames)} for video {video_path}"
-    )
-
+    logger.debug("Got frames")
+    frames = [frame[0] for frame in frames_with_metadata]
+    frame_metadatas = [frame[1] for frame in frames_with_metadata]
     frame_buffers = [pil_to_bytes(frame, format="PNG") for frame in frames]
-    print(f"Extracted {len(frames)} frames for video {video_path}")
-
     try:
         video_instruction = get_video_instruction(
             frame_buffers[0],
             frame_buffers[1:],
-            actions_to_process,
+            actions,
         )
+        logger.debug("Got video instruction")
         if video_instruction is None:
-            logger.warning(f"Failed to generate video instruction for {video_path}")
+            logger.warning("Failed to generate video instruction ")
             return None
         instruction_text, instruction = video_instruction
     except Exception as e:
-        logger.error(
-            f"Error generating video instruction for {video_path}: {e}", exc_info=True
-        )
+        logger.error(f"Error generating video instruction {e}", exc_info=True)
         return None
-
     try:
-        # print(f"Generated instruction: {instruction_text}")
         thinking_texts = get_thinking_texts(
             frame_buffers[0],
             frame_buffers[1:],
-            actions_to_process,
+            actions,
             instruction_text,
         )
+        logger.debug("Got thinking texts")
     except Exception as e:
-        logger.error(
-            f"Error generating thinking texts for {video_path}: {e}", exc_info=True
-        )
+        logger.error(f"Error generating thinking texts for  {e}", exc_info=True)
         return None
     b64_images = [base64.b64encode(bytes).decode("utf-8") for bytes in frame_buffers]
     save_actions = [
@@ -374,115 +353,40 @@ def process_single_action_range(
             action=action.dump_to_text(),
             text=f"{thinking_texts[i]}\nAction: {action.dump_to_text()}",
             thinking=thinking_texts[i],
+            frame_metadata=frame_metadatas[i],
         )
-        for i, action in enumerate(actions_to_process)
+        for i, action in enumerate(actions)
     ]
     save_actions.append(
         SaveAction(
-            step=len(actions_to_process),
+            step=len(actions),
             image=b64_images[-1],
             action="finished()",
             text="Action: finished()",
             thinking="",
+            frame_metadata=frame_metadatas[-1],  # Use the last frame metadata
         )
     )
 
-    train_sample = TrainSample(
+    return TrainSample(
         actions=save_actions,
         instruction=instruction,
         metadata={
-            "video_path": video_path,
-            "start_time": float(video_metadata.start_pts * video_metadata.time_base),
-            "end_time": float(video_metadata.end_pts * video_metadata.time_base),
+            "source_dir": source_dir,
+            "start_time": float(frame_metadatas[0].timestamp),
+            "end_time": float(frame_metadatas[-1].timestamp),
             "instruction_text": instruction_text,
             "original_resolution": {
-                "width": video_metadata.resolution.width,
-                "height": video_metadata.resolution.height,
+                "width": recording_metadata.screen_info.video_width,
+                "height": recording_metadata.screen_info.video_height,
             },
             "output_resolution": {
-                "width": output_resolution.width,
-                "height": output_resolution.height,
+                "width": recording_metadata.screen_info.logical_pixel_width,
+                "height": recording_metadata.screen_info.logical_pixel_height,
             },
-            "logical_pixel_ratio": metadata.screen_info.logical_pixel_ratio,
+            "logical_pixel_ratio": recording_metadata.screen_info.logical_pixel_ratio,
         },
     )
-    return train_sample
-
-
-def video_process(
-    video_path: str,
-    actions_df: pd.DataFrame,
-    select_policy: SelectActionPolicy,
-    metadata: RecordingMetadata,
-) -> list[TrainSample]:
-    train_samples = []
-
-    with tempfile.NamedTemporaryFile(suffix=".mp4", delete=True) as f:
-        download_video_with_ffmpeg_copy(
-            source_path=video_path,
-            dest_path=f.name,
-            ffmpeg_path="/nix/store/q7j5awbg80d38p9my5b5zgn0xadgvbmb-ffmpeg-7.1.1-bin/bin/ffmpeg",
-        )
-        with av.open(f.name) as video_container:
-            video_metadata = VideoMetadataFetcher.get_video_metadata(
-                video_container.streams.video[0]
-            )
-            start_timestamp = float(video_metadata.start_pts * video_metadata.time_base)
-            end_timestamp = float(video_metadata.end_pts * video_metadata.time_base)
-            filtered_actions_df = actions_df[
-                (actions_df["start_timestamp"] >= start_timestamp)
-                & (actions_df["end_timestamp"] <= end_timestamp)
-            ]
-
-            filtered_actions: list[Action] = filtered_actions_df["action"].tolist()
-            selected_action_ranges = select_policy.select_actions(filtered_actions)
-            if len(selected_action_ranges) == 0:
-                return []
-
-            print(
-                f"Processing {len(selected_action_ranges)} action ranges for video {video_path}"
-            )
-
-            # Process each action range to create multiple train samples
-            for i, selected_actions in enumerate(selected_action_ranges):
-                import random
-
-                # 25% chance
-                if random.random() < 0.25:
-                    selected_actions[-1] = Action(
-                        action=FinishedAction(),
-                        timestamp=selected_actions[-2].end_timestamp
-                        + SS_DELAY
-                        + BEFORE_ACTION_BUFFER,
-                        end_timestamp=selected_actions[-2].end_timestamp
-                        + SS_DELAY
-                        + BEFORE_ACTION_BUFFER,
-                    )
-                print(f"Processing action range {i + 1}/{len(selected_action_ranges)}")
-
-                try:
-                    train_sample = process_single_action_range(
-                        video_container,
-                        video_metadata,
-                        selected_actions,
-                        metadata,
-                        video_path,
-                    )
-
-                    if train_sample is not None:
-                        train_samples.append(train_sample)
-                    else:
-                        logger.warning(
-                            f"Action range {i + 1}/{len(selected_action_ranges)} returned None for video {video_path}"
-                        )
-                except Exception as e:
-                    logger.error(
-                        f"Error processing action range {i + 1}/{len(selected_action_ranges)} for video {video_path}: {e}",
-                        exc_info=True,
-                    )
-                    # Continue processing other action ranges
-
-    return train_samples
 
 
 def get_actions_df(source_dir: str) -> pd.DataFrame:
@@ -505,6 +409,147 @@ def get_actions_df(source_dir: str) -> pd.DataFrame:
 def gen_id(length: int = 8) -> str:
     alphabet = string.ascii_letters + string.digits
     return "".join(secrets.choice(alphabet) for _ in range(length))
+
+
+def get_video_index(recording_metadata: RecordingMetadata, timestamp: float) -> int:
+    """
+    Get the video index from the recording metadata.
+
+    Args:
+        recording_metadata: RecordingMetadata object
+
+    Returns:
+        Video index as a string
+    """
+    rel_timestamp = timestamp - recording_metadata.timestamp
+    if rel_timestamp < 0:
+        logger.warning(
+            f"Timestamp {timestamp} is before recording start time {recording_metadata.timestamp}. Returning index 0."
+        )
+        return 0
+    video_segment_length = recording_metadata.video_segment_buffer_length
+    video_index = int(rel_timestamp // video_segment_length)
+    return video_index
+
+
+class FrameMetadata(BaseModel):
+    timestamp: float
+    original_timestamp: float
+    video_path: str
+
+
+def get_target_resolution(
+    recording_metadata: RecordingMetadata,
+    max_pixels: int = resolution_1080p.pixels,
+) -> VideoResolution:
+    """
+    Get the target resolution based on the recording metadata and optional target resolution.
+    """
+    resize_h, resize_w = smart_resize(
+        recording_metadata.screen_info.video_height,
+        recording_metadata.screen_info.video_width,
+        min_pixels=0,
+        max_pixels=max_pixels,
+    )
+    output_resolution = VideoResolution(width=resize_w, height=resize_h)
+    return output_resolution
+
+
+def get_frames_at_timestamps(
+    source_dir: str,
+    recording_metadata: RecordingMetadata,
+    timestamps: list[float],
+    target_resolution: VideoResolution,
+) -> list[tuple[PIL.Image.Image, FrameMetadata]]:
+    """
+    Extract frames at specific timestamps from videos in a source directory.
+
+    Args:
+        source_dir: Source directory path (e.g., gs://bucket/folder)
+        recording_metadata: RecordingMetadata object containing video segment info
+        timestamps: List of sorted timestamps to extract frames from
+
+    Returns:
+        List of tuples (image, metadata) corresponding to the timestamps
+    """
+    if not timestamps:
+        return []
+
+    # Group timestamps by video index
+    video_groups: dict[int, list[tuple[int, float]]] = {}
+    for i, timestamp in enumerate(timestamps):
+        video_index = get_video_index(recording_metadata, timestamp)
+        if video_index not in video_groups:
+            video_groups[video_index] = []
+        video_groups[video_index].append((i, timestamp))
+
+    # Initialize results list with correct size
+    results: list[tuple[PIL.Image.Image, FrameMetadata] | None] = [None] * len(
+        timestamps
+    )
+
+    # Set up resize filter once using RecordingMetadata screen info
+    screen_info = recording_metadata.screen_info
+    #
+    buffer_src, buffer_sink, filter_graph = None, None, None
+    input_resolution = VideoResolution(
+        width=screen_info.video_width, height=screen_info.video_height
+    )
+
+    # Process each video index
+    for video_index, timestamp_pairs in video_groups.items():
+        video_path = f"{source_dir}/screen_capture_{video_index:06d}.mp4"
+
+        # Extract just the timestamps for this video
+        video_timestamps = [ts for _, ts in timestamp_pairs]
+
+        try:
+            # Download and process video
+            with tempfile.NamedTemporaryFile(suffix=".mp4", delete=True) as f:
+                download_video_with_ffmpeg_copy(
+                    source_path=video_path,
+                    dest_path=f.name,
+                    ffmpeg_path="/nix/store/q7j5awbg80d38p9my5b5zgn0xadgvbmb-ffmpeg-7.1.1-bin/bin/ffmpeg",
+                )
+
+                with av.open(f.name) as video_container:
+                    # Use consistent filter based on RecordingMetadata
+                    if target_resolution is not None:
+                        buffer_src, buffer_sink, filter_graph = get_resize_filter(
+                            video_container.streams.video[0].format,
+                            input_resolution,
+                            target_resolution,
+                            recording_metadata.time_base,
+                        )
+
+                    # Extract frames at the relative timestamps
+                    frame_tuples = extract_frames_by_pts_from_container(
+                        video_container,
+                        video_timestamps,
+                        buffer_src,
+                        buffer_sink,
+                    )
+
+                    # Store frames in the correct positions in results
+                    for (frame_timestamp, image), (
+                        original_index,
+                        original_timestamp,
+                    ) in zip(frame_tuples, timestamp_pairs, strict=True):
+                        frame_metadata = FrameMetadata(
+                            timestamp=frame_timestamp,
+                            video_path=video_path,
+                            original_timestamp=original_timestamp,
+                        )
+                        results[original_index] = (image, frame_metadata)
+
+        except Exception as e:
+            logger.error(f"Error processing video {video_path}: {e}", exc_info=True)
+            # Fill with None values for failed video
+            for original_index, _ in timestamp_pairs:
+                results[original_index] = None
+
+    # Filter out None values and return only successful frames
+    return [result for result in results if result is not None]
 
 
 def load_metadata(source_dir: str) -> RecordingMetadata:
@@ -530,14 +575,40 @@ def load_metadata(source_dir: str) -> RecordingMetadata:
         with fs.open(metadata_path, "r") as f:
             metadata_dict = json.load(f)
 
+        # Convert timestamp to
+        metadata_dict["timestamp"] = 0
         # Validate using Pydantic
-        metadata = RecordingMetadata(**metadata_dict)
-        return metadata
 
     except Exception as e:
         raise Exception(
             f"Failed to load or validate metadata from {source_dir}: {e}"
         ) from e
+    first_video_path = f"{source_dir}/screen_capture_000000.mp4"
+    try:
+        # Validate first video
+        # We need to do this because action recorder is not saving video timestamp in utc prior to 0.1.2 mac build
+        with fs.open(first_video_path, "rb") as f:
+            video_container = av.open(f)
+            video_stream = video_container.streams.video[0]
+            video_metadata = VideoMetadataFetcher.get_video_metadata(video_stream)
+        first_video_start_time = float(
+            video_metadata.start_pts * video_metadata.time_base
+        )
+        metadata_dict["timestamp"] = first_video_start_time
+        metadata_dict["time_base"] = video_metadata.time_base
+
+        metadata = RecordingMetadata(**metadata_dict)
+        # Check if video resolution matches screen info
+        if (
+            video_metadata.resolution.width != metadata.screen_info.video_width
+            or video_metadata.resolution.height != metadata.screen_info.video_height
+        ):
+            raise ValueError("Video resolution does not match screen info in metadata")
+    except Exception as e:
+        raise Exception(
+            f"Failed to validate first video {first_video_path} in {source_dir}: {e}"
+        ) from e
+    return metadata
 
 
 def transform_coordinates(
@@ -635,62 +706,45 @@ def transform_action_coordinates(
     return transformed_action
 
 
-def discover_video_files(source_folders: list[str]) -> list[tuple[str, str]]:
+def transform_action_coords_list(
+    actions: list[Action],
+    target_resolution: VideoResolution,
+    recording_metadata: RecordingMetadata,
+) -> list[Action]:
     """
-    Discover all video files in the given source folders.
+    Transform a list of actions to match the target resolution.
 
     Args:
-        source_folders: List of folder paths (e.g., gs://bucket/folder)
+        actions: List of Action objects to transform
+        target_resolution: Target video resolution
+        recording_metadata: RecordingMetadata object containing original resolution
 
     Returns:
-        List of tuples (video_path, source_dir) where video_path is the full path
-        to the video file and source_dir is the folder containing it
+        List of transformed Action objects
     """
-    video_files = []
-    fs = gcsfs.GCSFileSystem()
-
-    for source_dir in source_folders:
-        print(f"Discovering videos in {source_dir}")
-
-        try:
-            # Remove gs:// prefix for gcsfs
-            gs_path = source_dir.replace("gs://", "")
-
-            # List all files in the directory
-            all_files = fs.ls(gs_path)
-
-            # Filter for screen_capture videos and sort them
-            video_pattern = re.compile(r"/screen_capture_(\d+)\.mp4$")
-            video_files_in_dir = []
-
-            for f in all_files:
-                match = video_pattern.search(f)
-                if match:
-                    video_files_in_dir.append(f)
-
-            # Sort by video number
-            def get_video_number(filename):
-                match = video_pattern.search(filename)  # noqa: B023
-                return int(match.group(1)) if match else 0
-
-            video_files_in_dir.sort(key=get_video_number)
-
-            for video_file in video_files_in_dir:
-                # Convert back to gs:// format
-                video_path = f"gs://{video_file}"
-                video_files.append((video_path, source_dir))
-
-        except Exception as e:
-            print(f"Error discovering videos in {source_dir}: {e}")
-            continue
-
-    print(f"Found {len(video_files)} video files across {len(source_folders)} folders")
-    return video_files
+    return [
+        transform_action_coordinates(
+            action,
+            recording_metadata.screen_info.logical_pixel_width,
+            recording_metadata.screen_info.logical_pixel_height,
+            target_resolution.width,
+            target_resolution.height,
+        )
+        for action in actions
+    ]
 
 
-def process_single_video(
-    args: tuple[str, str, pd.DataFrame, SelectActionPolicy, str, RecordingMetadata],
-) -> list[dict]:
+def chunkify(lst, n):
+    """Split list into n roughly equal chunks."""
+    k, m = divmod(len(lst), n)
+    return [lst[i * k + min(i, m) : (i + 1) * k + min(i + 1, m)] for i in range(n)]
+
+
+def save_and_get_metadata(
+    source_dir: str,
+    output_dir: str,
+    train_sample: TrainSample,
+) -> dict:
     """
     Process a single video for multiprocessing.
 
@@ -700,94 +754,92 @@ def process_single_video(
     Returns:
         List of dictionaries with train sample metadata
     """
-    video_path, source_dir, actions_df, select_policy, output_dir, metadata = args
 
-    print(f"Processing video: {video_path}")
-    train_samples = video_process(video_path, actions_df, select_policy, metadata)
+    train_sample_id = gen_id(12)
 
-    if not train_samples:
-        return []
-
-    results = []
-
-    # Process each train sample
-    for train_sample in train_samples:
-        train_sample_id = gen_id(12)
-
-        # Save the train sample to file
-        with open(
-            f"{output_dir}/metadata/{train_sample_id}.json", "w", encoding="utf-8"
-        ) as f:
-            json.dump(
-                train_sample.model_dump()["actions"], f, ensure_ascii=False, indent=0
-            )
-        with open(
-            f"{output_dir}/train_samples/{train_sample_id}.metadata.json",
-            "w",
-            encoding="utf-8",
-        ) as f:
-            json.dump(
-                train_sample.model_dump(exclude={"actions"}),
-                f,
-                ensure_ascii=False,
-                indent=0,
-            )
-
-        # Add metadata for the main process to collect
-        results.append(
-            {
-                "attempt_id": train_sample_id,
-                "eval_task_id": train_sample_id,
-                "actions": [s.action for s in train_sample.actions],
-                "thinking": [s.thinking for s in train_sample.actions],
-                "instruction": train_sample.instruction,
-                "video_path": video_path,
-                "trajectory_length": len(train_sample.actions),
-                "source_dir": source_dir,
-                "image_turns_start": 0,
-                "image_turns_end": len(train_sample.actions) - 1,
-                "text_turns_start": 0,
-                "text_turns_end": len(train_sample.actions) - 1,
-                "unmask_last_only": False,
-            }
+    # Save the train sample to file
+    with smart_open(
+        f"{output_dir}/metadata/{train_sample_id}.json", "w", encoding="utf-8"
+    ) as f:
+        json.dump(train_sample.model_dump()["actions"], f, ensure_ascii=False, indent=0)
+    with smart_open(
+        f"{output_dir}/train_samples/{train_sample_id}.metadata.json",
+        "w",
+        encoding="utf-8",
+    ) as f:
+        json.dump(
+            train_sample.model_dump(exclude={"actions"}),
+            f,
+            ensure_ascii=False,
+            indent=0,
         )
 
-    print(f"Generated {len(results)} train samples from video {video_path}")
-    return results
+    # Add metadata for the main process to collect
+    return {
+        "attempt_id": train_sample_id,
+        "eval_task_id": train_sample_id,
+        "actions": [s.action for s in train_sample.actions],
+        "thinking": [s.thinking for s in train_sample.actions],
+        "instruction": train_sample.instruction,
+        "trajectory_length": len(train_sample.actions),
+        "source_dir": source_dir,
+        "image_turns_start": 0,
+        "image_turns_end": len(train_sample.actions) - 1,
+        "text_turns_start": 0,
+        "text_turns_end": len(train_sample.actions) - 1,
+        "unmask_last_only": False,
+    }
 
 
-def chunkify(lst, n):
-    """Split list into n roughly equal chunks."""
-    k, m = divmod(len(lst), n)
-    return [lst[i * k + min(i, m) : (i + 1) * k + min(i + 1, m)] for i in range(n)]
-
-
-def thread_worker(video_args, lock):
+def thread_worker(
+    source_dir: str,
+    output_dir: str,
+    recording_metadata: RecordingMetadata,
+    target_resolution: VideoResolution,
+    actions: list[Action],
+):
     """Thread worker function that processes a single video."""
     try:
-        results = process_single_video(video_args)
-        return (video_args[0], results, None)  # video_path, results, error
+        result = process_actions_range(
+            source_dir, recording_metadata, target_resolution, actions
+        )
+        if result is None:
+            return (None, None)
+        metadata = save_and_get_metadata(source_dir, output_dir, result)
+        logger.debug(f"Processed {len(actions)} actions from {source_dir}")
+        return (metadata, None)  # video_path, results, error
     except Exception:
-        return (video_args[0], [], traceback.format_exc())
+        return (None, traceback.format_exc())
 
 
-def process_worker(video_args_chunk, threads_per_proc, lock, update_queue):
+def process_worker(
+    video_args_chunk: list[
+        tuple[str, str, RecordingMetadata, VideoResolution, list[Action]]
+    ],
+    threads_per_proc: int,
+    update_queue: Queue[tuple[dict | None, str | None]],
+):
     """
     Runs in each separate process. Spins up a thread pool to process its chunk of videos.
     Reports completion (with error or not) back via update_queue.
     """
     with ThreadPoolExecutor(max_workers=threads_per_proc) as executor:
         futures = {
-            executor.submit(thread_worker, video_args, lock): video_args
+            executor.submit(thread_worker, *video_args): video_args
             for video_args in video_args_chunk
         }
         for fut in as_completed(futures):
-            video_path, results, err = fut.result()
+            logging.debug(f"Future completed: {fut}")
+            save_action, err = fut.result()
             # send results so main can aggregate them
-            update_queue.put((video_path, results, err))
+            update_queue.put((save_action, err))
 
 
-def progress_listener(total, update_queue, results_collector):
+def progress_listener[T](
+    total: int,
+    update_queue: Queue[tuple[T | None, str | None]],
+    results_collector: ListProxy[T],
+):
     """
     Runs in a thread in main process to consume updates and show progress bar.
     Also collects results from all processes.
@@ -796,14 +848,23 @@ def progress_listener(total, update_queue, results_collector):
     completed = 0
     while completed < total:
         try:
-            video_path, results, err = update_queue.get(timeout=1)
+            save_action, err = update_queue.get(timeout=1)
+        except Empty:
+            if completed >= total:
+                break
+            continue
         except Exception:
+            import traceback
+
+            tqdm.tqdm.write(
+                f"[!] Error getting update from queue: {traceback.format_exc()}"
+            )
             continue
         if err:
-            tqdm.tqdm.write(f"[!] Error processing {video_path}:\n{err}")
+            tqdm.tqdm.write(f"[!] Error processing action range:\n{err}")
         else:
-            tqdm.tqdm.write(f"Done processing {video_path} -> {len(results)} samples")
-            results_collector.extend(results)
+            if save_action is not None:
+                results_collector.append(save_action)
         completed += 1
         pbar.update(1)
     pbar.close()
@@ -827,38 +888,62 @@ def process_videos(
         max_video_files: Maximum number of video files to process
     """
     # Discover all video files in the source folders
-    video_files = discover_video_files(source_folders)
 
-    if not video_files:
+    raw_action_sets = {k: get_actions(k) for k in source_folders}
+    video_metadatas = {k: load_metadata(k) for k in source_folders}
+    target_resolutions = {
+        k: get_target_resolution(v) for k, v in video_metadatas.items()
+    }
+    action_sets = {
+        k: transform_action_coords_list(
+            combine_scroll_actions(parse_actions(v)),
+            target_resolutions[k],
+            video_metadatas[k],
+        )
+        for k, v in raw_action_sets.items()
+    }
+    action_segments = [
+        (source_dir, segment_actions_by_time_gaps(actions))
+        for source_dir, actions in action_sets.items()
+    ]
+
+    unravelled_segments = [
+        (source_dir, action_chunk)
+        for source_dir, segments in action_segments
+        for actions in segments
+        for action_chunk in reverse_chunk_actions_to_length(actions, 10)
+    ]
+    action_segment_lens_df = pd.DataFrame(
+        [
+            {
+                "source_dir": source_dir,
+                "num_actions": len(actions),
+            }
+            for source_dir, actions in unravelled_segments
+        ]
+    )
+    print("Action segments summary:")
+    print(action_segment_lens_df.describe())
+
+    if not unravelled_segments:
         print("No video files found in the specified folders")
         return
     if max_video_files is not None:
-        video_files = video_files[:max_video_files]
+        unravelled_segments = unravelled_segments[:max_video_files]
         print(f"Limiting to first {max_video_files} video files")
 
     # Build mappings for efficiency
-    actions_dfs = {}
-    metadatas = {}
-    for _, source_dir in video_files:
-        if source_dir not in actions_dfs:
-            print(f"Loading actions for {source_dir}")
-            actions_dfs[source_dir] = get_actions_df(source_dir)
-            print(f"Loading metadata for {source_dir}")
-            metadatas[source_dir] = load_metadata(source_dir)
-
-    select_policy = DefaultSelectActionPolicy()
 
     # Prepare arguments for each video
-    video_args = [
+    process_args = [
         (
-            video_path,
             source_dir,
-            actions_dfs[source_dir],
-            select_policy,
             output_dir,
-            metadatas[source_dir],
+            video_metadatas[source_dir],
+            target_resolutions[source_dir],
+            actions,
         )
-        for video_path, source_dir in video_files
+        for source_dir, actions in unravelled_segments
     ]
 
     # Use all CPU cores if num_processes not specified
@@ -866,32 +951,33 @@ def process_videos(
         num_processes = multiprocessing.cpu_count()
 
     print(
-        f"Processing {len(video_files)} videos using {num_processes} processes x {threads_per_process} threads..."
+        f"Processing {len(process_args)} videos using {num_processes} processes x {threads_per_process} threads..."
     )
 
     # Use multiprocessing + threading pattern
     manager = Manager()
-    lock = manager.Lock()  # shared across processes
-    update_queue = manager.Queue()
-    results_collector = manager.list()  # shared list to collect results
+    update_queue: Queue[tuple[SaveAction | None, str | None]] = manager.Queue()
+    results_collector: ListProxy[SaveAction] = (
+        manager.list()
+    )  # shared list to collect results
 
     # Start progress listener thread
     listener = threading.Thread(
         target=progress_listener,
-        args=(len(video_files), update_queue, results_collector),
+        args=(len(process_args), update_queue, results_collector),
         daemon=True,
     )
     listener.start()
 
     # Split video args among processes
-    chunks = chunkify(video_args, num_processes)
+    chunks = chunkify(process_args, num_processes)
     processes = []
     for chunk in chunks:
         if not chunk:
             continue
         p = Process(
             target=process_worker,
-            args=(chunk, threads_per_process, lock, update_queue),
+            args=(chunk, threads_per_process, update_queue),
         )
         p.start()
         processes.append(p)
@@ -924,12 +1010,15 @@ def main() -> None:
     process_videos(
         [
             "gs://induction-labs-data-ext/action_capture/jeffrey/2025-08-10_133207_0V8HU",
+            "gs://induction-labs-data-ext/action_capture/Jarry/2025-08-10_121140_Q4KI9",
+            "gs://induction-labs-data-ext/action_capture/jonathan/2025-07-17_093647_KZ3CG",
             # "gs://induction-labs-data-ext/action_capture/aryan_91532/2025-07-07_170814_A2QD2",
             # "gs://induction-labs-data-ext/action_capture/aryan_91532/2025-07-07_143610_SBK20",
             # "gs://induction-labs-data-ext/action_capture/aryan_91532/2025-07-08_160952_VX5RU",
         ],
-        "gs://induction-labs/passive_data/2025-08-10/jeffrey-lowfps-test",
+        "gs://induction-labs/passive_data/2025-08-11/actionblock_10",
         # max_video_files=10,
+        # num_processes=1,
     )
 
 
