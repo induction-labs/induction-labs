@@ -4,7 +4,7 @@ import asyncio
 import functools
 import json
 import re
-from typing import TYPE_CHECKING, Any, Self
+from typing import TYPE_CHECKING, Any, ClassVar, Self
 
 import fsspec
 import pandas as pd
@@ -21,12 +21,12 @@ from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 
 from modeling.config import DatapackConfig, ExperimentConfig, ModuleConfig
 from modeling.config.data import BaseDataSample, BaseDataset
-
-# from modeling.modules.vl_sft.qwen_25vl import VlSftLITConfig
 from modeling.eve.os_world.agents.uitars15 import COMPUTER_USE_15, THOUGHT_LONG
 
 if TYPE_CHECKING:
     from modeling.modules.vl_sft.qwen_25vl import VlSftLITConfig
+
+# from modeling.modules.vl_sft.qwen_25vl import VlSftLITConfig
 
 
 @functools.lru_cache(maxsize=1)
@@ -103,7 +103,7 @@ class VlDataSample(BaseDataSample):
 
 
 class VlDatasetArgs(BaseModel):
-    dataset_path: str
+    dataset_paths: list[str]
     seq_len: int
     tokenizer_name: str
 
@@ -150,7 +150,7 @@ IM_END = 151645  # "<|im_end|>"
 ASSISTANT_ID = 77091  # "assistant"
 
 
-def mask_assistant(token_ids) -> torch.BoolTensor:
+def mask_assistant(token_ids) -> torch.Tensor:
     """
     Args
     ----
@@ -188,9 +188,17 @@ class VlDataset(BaseDataset[VlDataSample, VlDatasetArgs]):
     A PyTorch Dataset for VL model tasks.
     """
 
-    # has rows "attempt_id", "instruction"
+    col_names: ClassVar[list[str]] = [
+        "attempt_id",
+        "instruction",
+        "text_turns_start",
+        "text_turns_end",
+        "image_turns_start",
+        "image_turns_end",
+        "dataset_folder",
+        "unmask_last_only",
+    ]
     examples: pd.DataFrame
-    dataset_folder: str
     processor: Qwen2_5_VLProcessor
     seq_len: int
 
@@ -210,14 +218,20 @@ class VlDataset(BaseDataset[VlDataSample, VlDatasetArgs]):
         Asynchronous constructor for the dataset.
         This allows for any necessary asynchronous setup before the dataset is used.
         """
+        frames: list[pd.DataFrame] = []
 
-        examples = pd.read_json(args.dataset_path, lines=True)
-        dataset_folder = args.dataset_path.rstrip("/").rsplit("/", 1)[0]
+        for dataset_path in args.dataset_paths:
+            samples = pd.read_json(dataset_path, lines=True)
+            dataset_folder = dataset_path.rstrip("/").rsplit("/", 1)[0]
+            samples["dataset_folder"] = dataset_folder
+            samples = samples[cls.col_names]
+            frames.append(samples)
+
+        examples = pd.concat(frames, ignore_index=True)
         processor = Qwen2_5_VLProcessor.from_pretrained(args.tokenizer_name)
         return cls(
             args=args,
             examples=examples,
-            dataset_folder=dataset_folder,
             length=len(examples),
             processor=processor,
             seq_len=args.seq_len,
@@ -230,8 +244,9 @@ class VlDataset(BaseDataset[VlDataSample, VlDatasetArgs]):
         """
         sample = self.examples.iloc[idx]
         instruction = sample["instruction"]
+        dataset_folder = sample["dataset_folder"]
         # print(instruction)
-        data_path = f"{self.dataset_folder}/metadata/{sample['attempt_id']}.json"
+        data_path = f"{dataset_folder}/metadata/{sample['attempt_id']}.json"
         # !!!XXX: you must do .to_thread bc otherwise ray will hang
         turns = await asyncio.to_thread(load_turns_gcs, data_path)
         messages = [
@@ -353,7 +368,7 @@ class VlDatapackConfig(DatapackConfig[VlDataSample]):
     """
 
     config_path: str = "modeling.data.trajectory_train.VlDatapackConfig"
-    dataset_path: str = "gs://induction-labs/jonathan/sampled_trajectories/uitars_initial_osworld_fixed/samples_correct.jsonl"
+    dataset_paths: list[str]
     num_workers: int = 2
 
     def validate_module_compatibility(
@@ -374,7 +389,7 @@ class VlDatapackConfig(DatapackConfig[VlDataSample]):
         module_config = self.validate_module_compatibility(full_config.module)
         return await VlDataset.constructor(
             VlDatasetArgs(
-                dataset_path=self.dataset_path,
+                dataset_paths=self.dataset_paths,
                 seq_len=full_config.run.sequence_length,
                 tokenizer_name=module_config.tokenizer_name,
             )
@@ -389,7 +404,9 @@ if __name__ == "__main__":
     async def main():
         result = await VlDataset.constructor(
             VlDatasetArgs(
-                dataset_path="gs://induction-labs/jonathan/sampled_trajectories/uitars_initial_osworld_fixed/samples_correct.jsonl",
+                dataset_paths=[
+                    "gs://induction-labs/jonathan/sampled_trajectories/uitars_initial_osworld_fixed/samples_correct.jsonl"
+                ],
                 seq_len=8192,
                 tokenizer_name="ByteDance-Seed/UI-TARS-1.5-7B",
             )
