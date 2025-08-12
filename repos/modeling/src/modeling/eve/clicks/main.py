@@ -182,8 +182,6 @@ async def run_clicks_evaluation(
 
     # Setup output folder handling
     local_output_folder, cloud_output_path = setup_output_folder(output_folder)
-    run_output_folder = os.path.join(local_output_folder, run_id)
-    os.makedirs(run_output_folder, exist_ok=True)
 
     # Initialize wandb
     wandb.init(
@@ -235,7 +233,7 @@ async def run_clicks_evaluation(
             raise ValueError("Only 'dev' dataset is currently supported")
 
         # Set output file path
-        output_file = os.path.join(run_output_folder, f"clicks_results_{dataset}.csv")
+        output_file = os.path.join(local_output_folder, f"clicks_results_{dataset}.csv")
 
         print("Running evaluation:")
         print(f"  Dataset: {dataset}")
@@ -342,14 +340,14 @@ async def run_clicks_evaluation(
             wandb.log({"results_table": results_table})
             results_df = pd.DataFrame(results_dict)
             results_df.to_json(
-                os.path.join(run_output_folder, "results.jsonl"),
+                os.path.join(local_output_folder, "results.jsonl"),
                 orient="records",
                 lines=True,
             )
 
             import json
 
-            with open(os.path.join(run_output_folder, "metrics.json"), "w") as f:
+            with open(os.path.join(local_output_folder, "metrics.json"), "w") as f:
                 json.dump(metrics, f, indent=2)
 
         else:
