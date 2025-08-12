@@ -122,7 +122,7 @@ def start_screen_record(
             "-c:a",
             "aac",
             "-preset",
-            "veryfast",
+            "ultrafast",
             "-crf",
             "17",
             "-copyts",

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import datetime
 import json
 import multiprocessing
 import secrets
@@ -9,20 +10,21 @@ import tempfile
 import threading
 import traceback
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from fractions import Fraction
+from copy import deepcopy
+from enum import Enum
 from multiprocessing import Manager, Process
 from multiprocessing.managers import ListProxy
 from queue import Empty, Queue
+from typing import Literal
 
 import av
 import dotenv
 import gcsfs
+import litellm
 import pandas as pd
 import PIL
 import PIL.Image
 import tqdm
-from google import genai
-from google.genai import types
 from pydantic import BaseModel
 from smart_open import open as smart_open
 from synapse.utils.logging import configure_logging, logging
@@ -44,16 +46,140 @@ from synth.recordings.parse_actions import (
     parse_actions,
 )
 from synth.recordings.synth_captions_generated_samples import (
-    PROMPT_WITHOUT_NEXT,
+    COMMON_INSTRUCTION,
     extract_frames_by_pts_from_container,
     get_actions,
+)
+from synth.recordings.transform_coordinates import (
+    RecordingMetadata,
+    transform_action_coords_list,
 )
 
 dotenv.load_dotenv()
 
 logger = configure_logging(__file__, logging.INFO)
 
-gem_client = genai.Client()
+litellm.drop_params = True
+# DEFAULT_MODEL = "anthropic/claude-sonnet-4-20250514"
+DEFAULT_MODEL = "o3"
+
+
+PROMPT_WITHOUT_NEXT = (
+    COMMON_INSTRUCTION
+    + "\n"
+    + """## Context
+Here's the task the user has been given:
+{instruction}
+
+Here's the reasoning the user has done so far:
+{old_turns}
+
+**Here's the new action the user took that you should write the monolouge for**:
+{new_action}
+
+Now, write the user's internal monologue about why they took this action, and what they plan to do next. The monologue should be focused on the action just taken.
+"""
+)
+
+
+class ModelProvider(Enum):
+    GEMINI = "gemini"
+    OPENAI = "openai"
+    CLAUDE = "claude"
+
+
+def call_model(
+    model_name: str,
+    messages: list[dict],
+    max_tokens: int = 4096,
+    reasoning_effort: Literal["low", "medium", "high"] = "high",
+) -> tuple[str, dict]:
+    """
+    Unified interface for calling different AI models using LiteLLM.
+
+    Messages should contain properly formatted content with interleaved text and images.
+    For multi-modal content, use the format:
+    [
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "Your text here"},
+                {"type": "image_url", "image_url": {"url": "data:image/png;base64,..."}}
+            ]
+        }
+    ]
+
+    Args:
+        model_name: Name of the model to use (e.g., "gemini-2.0-flash", "gpt-4o", "claude-3-5-sonnet-20241022")
+        messages: List of message dictionaries with 'role' and properly formatted 'content'
+        max_tokens: Maximum number of tokens to generate
+
+    Returns:
+        Tuple of (generated text response, cost info dict)
+    """
+    try:
+        response = litellm.completion(
+            model=model_name,
+            messages=messages,
+            max_tokens=max_tokens,
+            reasoning_effort=reasoning_effort,
+        )
+
+        # Extract cost information from the response
+        cost_info = {
+            "prompt_tokens": getattr(response.usage, "prompt_tokens", 0)
+            if response.usage
+            else 0,
+            "completion_tokens": getattr(response.usage, "completion_tokens", 0)
+            if response.usage
+            else 0,
+            "total_tokens": getattr(response.usage, "total_tokens", 0)
+            if response.usage
+            else 0,
+            "model": model_name,
+        }
+
+        # Add cache hit information if available
+        if response.usage:
+            # OpenAI/Anthropic style cache hits
+            cost_info["prompt_tokens_cached"] = (
+                response.usage.prompt_tokens_details.cached_tokens
+                if hasattr(response.usage, "prompt_tokens_details")
+                and response.usage.prompt_tokens_details
+                else 0
+            )
+
+            # Calculate cache hit rate
+            cached_tokens = cost_info["prompt_tokens_cached"]
+            total_prompt_tokens = cost_info["prompt_tokens"]
+            if total_prompt_tokens > 0:
+                cost_info["prompt_cache_hit_rate"] = cached_tokens / total_prompt_tokens
+            else:
+                cost_info["prompt_cache_hit_rate"] = 0.0
+        else:
+            cost_info["prompt_tokens_cached"] = 0
+            cost_info["prompt_cache_hit_rate"] = 0.0
+
+        # Add cost in USD if available
+        if (
+            hasattr(response, "_hidden_params")
+            and "response_cost" in response._hidden_params
+        ):
+            cost_info["cost_usd"] = response._hidden_params["response_cost"]
+        elif hasattr(response, "response_cost"):
+            cost_info["cost_usd"] = response.response_cost
+        else:
+            cost_info["cost_usd"] = 0.0
+        content = response.choices[0].message.content.strip()
+        # print(response.choices[0].message)
+        # if response.choices[0].message.reasoning_content:
+        #     content = response.choices[0].message.reasoning_content + "\n" + content
+
+        return content, cost_info
+
+    except Exception as e:
+        logger.error(f"Error calling model {model_name}: {e}")
+        raise
 
 
 def is_close(a: Point, b: Point, tol: float = 10) -> bool:
@@ -77,23 +203,56 @@ def reverse_chunk_actions_to_length(
     actions: list[Action],
     length: int = 5,
 ) -> list[list[Action]]:
-    if len(actions) < length - 1:
-        return []
-    actions, last_block = actions[: -length + 1], actions[-length + 1 :]
-    last_block.append(
+    """
+    Create action blocks using a sliding window approach from the end.
+
+    Starts with the last block (including FinishedAction), then slides the window
+    backwards. If a block is good, it's added and the window jumps back by the full
+    length. If not good, the window slides back by just 1 position.
+
+    Args:
+        actions: List of actions to chunk
+        length: Length of each chunk (default: 5, but last chunk gets +1 for FinishedAction)
+
+    Returns:
+        List of action blocks, each being a list of actions
+    """
+    actions = actions.copy()
+
+    actions.append(
         Action(
             action=FinishedAction(),
-            timestamp=last_block[-1].end_timestamp + SS_DELAY + BEFORE_ACTION_BUFFER,
-            end_timestamp=last_block[-1].end_timestamp
-            + SS_DELAY
-            + BEFORE_ACTION_BUFFER,
+            timestamp=actions[-1].end_timestamp + SS_DELAY + BEFORE_ACTION_BUFFER,
+            end_timestamp=actions[-1].end_timestamp + SS_DELAY + BEFORE_ACTION_BUFFER,
         )
     )
-    action_blocks = [last_block]
-    for i in range(len(actions) - length + 1, -1, -length):
-        block = actions[i : i + length]
-        if len(block) == length and is_good_action_sequence(block):
+    if len(actions) < length:
+        return []
+
+    action_blocks = []
+
+    # Start with the last block: take the last (length-1) actions + add FinishedAction
+    window_end = len(actions)
+
+    # Continue sliding window backwards
+    while (window_start := window_end - length) >= 0:
+        # Extract current window
+        assert window_end <= len(actions)
+        block = actions[window_start:window_end]
+        # Skip if block is too short
+        assert len(block) == length, (
+            f"{len(block)=}, {length=} {window_end=}, {window_start=}"
+        )
+
+        # Check if this block is good
+        if is_good_action_sequence(block):
             action_blocks.append(block)
+            # Jump back by full length
+            window_end = window_start
+        else:
+            # Slide back by 1
+            window_end -= 1
+
     return action_blocks
 
 
@@ -232,52 +391,157 @@ def get_timesteps_range(actions: list[Action]) -> tuple[float, list[float]]:
     return (timestamps[0], timestamps[1:])
 
 
+def text_content(text: str):
+    return {
+        "type": "text",
+        "text": text,
+    }
+
+
+class ImageDetail(str, Enum):
+    HIGH = "high"
+    LOW = "low"
+
+
+def image_content(image: bytes, detail=ImageDetail.HIGH):
+    image_b64 = base64.b64encode(image).decode("utf-8")
+    return {
+        "type": "image_url",
+        "image_url": {
+            "url": f"data:image/png;base64,{image_b64}",
+            # "detail": detail.value,
+        },
+    }
+
+
+def convert_image_detail(content: dict, detail: ImageDetail) -> dict:
+    if content["type"] != "image_url":
+        return content
+    content = deepcopy(content)
+    content["image_url"]["detail"] = detail.value
+    return content
+
+
+def get_should_filter(
+    base_prompt: list[dict],
+    model_name: str = DEFAULT_MODEL,
+) -> tuple[bool, str, dict] | None:
+    content = base_prompt.copy()
+    content.append(
+        {
+            "type": "text",
+            "text": """
+You are evaluating whether a user recording shows productive, goal-oriented work that would be valuable for training an AI assistant. 
+
+**REMOVE (answer "yes") recordings that contain:**
+
+1. **Passive consumption activities:**
+   - Watching videos, movies, or entertainment content
+   - Reading articles, news, or social media feeds
+   - Scrolling through content without clear purpose
+   - Browsing websites without taking meaningful actions
+
+2. **Aimless or idle behavior:**
+   - Random clicking or navigation without purpose
+   - Repeatedly switching between tabs/applications without progress
+   - Scrolling back and forth in the same location
+   - Opening and closing applications without using them
+   - Extended periods of inactivity or hesitation
+
+3. **Technical issues or mismatched data:**
+   - Actions that don't correspond to what's shown in the screenshots
+   - Evidence of multi-monitor setups where actions occur off-screen
+   - Clear recording software bugs or glitches
+   - Screenshots that don't match the described actions
+
+**KEEP (answer "no") recordings that show:**
+- Clear task completion or progress toward goals
+- Creating, editing, or managing content/documents
+- Problem-solving activities
+- Software configuration or meaningful interactions
+- Purposeful navigation with clear intent
+
+Look for patterns of intentional action sequences that demonstrate the user working toward completing specific tasks.
+
+After analyzing the screenshots and actions, finish your response with:
+### REMOVE: yes or no
+""".strip(),
+        }
+    )
+    try:
+        model_response_text, cost_info = call_model(
+            model_name=model_name,
+            messages=[{"role": "user", "content": content}],
+            max_tokens=2048,
+        )
+        if not model_response_text:
+            print("Model response is empty")
+            return None
+        model_response_text = model_response_text.strip().lower()
+        model_decision = model_response_text.split("### remove:")[-1].strip()
+        if model_decision not in ["yes", "no"]:
+            print(
+                f"Model response did not contain 'yes' or 'no': {model_response_text}"
+            )
+            return None
+        return False, model_response_text, cost_info
+        return model_decision == "yes", model_response_text, cost_info
+    except Exception as e:
+        logger.error(f"Error determining if content should be filtered: {e}")
+
+
 def get_video_instruction(
-    first_frame: bytes,
-    rest_frames: list[bytes],
-    actions: list[Action],
-) -> tuple[str, str] | None:
+    base_prompt: list[dict],
+    model_name: str = DEFAULT_MODEL,
+) -> tuple[str, str, dict] | None:
     """
     Generate an instruction based on the first frame and the actions.
+
+    Returns:
+        Tuple of (response_text, instruction, cost_info) or None if failed
     """
 
-    image_action_pairs = []
-    for i, action in enumerate(actions):
-        image_action_pairs.append(action.dump_to_text())
-        image_action_pairs.append(
-            types.Part.from_bytes(
-                data=rest_frames[i],
-                mime_type="image/png",
-            )
+    # Build interleaved content with text and images
+    content = base_prompt.copy()
+
+    # Add final instruction
+    content.append(
+        {
+            "type": "text",
+            "text": """
+Analyze what action the user took in the screenshots and then write a plausible instruction that would result in the behaviour shown in the screenshots.
+After reviewing the screenshots and actions, end your response with:
+### Instruction: <instruction>""",
+        }
+    )
+    try:
+        model_response_text, cost_info = call_model(
+            model_name=model_name,
+            messages=[{"role": "user", "content": content}],
+            max_tokens=4096,
         )
 
-    contents = [
-        "The following are screenshots and the actions a user took from a video recording. Analyze what action the user took in the screenshots and then write a plausible instruction that would result in the behaviour shown in the screenshots.",
-        types.Part.from_bytes(data=first_frame, mime_type="image/png"),
-        *image_action_pairs,
-        """After reviewing the screenshots and actions, end your response with:\n### Instruction: <instruction>""",
-    ]
-    # uploaded_file = gem_client.files.upload(file=image1_path)
+        if not model_response_text:
+            print("Model response is empty")
+            return None
 
-    model_response = gem_client.models.generate_content(
-        model="gemini-2.5-pro", contents=contents
-    )
-    assert model_response.candidates, "No candidates returned from model"
-    assert model_response.candidates[0].content
-    assert model_response.candidates[0].content.parts, "No content parts returned"
-    model_response_text = model_response.candidates[0].content.parts[0].text
-    if not model_response_text:
-        print("Model response is empty")
+        response_parts = model_response_text.split("### Instruction:")
+        if len(response_parts) < 2:
+            print(
+                f"Model response did not contain instruction part: {model_response_text}"
+            )
+            return None
+
+        model_instruction = response_parts[-1].strip()
+        if not model_instruction:
+            print("Model instruction is empty")
+            return None
+
+        return model_response_text, model_instruction, cost_info
+
+    except Exception as e:
+        logger.error(f"Error generating video instruction: {e}")
         return None
-    response_parts = model_response_text.split("### Instruction:")
-    if len(response_parts) < 2:
-        print(f"Model response did not contain instruction part: {model_response_text}")
-        return None
-    model_instruction = response_parts[-1].strip()
-    if not model_instruction:
-        print("Model instruction is empty")
-        return None
-    return model_response_text, model_instruction
 
 
 class SaveAction(BaseModel):
@@ -289,22 +553,6 @@ class SaveAction(BaseModel):
     frame_metadata: FrameMetadata
 
 
-class ScreenInfo(BaseModel):
-    video_width: int
-    video_height: int
-    logical_pixel_ratio: float
-    logical_pixel_width: int
-    logical_pixel_height: int
-
-
-class RecordingMetadata(BaseModel):
-    timestamp: float
-    username: str
-    screen_info: ScreenInfo
-    video_segment_buffer_length: int
-    time_base: Fraction
-
-
 class TrainSample(BaseModel):
     actions: list[SaveAction]
     instruction: str
@@ -312,39 +560,88 @@ class TrainSample(BaseModel):
 
 
 def get_thinking_texts(
-    first_frame: bytes,
-    rest_frames: list[bytes],
-    actions: list[Action],
+    base_prompt: list[dict],
     instruction: str,
-) -> list[str]:
+    actions: list[Action],
+    model_name: str = DEFAULT_MODEL,
+) -> tuple[list[str], list[dict]]:
+    """
+    Generate thinking texts for each action.
+
+    Returns:
+        Tuple of (thinking_texts, cost_infos) where cost_infos is a list of cost dicts for each call
+    """
     thinking_texts = []
+    cost_infos = []
     old_turns = []
-    all_frames = [first_frame, *rest_frames]
     for i, action in enumerate(actions):
         text_prompt = PROMPT_WITHOUT_NEXT.format(
             instruction=instruction,
             old_turns=old_turns,
             new_action=action.dump_to_text(),
         )
-        contents = [
-            text_prompt,
-            types.Part.from_bytes(data=all_frames[i], mime_type="image/png"),
-            types.Part.from_bytes(data=all_frames[i + 1], mime_type="image/png"),
-        ]
-        model = "gemini-2.5-flash"
 
-        # model = "gemini-2.5-pro"
-        model_response = gem_client.models.generate_content(
-            model=model, contents=contents
-        )
-        assert model_response.candidates, "No candidates returned from model"
-        assert model_response.candidates[0].content
-        assert model_response.candidates[0].content.parts, "No content parts returned"
-        model_response_text = model_response.candidates[0].content.parts[0].text
-        thinking_texts.append(model_response_text)
-        logger.debug(f"Thinking text for action {i}: {model_response_text}")
-        old_turns.append(f"{model_response_text}\n{action.dump_to_text()}")
-    return thinking_texts
+        # Build interleaved content with text and the two consecutive frames
+        content = base_prompt.copy()
+        content.append({"type": "text", "text": text_prompt})
+
+        # Add the frame before the action
+
+        try:
+            model_response_text, cost_info = call_model(
+                model_name=model_name,
+                messages=[{"role": "user", "content": content}],
+                max_tokens=2048,
+            )
+
+            thinking_texts.append(model_response_text)
+            cost_infos.append(cost_info)
+            logger.debug(f"Thinking text for action {i}: {model_response_text}")
+            old_turns.append(f"{model_response_text}\n{action.dump_to_text()}")
+
+        except Exception as e:
+            logger.error(f"Error generating thinking text for action {i}: {e}")
+            # Use a fallback thinking text
+            fallback_text = (
+                f"Next, I need to perform this action: {action.dump_to_text()}"
+            )
+            thinking_texts.append(fallback_text)
+            # Add empty cost info for fallback
+            cost_infos.append(
+                {
+                    "prompt_tokens": 0,
+                    "completion_tokens": 0,
+                    "total_tokens": 0,
+                    "model": model_name,
+                    "cost_usd": 0.0,
+                    "prompt_tokens_cached": 0,
+                    "prompt_cache_hit_rate": 0.0,
+                }
+            )
+            old_turns.append(f"{fallback_text}\n{action.dump_to_text()}")
+
+    return thinking_texts, cost_infos
+
+
+def build_base_prompt(
+    first_frame: bytes,
+    rest_frames: list[bytes],
+    actions: list[Action],
+) -> list[dict]:
+    prompt = [
+        text_content(
+            "The following are screenshots and the actions a user took from a video recording: \n Initial screenshot:\n"
+        ),
+        image_content(first_frame),
+    ]
+    for i, (action, frame) in enumerate(
+        zip(actions, rest_frames, strict=True),
+    ):
+        prompt.append(text_content(f"\nAction {i}: {action.dump_to_text()}\n"))
+        prompt.append(image_content(frame))
+
+    prompt[-1] = {**prompt[-1], "cache_control": {"type": "ephemeral"}}
+    return prompt
 
 
 def process_actions_range(
@@ -373,30 +670,56 @@ def process_actions_range(
         timestamps,
         target_resolution=target_resolution,
     )
+    assert len(frames_with_metadata) == len(timestamps), (
+        f"Expected {len(timestamps) + 1} frames, got {len(frames_with_metadata)}"
+    )
     logger.debug("Got frames")
     frames = [frame[0] for frame in frames_with_metadata]
     frame_metadatas = [frame[1] for frame in frames_with_metadata]
     frame_buffers = [pil_to_bytes(frame, format="PNG") for frame in frames]
+    base_prompt = build_base_prompt(
+        first_frame=frame_buffers[0],
+        rest_frames=frame_buffers[1:],
+        actions=actions,
+    )
+    try:
+        should_filter = get_should_filter(
+            base_prompt,
+            model_name="gpt-5",
+        )
+        logger.debug("Got filter decision")
+        if should_filter is None:
+            logger.warning("Failed to determine if content should be filtered")
+            return None
+        filter_decision, filter_text, filter_cost = should_filter
+        if filter_decision:
+            logger.debug(
+                f"Filtering out recording from {source_dir} due to: {filter_text}"
+            )
+            return None
+    except Exception as e:
+        logger.error(
+            f"Error determining if content should be filtered: {e}", exc_info=True
+        )
+        return None
+
     try:
         video_instruction = get_video_instruction(
-            frame_buffers[0],
-            frame_buffers[1:],
-            actions,
+            base_prompt,
         )
         logger.debug("Got video instruction")
         if video_instruction is None:
             logger.warning("Failed to generate video instruction ")
             return None
-        instruction_text, instruction = video_instruction
+        instruction_text, instruction, instruction_cost = video_instruction
     except Exception as e:
         logger.error(f"Error generating video instruction {e}", exc_info=True)
         return None
     try:
-        thinking_texts = get_thinking_texts(
-            frame_buffers[0],
-            frame_buffers[1:],
+        thinking_texts, thinking_costs = get_thinking_texts(
+            base_prompt,
+            instruction,
             actions,
-            instruction_text,
         )
         logger.debug("Got thinking texts")
     except Exception as e:
@@ -433,6 +756,7 @@ def process_actions_range(
             "start_time": float(frame_metadatas[0].timestamp),
             "end_time": float(frame_metadatas[-1].timestamp),
             "instruction_text": instruction_text,
+            "filter_text": filter_text,
             "original_resolution": {
                 "width": recording_metadata.screen_info.video_width,
                 "height": recording_metadata.screen_info.video_height,
@@ -442,6 +766,11 @@ def process_actions_range(
                 "height": recording_metadata.screen_info.logical_pixel_height,
             },
             "logical_pixel_ratio": recording_metadata.screen_info.logical_pixel_ratio,
+            "costs": {
+                "instruction_generation": instruction_cost,
+                "thinking_texts_generation": thinking_costs,
+                "filter_cost": filter_cost,
+            },
         },
     )
 
@@ -560,53 +889,72 @@ def get_frames_at_timestamps(
         # Extract just the timestamps for this video
         video_timestamps = [ts for _, ts in timestamp_pairs]
 
-        try:
-            # Download and process video
-            with tempfile.NamedTemporaryFile(suffix=".mp4", delete=True) as f:
-                download_video_with_ffmpeg_copy(
-                    source_path=video_path,
-                    dest_path=f.name,
-                    ffmpeg_path="/nix/store/q7j5awbg80d38p9my5b5zgn0xadgvbmb-ffmpeg-7.1.1-bin/bin/ffmpeg",
+        # Download and process video
+        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=True) as f:
+            download_video_with_ffmpeg_copy(
+                source_path=video_path,
+                dest_path=f.name,
+                ffmpeg_path="/nix/store/q7j5awbg80d38p9my5b5zgn0xadgvbmb-ffmpeg-7.1.1-bin/bin/ffmpeg",
+            )
+
+            with av.open(f.name) as video_container:
+                # Use consistent filter based on RecordingMetadata
+                container_metadata = VideoMetadataFetcher.get_video_metadata(
+                    video_container.streams.video[0]
+                )
+                assert container_metadata.time_base == recording_metadata.time_base, (
+                    f"Container time base {container_metadata.time_base} does not match recording metadata time base {recording_metadata.time_base}"
+                )
+                assert container_metadata.resolution == input_resolution, (
+                    f"Container resolution {container_metadata.resolution} {video_index=} does not match input resolution {input_resolution}"
                 )
 
-                with av.open(f.name) as video_container:
-                    # Use consistent filter based on RecordingMetadata
-                    if target_resolution is not None:
-                        buffer_src, buffer_sink, filter_graph = get_resize_filter(
-                            video_container.streams.video[0].format,
-                            input_resolution,
-                            target_resolution,
-                            recording_metadata.time_base,
+                for timestamp in video_timestamps:
+                    assert (
+                        container_start := float(
+                            container_metadata.start_pts * container_metadata.time_base
                         )
-
-                    # Extract frames at the relative timestamps
-                    frame_tuples = extract_frames_by_pts_from_container(
-                        video_container,
-                        video_timestamps,
-                        buffer_src,
-                        buffer_sink,
+                    ) <= timestamp, (
+                        f"Container start_pts {container_start} {video_index=} does not match recording metadata timestamp {timestamp}"
+                    )
+                    assert (
+                        container_end := float(
+                            container_metadata.end_pts * container_metadata.time_base
+                        )
+                    ) >= timestamp, (
+                        f"Container end_pts {container_end} does not match recording metadata timestamp {timestamp}"
+                    )
+                if target_resolution is not None:
+                    buffer_src, buffer_sink, filter_graph = get_resize_filter(
+                        video_container.streams.video[0].format,
+                        input_resolution,
+                        target_resolution,
+                        recording_metadata.time_base,
                     )
 
-                    # Store frames in the correct positions in results
-                    for (frame_timestamp, image), (
-                        original_index,
-                        original_timestamp,
-                    ) in zip(frame_tuples, timestamp_pairs, strict=True):
-                        frame_metadata = FrameMetadata(
-                            timestamp=frame_timestamp,
-                            video_path=video_path,
-                            original_timestamp=original_timestamp,
-                        )
-                        results[original_index] = (image, frame_metadata)
+                # Extract frames at the relative timestamps
+                frame_tuples = extract_frames_by_pts_from_container(
+                    video_container,
+                    video_timestamps,
+                    buffer_src,
+                    buffer_sink,
+                )
 
-        except Exception as e:
-            logger.error(f"Error processing video {video_path}: {e}", exc_info=True)
-            # Fill with None values for failed video
-            for original_index, _ in timestamp_pairs:
-                results[original_index] = None
-
+                # Store frames in the correct positions in results
+                for (frame_timestamp, image), (
+                    original_index,
+                    original_timestamp,
+                ) in zip(frame_tuples, timestamp_pairs, strict=True):
+                    frame_metadata = FrameMetadata(
+                        timestamp=frame_timestamp,
+                        video_path=video_path,
+                        original_timestamp=original_timestamp,
+                    )
+                    results[original_index] = (image, frame_metadata)
+    results = [result for result in results if result is not None]
+    assert len(results) == len(timestamps), "Results length mismatch with timestamps"
     # Filter out None values and return only successful frames
-    return [result for result in results if result is not None]
+    return results  # type: ignore  # noqa: PGH003
 
 
 def load_metadata(source_dir: str) -> RecordingMetadata:
@@ -666,129 +1014,6 @@ def load_metadata(source_dir: str) -> RecordingMetadata:
             f"Failed to validate first video {first_video_path} in {source_dir}: {e}"
         ) from e
     return metadata
-
-
-def transform_coordinates(
-    original_point: Point,
-    original_width: int,
-    original_height: int,
-    target_width: int,
-    target_height: int,
-) -> Point:
-    """
-    Transform coordinates from original video dimensions to target dimensions.
-
-    Args:
-        original_point: Point in original coordinates
-        original_width: Original video width
-        original_height: Original video height
-        target_width: Target video width
-        target_height: Target video height
-
-    Returns:
-        Point in target coordinates
-    """
-    scale_x = target_width / original_width
-    scale_y = target_height / original_height
-
-    return Point(x=int(original_point.x * scale_x), y=int(original_point.y * scale_y))
-
-
-def transform_action_coordinates(
-    action: Action,
-    original_width: int,
-    original_height: int,
-    target_width: int,
-    target_height: int,
-) -> Action:
-    """
-    Transform action coordinates from original to target dimensions.
-
-    Args:
-        action: Action with coordinates to transform
-        original_width: Original video width
-        original_height: Original video height
-        target_width: Target video width
-        target_height: Target video height
-
-    Returns:
-        Action with transformed coordinates
-    """
-    from copy import deepcopy
-
-    # Create a deep copy to avoid modifying the original action
-    transformed_action = deepcopy(action)
-
-    # Transform coordinates based on action type
-    if hasattr(transformed_action.action, "point"):
-        transformed_action.action.point = transform_coordinates(
-            transformed_action.action.point,
-            original_width,
-            original_height,
-            target_width,
-            target_height,
-        )
-
-    # Handle drag actions with start_point and end_point
-    if hasattr(transformed_action.action, "start_point"):
-        transformed_action.action.start_point = transform_coordinates(
-            transformed_action.action.start_point,
-            original_width,
-            original_height,
-            target_width,
-            target_height,
-        )
-
-    if hasattr(transformed_action.action, "end_point"):
-        transformed_action.action.end_point = transform_coordinates(
-            transformed_action.action.end_point,
-            original_width,
-            original_height,
-            target_width,
-            target_height,
-        )
-
-    # Handle scroll actions with displacement
-    if hasattr(transformed_action.action, "displacement"):
-        # Scale displacement but don't transform it as a point since it's relative
-        scale_x = target_width / original_width
-        scale_y = target_height / original_height
-
-        original_displacement = transformed_action.action.displacement
-        transformed_action.action.displacement = (
-            int(original_displacement[0] * scale_x),
-            int(original_displacement[1] * scale_y),
-        )
-
-    return transformed_action
-
-
-def transform_action_coords_list(
-    actions: list[Action],
-    target_resolution: VideoResolution,
-    recording_metadata: RecordingMetadata,
-) -> list[Action]:
-    """
-    Transform a list of actions to match the target resolution.
-
-    Args:
-        actions: List of Action objects to transform
-        target_resolution: Target video resolution
-        recording_metadata: RecordingMetadata object containing original resolution
-
-    Returns:
-        List of transformed Action objects
-    """
-    return [
-        transform_action_coordinates(
-            action,
-            recording_metadata.screen_info.logical_pixel_width,
-            recording_metadata.screen_info.logical_pixel_height,
-            target_resolution.width,
-            target_resolution.height,
-        )
-        for action in actions
-    ]
 
 
 def chunkify(lst, n):
@@ -903,6 +1128,12 @@ def progress_listener[T](
     """
     pbar = tqdm.tqdm(total=total, desc="Processing videos", unit="video")
     completed = 0
+
+    # Track counts for different outcomes
+    success_count = 0
+    none_count = 0
+    error_count = 0
+
     while completed < total:
         try:
             save_action, err = update_queue.get(timeout=1)
@@ -917,13 +1148,37 @@ def progress_listener[T](
                 f"[!] Error getting update from queue: {traceback.format_exc()}"
             )
             continue
+
+        # Categorize the result and update counts
         if err:
+            error_count += 1
             tqdm.tqdm.write(f"[!] Error processing action range:\n{err}")
+        elif save_action is not None:
+            success_count += 1
+            results_collector.append(save_action)
         else:
-            if save_action is not None:
-                results_collector.append(save_action)
+            none_count += 1
+
         completed += 1
         pbar.update(1)
+
+        # Update progress bar description with counts
+        pbar.set_description(
+            f"Processing videos (✓{success_count} ∅{none_count} ✗{error_count})"
+        )
+
+        # Periodically write detailed counts
+        if completed % 10 == 0 or completed == total:
+            tqdm.tqdm.write(
+                f"Progress: {completed}/{total} - "
+                f"Successes: {success_count}, None returns: {none_count}, Errors: {error_count}"
+            )
+
+    # Final summary
+    tqdm.tqdm.write(
+        f"Final results: {success_count} successes, {none_count} None returns, "
+        f"{error_count} errors out of {total} total"
+    )
     pbar.close()
 
 
@@ -1066,15 +1321,16 @@ def process_videos(
 def main() -> None:
     process_videos(
         [
-            "gs://induction-labs-data-ext/action_capture/jeffrey/2025-08-10_133207_0V8HU",
-            "gs://induction-labs-data-ext/action_capture/Jarry/2025-08-10_121140_Q4KI9",
-            "gs://induction-labs-data-ext/action_capture/jonathan/2025-07-17_093647_KZ3CG",
-            # "gs://induction-labs-data-ext/action_capture/aryan_91532/2025-07-07_170814_A2QD2",
-            # "gs://induction-labs-data-ext/action_capture/aryan_91532/2025-07-07_143610_SBK20",
+            # "gs://induction-labs-data-ext/action_capture/jeffrey/2025-08-10_133207_0V8HU",
+            # "gs://induction-labs-data-ext/action_capture/Jarry/2025-08-10_121140_Q4KI9",
+            # "gs://induction-labs-data-ext/action_capture/jonathan/2025-07-17_093647_KZ3CG",
+            # "gs://induction-labs-data-ext/action_capture/Jarry/2025-08-11_185116_OXFUY",
+            "gs://induction-labs-data-ext/action_capture/aryan_91532/2025-07-07_170814_A2QD2",  # This one has second monitor stuffs
+            "gs://induction-labs-data-ext/action_capture/aryan_91532/2025-07-07_143610_SBK20",
             # "gs://induction-labs-data-ext/action_capture/aryan_91532/2025-07-08_160952_VX5RU",
         ],
-        "gs://induction-labs/passive_data/2025-08-11/actionblock_10",
-        # max_video_files=10,
+        f"gs://induction-labs/passive_data/2025-08-11/aryan_data/{datetime.datetime.now(datetime.UTC):%Y-%m-%d}",
+        # max_video_files=1,
         # num_processes=1,
     )
 
