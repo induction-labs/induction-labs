@@ -8,15 +8,17 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Annotated
 
+import pandas as pd
 import typer
-import wandb
 
 # Import the evaluate_csv function from the showdown clicks package
-from clicks.eval import evaluate_csv
+from clicks.eval import EvaluationResult, evaluate_csv
 from clicks.third_party import get_ui_tars_api_client
+from pydantic import computed_field
 from synapse.utils.async_typer import AsyncTyper
 from synapse.utils.logging import configure_logging, logging
 
+import wandb
 from modeling.checkpoints.load import download_gcs_folder
 from modeling.checkpoints.save import upload_to_gcs
 from modeling.eve.vllm_utils import wait_for_servers_ready
@@ -59,6 +61,39 @@ def setup_output_folder(output_folder: str) -> tuple[str, CloudPath | None]:
         if not os.path.exists(output_folder):
             os.makedirs(output_folder)
         return output_folder, None
+
+
+class AugmentedEvaluationResult(EvaluationResult):
+    @computed_field
+    @property
+    def center_coords(self) -> tuple[float, float] | None:
+        if self.pred_x is not None and self.pred_y is not None:
+            return (self.pred_x, self.pred_y)
+        return None
+
+    @computed_field
+    @property
+    def x_error(self) -> float | None:
+        if self.center_coords and self.gt_x1 is not None:
+            return self.gt_x1 - self.center_coords[0]
+        return None
+
+    @computed_field
+    @property
+    def y_error(self) -> float | None:
+        if self.center_coords and self.gt_y1 is not None:
+            return self.gt_y1 - self.center_coords[1]
+        return None
+
+    @computed_field
+    @property
+    def pixel_distance(self) -> float | None:
+        if self.center_coords and self.gt_x1 is not None and self.gt_y1 is not None:
+            return (
+                (self.gt_x1 - self.center_coords[0]) ** 2
+                + (self.gt_y1 - self.center_coords[1]) ** 2
+            ) ** 0.5
+        return None
 
 
 @app.async_command(name="run")
@@ -187,8 +222,8 @@ async def run_clicks_evaluation(
 
         await asyncio.to_thread(
             download_gcs_folder,
-            bucket_name="induction-labs",
-            prefix="jeffrey/generalagents-showdown-clicks",
+            bucket_name="click-eval",
+            prefix="generalagents-showdown-clicks",
             local_dir=Path(dataset_tmpdir),
         )
         data_dir = dataset_tmpdir
@@ -224,6 +259,11 @@ async def run_clicks_evaluation(
             num_workers=num_workers,
             run_id=run_id,
         )
+        results = [
+            AugmentedEvaluationResult.model_validate(result.model_dump())
+            for result in results
+            if isinstance(result, EvaluationResult)
+        ]
 
         if results:
             print("\nEvaluation completed successfully!")
@@ -232,55 +272,80 @@ async def run_clicks_evaluation(
 
             # Calculate accuracy
             total_processed = len(results)
-            total_in_bbox = sum(
-                1 for result in results if result.get("is_in_bbox", False)
-            )
+            total_in_bbox = sum(1 for result in results if result.is_in_bbox)
             accuracy = (
                 (total_in_bbox / total_processed) * 100 if total_processed > 0 else 0
+            )
+            err_x = (
+                sum(result.x_error for result in results if result.x_error is not None)
+                / total_processed
+            )
+            err_y = (
+                sum(result.y_error for result in results if result.y_error is not None)
+                / total_processed
+            )
+            avg_dist = (
+                sum(
+                    result.pixel_distance
+                    for result in results
+                    if result.pixel_distance is not None
+                )
+                / total_processed
+                if total_processed > 0
+                else 0
+            )
+            avg_elapsed = (
+                sum(result.latency_seconds for result in results) / total_processed
+                if total_processed > 0
+                else 0
             )
 
             print(f"Accuracy: {accuracy:.2f}% ({total_in_bbox}/{total_processed})")
 
             # Save summary metrics
+            wandb_metrics = {
+                "accuracy": accuracy,
+                "total_processed": total_processed,
+                "total_in_bbox": total_in_bbox,
+                "accuracy_percentage": accuracy,
+                "success_rate": accuracy / 100.0,
+                "avg_x_error": err_x,
+                "avg_y_error": err_y,
+                "avg_pixel_distance": avg_dist,
+                "avg_latency_seconds": avg_elapsed,
+            }
+
             metrics = {
                 "run_id": run_id,
                 "model": "ui-tars",
                 "dataset": dataset,
-                "accuracy": accuracy,
-                "total_processed": total_processed,
-                "total_in_bbox": total_in_bbox,
                 "api_url": api_url,
                 "max_tokens": max_tokens,
                 "temperature": temperature,
                 "num_workers": num_workers,
                 "sample_size": sample_size,
+                **wandb_metrics,
             }
 
             # Log metrics to wandb
-            wandb.log(
-                {
-                    "accuracy": accuracy,
-                    "total_processed": total_processed,
-                    "total_in_bbox": total_in_bbox,
-                    "accuracy_percentage": accuracy,
-                    "success_rate": accuracy / 100.0,
-                }
-            )
+            wandb.log(wandb_metrics)
 
             # Log the full results as a table for detailed analysis
+            results_dict = [result.model_dump() for result in results]
+            table_columns = list(results_dict[0].keys()) if results else []
             results_table = wandb.Table(
-                columns=["id", "is_in_bbox", "pixel_distance", "bbox_accuracy"],
+                columns=table_columns,
                 data=[
-                    [
-                        result.get("id", ""),
-                        result.get("is_in_bbox", False),
-                        result.get("pixel_distance", 0),
-                        1.0 if result.get("is_in_bbox", False) else 0.0,
-                    ]
-                    for result in results
+                    [result[col] for col in table_columns] for result in results_dict
                 ],
             )
             wandb.log({"results_table": results_table})
+            results_df = pd.DataFrame(results_dict)
+            results_df.to_json(
+                os.path.join(run_output_folder, "results.jsonl"),
+                orient="records",
+                lines=True,
+            )
 
             import json
 
