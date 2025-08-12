@@ -35,7 +35,7 @@ export function TrajectoryStepViewer({ steps }: TrajectoryStepViewerProps) {
 
   // Extract click coordinates from action field
   const extractClickCoordinates = (action: string) => {
-    const pointRegex = /<point>(\d+)\s+(\d+)<\/point>/;
+    const pointRegex = /='\((\d+),(\d+)\)/;
     const match = pointRegex.exec(action);
     if (match) {
       return {
