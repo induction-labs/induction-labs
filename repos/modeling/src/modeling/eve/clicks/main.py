@@ -4,7 +4,9 @@ import asyncio
 import os
 import shutil
 import tempfile
+from collections.abc import Mapping
 from datetime import datetime, timedelta
+from enum import Enum
 from pathlib import Path
 from typing import Annotated
 
@@ -21,6 +23,11 @@ from synapse.utils.logging import configure_logging, logging
 import wandb
 from modeling.checkpoints.load import download_gcs_folder
 from modeling.checkpoints.save import upload_to_gcs
+from modeling.eve.os_world.agents.uitars15 import (
+    COMPUTER_USE_15,
+    COMPUTER_USE_15_ONLY_CLICKS,
+    THOUGHT_LONG,
+)
 from modeling.eve.vllm_utils import wait_for_servers_ready
 from modeling.utils.cloud_path import CloudPath
 from modeling.utils.max_timeout import max_timeout
@@ -34,10 +41,21 @@ DEFAULT_API_URL = "http://127.0.0.1:8080"
 DEFAULT_UI_TARS_MODEL = ""
 DEFAULT_DATASET = "dev"
 DEFAULT_NUM_WORKERS = 1
-DEFAULT_MAX_TOKENS = 128
+DEFAULT_MAX_TOKENS = 256
 DEFAULT_TEMPERATURE = 0.0
-DEFAULT_FREQUENCY_PENALTY = 1.0
+DEFAULT_FREQUENCY_PENALTY = 0.0
 DEFAULT_OUTPUT_FOLDER = "gs://induction-labs/evals/clicks-evals/"
+
+
+class PromptTemplates(str, Enum):
+    default = "default"
+    only_clicks = "only_clicks"
+
+
+prompt_templates: Mapping[PromptTemplates, str] = {
+    PromptTemplates.default: COMPUTER_USE_15,
+    PromptTemplates.only_clicks: COMPUTER_USE_15_ONLY_CLICKS,
+}
 
 
 def setup_output_folder(output_folder: str) -> tuple[str, CloudPath | None]:
@@ -119,6 +137,16 @@ async def run_clicks_evaluation(
     frequency_penalty: Annotated[
         float, typer.Option("--frequency-penalty", help="Frequency penalty parameter")
     ] = DEFAULT_FREQUENCY_PENALTY,
+    prompt_template: Annotated[
+        PromptTemplates,
+        typer.Option(
+            "--prompt-template",
+            help="Prompt template to use for evaluation",
+            case_sensitive=False,
+            show_choices=True,
+            show_default=True,
+        ),
+    ] = PromptTemplates.default,
     sample_size: Annotated[
         int | None,
         typer.Option(
@@ -158,6 +186,8 @@ async def run_clicks_evaluation(
             cmd_parts.extend(["--frequency-penalty", str(frequency_penalty)])
         if sample_size is not None:
             cmd_parts.extend(["--sample-size", str(sample_size)])
+        if prompt_template != PromptTemplates.default:
+            cmd_parts.extend(["--prompt-template", prompt_template.value])
         if output_folder != DEFAULT_OUTPUT_FOLDER:
             cmd_parts.extend(["--output", output_folder])
         if run_id is not None:
@@ -182,6 +212,11 @@ async def run_clicks_evaluation(
 
     # Setup output folder handling
     local_output_folder, cloud_output_path = setup_output_folder(output_folder)
+    prompt_template_str = prompt_templates[prompt_template].format(
+        language="en",
+        thought_mode=THOUGHT_LONG,
+        instruction="{instruction}",
+    )
 
     # Initialize wandb
     wandb.init(
@@ -198,6 +233,8 @@ async def run_clicks_evaluation(
             "sample_size": sample_size,
             "output_folder": output_folder,
             "cloud_output_path": cloud_output_path.uri if cloud_output_path else None,
+            "prompt_template_str": prompt_template_str,
+            "prompt_template": prompt_template.value,
         },
         tags=["clicks", "evaluation", "ui-tars"],
     )
@@ -210,6 +247,7 @@ async def run_clicks_evaluation(
         # Create API client
         api_client = get_ui_tars_api_client(
             api_url=api_url,
+            prompt_template=prompt_template_str,
             api_key="super-secret-key",  # Default key for vLLM
             max_tokens=max_tokens,
             temperature=temperature,
@@ -322,6 +360,7 @@ async def run_clicks_evaluation(
                 "temperature": temperature,
                 "num_workers": num_workers,
                 "sample_size": sample_size,
+                "prompt_template_str": prompt_template_str,
                 **wandb_metrics,
             }
 

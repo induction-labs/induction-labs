@@ -640,6 +640,31 @@ call_user() # Submit the task and call the user when the task is unsolvable, or 
 {instruction}
 """
 
+COMPUTER_USE_15_ONLY_CLICKS = """You are a GUI agent. You are given a task and your action history, with screenshots. You need to perform the next action to complete the task.
+
+## Output Format
+```
+Thought: ...
+Action: ...
+```
+
+## Action Space
+
+click(start_box='<|box_start|>(x1,y1)<|box_end|>')
+left_double(start_box='<|box_start|>(x1,y1)<|box_end|>')
+right_single(start_box='<|box_start|>(x1,y1)<|box_end|>')
+drag(start_box='<|box_start|>(x1,y1)<|box_end|>', end_box='<|box_start|>(x3,y3)<|box_end|>')
+
+
+## Note
+- Use {language} in `Thought` part.
+- {thought_mode}
+
+## User Instruction
+{instruction}
+"""
+
+
 THOUGHT_BRIEF = "Generate a well-defined and practical strategy in the `Thought` section, summarizing your next move and its objective."
 THOUGHT_LONG = "Compose a step-by-step approach in the `Thought` part, specifying your next action and its focus."
 LANG_EN = "English"
