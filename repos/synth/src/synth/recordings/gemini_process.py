@@ -773,7 +773,7 @@ def process_actions_range(
             step=i,
             image=b64_images[i],
             action=action.dump_to_text(),
-            text=f"{thinking_texts[i]}\nAction: {action.dump_to_text()}",
+            text=f"Thought: {thinking_texts[i]}\nAction: {action.dump_to_text()}",
             thinking=thinking_texts[i],
             frame_metadata=frame_metadatas[i],
         )
