@@ -102,11 +102,12 @@ def normalize_key_to_physical(key):
     return reverse_map.get(key_lower, key_lower)
 
 
+# TODO: Take screensize as argument
 def parse_scroll(
     events: list[dict],
     /,
     page_delta: int = 1024,
-    point_threshold: int = 50,
+    point_threshold: int = 70,
     time_threshold: float = 4.0,
 ) -> list[Action]:
     """
@@ -131,10 +132,19 @@ def parse_scroll(
     acc_dy: int = 0  # |ΣΔ| accumulated so far
     start_t: float | None = None  # first timestamp contributing
     last_t: float | None = None  # previous event time
+    last_scroll_pos: tuple[int, int] | None = None  # last scroll position
 
     def flush():
         """Emit one residual page, if any, for the current group."""
-        nonlocal acc_dx, acc_dy, start_t, last_t, origin, axis, direction
+        nonlocal \
+            acc_dx, \
+            acc_dy, \
+            start_t, \
+            last_t, \
+            origin, \
+            axis, \
+            direction, \
+            last_scroll_pos
         if (acc_dx or acc_dy) and start_t is not None and last_t is not None:
             out.append(
                 Action(
@@ -155,6 +165,7 @@ def parse_scroll(
         axis = None
         direction = None
         start_t = None
+        last_scroll_pos = None
 
     # ----------------------------------------------------------------------
     for ev in events:
@@ -188,22 +199,22 @@ def parse_scroll(
             origin = (x, y)
             axis = axis_now
             direction = dir_now
+        if last_scroll_pos is None:
+            last_scroll_pos = (x, y)
 
         # does this event *break* the current group?
         if (
-            axis_now != axis
-            or dir_now != direction
-            or abs(x - origin[0]) > point_threshold
-            or abs(y - origin[1]) > point_threshold
+            abs(x - last_scroll_pos[0]) > point_threshold
+            or abs(y - last_scroll_pos[1]) > point_threshold
             or (last_t is not None and t - last_t > time_threshold)
         ):
             # print(
             #     "flush1",
             #     ev["timestamp"],
-            #     axis_now != axis,
-            #     dir_now != direction,
-            #     abs(x - origin[0]) > point_threshold,
-            #     abs(y - origin[1]) > point_threshold,
+            #     x,
+            #     last_scroll_pos[0],
+            #     abs(x - last_scroll_pos[0]) > point_threshold,
+            #     abs(y - last_scroll_pos[1]) > point_threshold,
             #     last_t is not None and t - last_t > time_threshold,
             # )
             flush()
@@ -217,6 +228,7 @@ def parse_scroll(
         acc_dx += dx
         acc_dy += dy
         last_t = t
+        last_scroll_pos = (x, y)
 
         acc_change = acc_dx if axis_now == "x" else acc_dy
 
@@ -577,8 +589,6 @@ def parse_actions(raw_actions: list[dict]) -> list[Action]:
                             key=final_char.lower(),
                             modifiers=get_modifiers(),
                         )
-                        if timestamp == 1754667368.8691633:
-                            print(f"Arrow action at {timestamp}: {arrow_action}")
                         add_parsed_action(arrow_action, timestamp, timestamp)
                     elif len(final_char) == 1:  # Single character
                         typing_buffer.append((final_char, timestamp))

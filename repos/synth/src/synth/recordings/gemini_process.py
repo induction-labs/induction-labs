@@ -25,6 +25,7 @@ import pandas as pd
 import PIL
 import PIL.Image
 import tqdm
+from PIL import ImageDraw
 from pydantic import BaseModel
 from smart_open import open as smart_open
 from synapse.utils.logging import configure_logging, logging
@@ -378,13 +379,22 @@ SS_DELAY = 0.20
 BEFORE_ACTION_BUFFER = 0.0
 
 
+def mean(a: float, b: float, weight=0.5) -> float:
+    return a * (1 - weight) + b * weight
+
+
 def get_timesteps_range(actions: list[Action]) -> tuple[float, list[float]]:
     timestamps: list[float] = []
     timestamps.append(actions[0].timestamp - SS_DELAY)
     for i, prev_action in enumerate(actions[:-1]):
         next_action = actions[i + 1]
-        end_timestamp = min(
+        end_timestamp = mean(
             prev_action.end_timestamp + SS_DELAY,
+            next_action.timestamp - BEFORE_ACTION_BUFFER,
+            0.2,
+        )
+        end_timestamp = min(
+            end_timestamp,
             next_action.timestamp - BEFORE_ACTION_BUFFER,
         )
         timestamps.append(end_timestamp)
@@ -578,12 +588,12 @@ def get_thinking_texts(
     """
     thinking_texts = []
     cost_infos = []
-    old_turns = []
+    old_turns: list[str] = []
     for i, action in enumerate(actions):
         text_prompt = PROMPT_WITHOUT_NEXT.format(
             instruction=instruction,
             old_turns=old_turns,
-            new_action=action.dump_to_text(),
+            new_action=f"Action #{i + 1}: {action.dump_to_text()}",
         )
 
         # Build interleaved content with text and the two consecutive frames
@@ -602,7 +612,9 @@ def get_thinking_texts(
             thinking_texts.append(model_response_text)
             cost_infos.append(cost_info)
             logger.debug(f"Thinking text for action {i}: {model_response_text}")
-            old_turns.append(f"{model_response_text}\n{action.dump_to_text()}")
+            old_turns.append(
+                f"Action #{i + 1}: {model_response_text}\n{action.dump_to_text()}"
+            )
 
         except Exception as e:
             logger.error(f"Error generating thinking text for action {i}: {e}")
@@ -629,23 +641,47 @@ def get_thinking_texts(
 
 
 def build_base_prompt(
-    first_frame: bytes,
-    rest_frames: list[bytes],
+    last_frame: PIL.Image.Image,
+    rest_frames: list[PIL.Image.Image],
     actions: list[Action],
 ) -> list[dict]:
-    prompt = [
+    prompt: list[dict] = [
         text_content(
-            "The following are screenshots and the actions a user took from a video recording: \n Initial screenshot:\n"
+            "The following are a series of screenshots and the actions a user took from a video recording of performing a task. "
+            "The `i`th screenshot is taken right before the user performs the `i`th action, resulting in the `i+1`th screenshot."
         ),
-        image_content(first_frame),
     ]
+    # image_content(pil_to_bytes(first_frame, format="PNG")),
     for i, (action, frame) in enumerate(
         zip(actions, rest_frames, strict=True),
     ):
-        prompt.append(text_content(f"\nAction {i}: {action.dump_to_text()}\n"))
-        prompt.append(image_content(frame))
-
-    prompt[-1] = {**prompt[-1], "cache_control": {"type": "ephemeral"}}
+        prompt.append(text_content(f"\n\nScreenshot #{i + 1}:"))
+        # text = f"Screenshot {i}:\n"
+        text = f"Action #{i + 1}: {action.dump_to_text()}."
+        if hasattr(action.action, "point") and action.action.action_type != "scroll":
+            point = action.action.point
+            text += f" (Point ({point.x}, {point.y}) highlighted in red)"
+            frame = frame.copy()
+            draw = ImageDraw.Draw(frame)
+            draw.ellipse(
+                [point.x - 8, point.y - 8, point.x + 8, point.y + 8],
+                fill="red",
+                outline="black",
+                width=2,
+            )
+        prompt.append(image_content(pil_to_bytes(frame, format="PNG")))
+        prompt.append(text_content(text))
+    prompt.append(
+        text_content(
+            "\n\nThe last screenshot is the final state of the screen after all actions have been performed:",
+        )
+    )
+    prompt.append(
+        {
+            **image_content(pil_to_bytes(last_frame, format="PNG")),
+            "cache_control": {"type": "ephemeral"},
+        },
+    )
     return prompt
 
 
@@ -681,12 +717,13 @@ def process_actions_range(
     logger.debug("Got frames")
     frames = [frame[0] for frame in frames_with_metadata]
     frame_metadatas = [frame[1] for frame in frames_with_metadata]
-    frame_buffers = [pil_to_bytes(frame, format="PNG") for frame in frames]
+
     base_prompt = build_base_prompt(
-        first_frame=frame_buffers[0],
-        rest_frames=frame_buffers[1:],
+        last_frame=frames[-1],
+        rest_frames=frames[:-1],
         actions=actions,
     )
+    frame_buffers = [pil_to_bytes(frame, format="PNG") for frame in frames]
     try:
         should_filter = get_should_filter(
             base_prompt,
@@ -1367,13 +1404,32 @@ def process_videos(
 
 
 def main() -> None:
-    dataset_name = "aryan_data_long_video"
+    dataset_name = "aryan_data_long_video_timestamp_good2_test"
     process_videos(
         [
-            # "gs://induction-labs-data-ext/action_capture/jeffrey/2025-08-10_133207_0V8HU",
-            # "gs://induction-labs-data-ext/action_capture/Jarry/2025-08-10_121140_Q4KI9",
-            # "gs://induction-labs-data-ext/action_capture/jonathan/2025-07-17_093647_KZ3CG",
-            # "gs://induction-labs-data-ext/action_capture/Jarry/2025-08-11_185116_OXFUY",
+            # Jeffrey
+            # (
+            #     "gs://induction-labs-data-ext/action_capture/jeffrey/2025-08-10_133207_0V8HU",
+            #     (None, None),
+            # ),
+            # # Jonathan
+            # (
+            #     "gs://induction-labs-data-ext/action_capture/jonathan/2025-07-17_093647_KZ3CG",
+            #     (None, None),
+            # ),
+            # # Jarry
+            # (
+            #     "gs://induction-labs-data-ext/action_capture/Jarry/2025-07-07_002920_0SPCN",
+            #     (None, None),
+            # ),
+            # (
+            #     "gs://induction-labs-data-ext/action_capture/Jarry/2025-08-10_121140_Q4KI9",
+            #     (None, None),
+            # ),
+            # (
+            #     "gs://induction-labs-data-ext/action_capture/Jarry/2025-08-11_185116_OXFUY",
+            #     (None, None),
+            # ),
             # (
             #     # This one has second monitor stuffs
             #     "gs://induction-labs-data-ext/action_capture/aryan_91532/2025-07-07_170814_A2QD2",
@@ -1390,7 +1446,7 @@ def main() -> None:
             ),
         ],
         f"gs://induction-labs/passive_data/{datetime.datetime.now(datetime.UTC):%Y-%m-%d}/{dataset_name}-{datetime.datetime.now(datetime.UTC):%H-%M-%S}",
-        # max_video_files=1,
+        max_video_files=20,
         # num_processes=1,
     )
 
