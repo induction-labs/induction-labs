@@ -36,6 +36,16 @@ logger = configure_logging(__name__, level=logging.INFO)
 
 app = AsyncTyper()
 
+
+class PromptTemplates(str, Enum):
+    uitars15 = "computer_use_15"
+    only_clicks = "only_clicks"
+
+
+prompt_templates: Mapping[PromptTemplates, str] = {
+    PromptTemplates.uitars15: COMPUTER_USE_15,
+    PromptTemplates.only_clicks: COMPUTER_USE_15_ONLY_CLICKS,
+}
 # Default values for command options
 DEFAULT_API_URL = "http://127.0.0.1:8080"
 DEFAULT_UI_TARS_MODEL = ""
@@ -45,17 +55,7 @@ DEFAULT_MAX_TOKENS = 256
 DEFAULT_TEMPERATURE = 0.0
 DEFAULT_FREQUENCY_PENALTY = 0.0
 DEFAULT_OUTPUT_FOLDER = "gs://induction-labs/evals/clicks-evals/"
-
-
-class PromptTemplates(str, Enum):
-    default = "default"
-    only_clicks = "only_clicks"
-
-
-prompt_templates: Mapping[PromptTemplates, str] = {
-    PromptTemplates.default: COMPUTER_USE_15,
-    PromptTemplates.only_clicks: COMPUTER_USE_15_ONLY_CLICKS,
-}
+DEFAULT_PROMPT_TEMPLATE = PromptTemplates.only_clicks
 
 
 def setup_output_folder(output_folder: str) -> tuple[str, CloudPath | None]:
@@ -146,7 +146,7 @@ async def run_clicks_evaluation(
             show_choices=True,
             show_default=True,
         ),
-    ] = PromptTemplates.default,
+    ] = DEFAULT_PROMPT_TEMPLATE,
     sample_size: Annotated[
         int | None,
         typer.Option(
@@ -186,7 +186,7 @@ async def run_clicks_evaluation(
             cmd_parts.extend(["--frequency-penalty", str(frequency_penalty)])
         if sample_size is not None:
             cmd_parts.extend(["--sample-size", str(sample_size)])
-        if prompt_template != PromptTemplates.default:
+        if prompt_template != DEFAULT_PROMPT_TEMPLATE:
             cmd_parts.extend(["--prompt-template", prompt_template.value])
         if output_folder != DEFAULT_OUTPUT_FOLDER:
             cmd_parts.extend(["--output", output_folder])
