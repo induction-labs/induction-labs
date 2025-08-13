@@ -7,6 +7,7 @@ import re
 from typing import TYPE_CHECKING, Any, ClassVar, Self
 
 import fsspec
+import numpy as np
 import pandas as pd
 import torch
 from google.cloud import storage
@@ -196,7 +197,9 @@ class VlDataset(BaseDataset[VlDataSample, VlDatasetArgs]):
         "image_turns_start",
         "image_turns_end",
         "dataset_folder",
+        # TODO: Deprecate unmask_last_only
         "unmask_last_only",
+        "unmask_last_n_turns",
     ]
     examples: pd.DataFrame
     processor: Qwen2_5_VLProcessor
@@ -224,6 +227,9 @@ class VlDataset(BaseDataset[VlDataSample, VlDatasetArgs]):
             samples = pd.read_json(dataset_path, lines=True)
             dataset_folder = dataset_path.rstrip("/").rsplit("/", 1)[0]
             samples["dataset_folder"] = dataset_folder
+
+            samples["unmask_last_n_turns"] = samples.get("unmask_last_n_turns", pd.NA)
+            samples["unmask_last_only"] = samples.get("unmask_last_only", pd.NA)
             samples = samples[cls.col_names]
             frames.append(samples)
 
@@ -335,20 +341,49 @@ class VlDataset(BaseDataset[VlDataSample, VlDatasetArgs]):
         labels = input_ids.clone()
 
         # Mask padding tokens in labels + image tokens
-        unmask_only_last = sample.get("unmask_last_only", False)
+        unmask_only_last = sample.get("unmask_last_only", pd.NA)
+        # Check if unmask_last_only is set to True or False
+
+        # -1 for unmask all assistant turns
+        unmask_last_n_turns = -1
+
+        if pd.notna(unmask_only_last):
+            assert pd.isna(sample.get("unmask_last_n_turns", pd.NA)), (
+                f"unmask_last_n_turns must be None when unmask_last_only is  {sample=}"
+            )
+            assert isinstance(unmask_only_last, bool | np.bool), (
+                f"unmask_last_only must be a boolean, got {type(unmask_only_last)}"
+            )
+            if unmask_only_last:
+                # unmask only the last assistant turn
+                unmask_last_n_turns = 1
+        else:
+            # Here unmask_only_last is None, we explicitly get the value of `unmask_last_n_turns`
+            unmask_last_n_turns = sample.get("unmask_last_n_turns")
+
+        assert isinstance(unmask_last_n_turns, (int | np.integer)), (
+            f"unmask_last_n_turns must be an integer when {unmask_last_n_turns=} {type(unmask_last_n_turns)=} is None {sample=}"
+        )
+
         labels[labels == self.processor.tokenizer.pad_token_id] = -100
         assistant_tokens = mask_assistant(input_ids)
         any_assistant_tokens = assistant_tokens.any()
         if not any_assistant_tokens:
             logger.warning(f"No assistant tokens found in {sample['attempt_id']}, ")
-        if unmask_only_last and any_assistant_tokens:
+        if (unmask_last_n_turns >= 0) and any_assistant_tokens:
             prev = torch.cat(
                 [assistant_tokens.new_tensor([False]), assistant_tokens[:-1]]
             )
             starts = assistant_tokens & ~prev
             _labels = torch.cumsum(starts, dim=0)
-            last_chunk = _labels[assistant_tokens].max()
-            assistant_tokens = assistant_tokens & (_labels == last_chunk)
+            for _ in range(unmask_last_n_turns):
+                last_chunk = _labels[assistant_tokens].max()
+                assert last_chunk > 0, (
+                    f"unmask_last_n_turns={unmask_last_n_turns} but no assistant tokens found in {sample['attempt_id']}"
+                    f"{sample=}"
+                )
+                assistant_tokens = assistant_tokens & (_labels == last_chunk)
+                _labels[last_chunk] = 0  # reset the last chunk to 0
 
         labels[~assistant_tokens] = -100
 
