@@ -7,6 +7,7 @@ import Link from "next/link";
 import { useTrajectoryContext } from "../trajectory-context";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "~/components/ui/tabs";
 import { usePathname } from "next/navigation";
+import { EditablePathInput } from "~/components/editable-path-input";
 
 interface MainLayoutProps {
   children: ReactNode;
@@ -31,9 +32,13 @@ export default function MainLayout({ children }: MainLayoutProps) {
             </Button>
           </Link>
           <h1 className="text-4xl font-bold tracking-tight">Trajectory Data</h1>
-          <p className="text-muted-foreground mt-2">
-            Viewing data from: <code className="bg-muted px-1 py-0.5 rounded text-xs">{decodedPath}</code>
-          </p>
+          <div className="mt-2">
+            <p className="text-muted-foreground text-sm mb-2">Viewing data from:</p>
+            <EditablePathInput 
+              currentPath={decodedPath}
+              basePath="/trajectories"
+            />
+          </div>
         </div>
 
         <Tabs value={activeTab} className="space-y-6">

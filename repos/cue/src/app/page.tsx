@@ -47,9 +47,14 @@ export default async function Home() {
                   Monitor and manage jobs in your Kubernetes cluster queues
                 </p>
               </div>
-              <Link href="/trajectories" className="text-sm text-muted-foreground hover:text-foreground">
-                Data Trajectory Explorer →
-              </Link>
+              <div className="flex space-x-4">
+                <Link href="/trajectories" className="text-sm text-muted-foreground hover:text-foreground">
+                  Trajectories →
+                </Link>
+                <Link href="/clicks" className="text-sm text-muted-foreground hover:text-foreground">
+                  Clicks →
+                </Link>
+              </div>
             </div>
           </div>
 
