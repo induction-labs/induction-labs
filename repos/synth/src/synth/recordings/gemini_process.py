@@ -606,7 +606,7 @@ def get_thinking_texts(
             model_response_text, cost_info = call_model(
                 model_name=model_name,
                 messages=[{"role": "user", "content": content}],
-                max_tokens=2048,
+                max_tokens=4096,
             )
 
             thinking_texts.append(model_response_text)
@@ -1013,6 +1013,7 @@ def load_metadata(source_dir: str) -> RecordingMetadata:
     Raises:
         Exception: If metadata.json cannot be loaded or is invalid
     """
+    source_dir = source_dir.rstrip("/")
     fs = gcsfs.GCSFileSystem()
 
     try:
@@ -1024,6 +1025,7 @@ def load_metadata(source_dir: str) -> RecordingMetadata:
             metadata_dict = json.load(f)
 
         # Convert timestamp to
+
         metadata_dict["timestamp"] = 0
         # Validate using Pydantic
 
@@ -1046,12 +1048,26 @@ def load_metadata(source_dir: str) -> RecordingMetadata:
         metadata_dict["time_base"] = video_metadata.time_base
 
         metadata = RecordingMetadata(**metadata_dict)
+
+        if metadata.platform.is_windows:
+            logger.warning(
+                "Windows platform detected. Please ensure the metadata is correct and matches the video resolution."
+            )
+            metadata.screen_info.video_width = video_metadata.resolution.width
+            metadata.screen_info.video_height = video_metadata.resolution.height
+            metadata.screen_info.logical_pixel_width = video_metadata.resolution.width
+            metadata.screen_info.logical_pixel_height = video_metadata.resolution.height
+            metadata.screen_info.logical_pixel_ratio = 1.0
+
         # Check if video resolution matches screen info
-        if (
-            video_metadata.resolution.width != metadata.screen_info.video_width
-            or video_metadata.resolution.height != metadata.screen_info.video_height
-        ):
-            raise ValueError("Video resolution does not match screen info in metadata")
+        assert video_metadata.resolution.width == metadata.screen_info.video_width, (
+            f"Video width {video_metadata.resolution.width} does not match screen info in metadata {metadata.screen_info.video_width}"
+        )
+
+        assert video_metadata.resolution.height == metadata.screen_info.video_height, (
+            f"Video height {video_metadata.resolution.height} does not match screen info in metadata {metadata.screen_info.video_height}"
+        )
+
     except Exception as e:
         raise Exception(
             f"Failed to validate first video {first_video_path} in {source_dir}: {e}"
@@ -1281,6 +1297,12 @@ def process_videos(
     """
     # Discover all video files in the source folders
 
+    source_folders = [
+        (source.rstrip("/"), time_bounds)
+        for source, time_bounds in source_folders
+        if source
+    ]
+
     raw_action_sets = {
         k: filter_actions_time_bounds(get_actions(k[0]), k[1]) for k in source_folders
     }
@@ -1316,6 +1338,9 @@ def process_videos(
             }
             for source_dir, actions in unravelled_segments
         ]
+    )
+    assert len(action_segment_lens_df) > 0, (
+        "No action segments found. Check if the source folders contain valid actions."
     )
     print("Action segments summary:")
     print(action_segment_lens_df.describe())
@@ -1404,20 +1429,20 @@ def process_videos(
 
 
 def main() -> None:
-    dataset_name = "aryan_data_long_video_timestamp_good2_test"
+    dataset_name = "joyce_data"
     process_videos(
         [
-            # Jeffrey
+            # # Jeffrey
             # (
             #     "gs://induction-labs-data-ext/action_capture/jeffrey/2025-08-10_133207_0V8HU",
             #     (None, None),
             # ),
-            # # Jonathan
+            # # # Jonathan
             # (
             #     "gs://induction-labs-data-ext/action_capture/jonathan/2025-07-17_093647_KZ3CG",
             #     (None, None),
             # ),
-            # # Jarry
+            # # # Jarry
             # (
             #     "gs://induction-labs-data-ext/action_capture/Jarry/2025-07-07_002920_0SPCN",
             #     (None, None),
@@ -1430,6 +1455,7 @@ def main() -> None:
             #     "gs://induction-labs-data-ext/action_capture/Jarry/2025-08-11_185116_OXFUY",
             #     (None, None),
             # ),
+            # # Aryan
             # (
             #     # This one has second monitor stuffs
             #     "gs://induction-labs-data-ext/action_capture/aryan_91532/2025-07-07_170814_A2QD2",
@@ -1439,14 +1465,39 @@ def main() -> None:
             #     "gs://induction-labs-data-ext/action_capture/aryan_91532/2025-07-07_143610_SBK20",
             #     (None, None),
             # ),
-            (
-                "gs://induction-labs-data-ext/action_capture/aryan_91532/2025-07-08_160952_VX5RU",
-                # Filters to video 414. TODO: write auto filter based on timestamps
-                (None, 1752017846.856214),
-            ),
+            # (
+            #     "gs://induction-labs-data-ext/action_capture/aryan_91532/2025-07-08_160952_VX5RU",
+            #     # Filters to video 414. TODO: write auto filter based on timestamps
+            #     (None, 1752017846.856214),
+            # ),
+            # Joyce
+            *(
+                (
+                    data,
+                    (None, None),
+                )
+                for data in [
+                    "gs://induction-labs-data-ext/action_capture/joyceliu/2025-07-04_110139_B6VYF/",
+                    "gs://induction-labs-data-ext/action_capture/joyceliu/2025-07-06_112602_9ZEFH/",
+                    "gs://induction-labs-data-ext/action_capture/joyceliu/2025-07-09_160136_WVNHY/",
+                    "gs://induction-labs-data-ext/action_capture/joyceliu/2025-07-12_100706_2RKVJ/",
+                    "gs://induction-labs-data-ext/action_capture/joyceliu/2025-07-14_111643_P725G/",
+                    "gs://induction-labs-data-ext/action_capture/joyceliu/2025-07-14_162035_B9PM6/",
+                    "gs://induction-labs-data-ext/action_capture/joyceliu/2025-07-15_100419_MAESY/",
+                    "gs://induction-labs-data-ext/action_capture/joyceliu/2025-07-15_101847_913IO/",
+                    "gs://induction-labs-data-ext/action_capture/joyceliu/2025-07-15_102313_K967C/",
+                    "gs://induction-labs-data-ext/action_capture/joyceliu/2025-07-18_203324_YL5VM/",
+                    "gs://induction-labs-data-ext/action_capture/joyceliu/2025-07-27_192513_2FNA0/",
+                    "gs://induction-labs-data-ext/action_capture/joyceliu/2025-07-27_192852_E59D8/",
+                    "gs://induction-labs-data-ext/action_capture/joyceliu/2025-07-27_193551_TX1BD/",
+                    "gs://induction-labs-data-ext/action_capture/joyceliu/2025-07-29_193316_LSEM8/",
+                    "gs://induction-labs-data-ext/action_capture/joyceliu/2025-07-30_111301_8RVWD/",
+                    "gs://induction-labs-data-ext/action_capture/joyceliu/2025-07-31_200548_0Z5EH/",
+                ]
+            )
         ],
         f"gs://induction-labs/passive_data/{datetime.datetime.now(datetime.UTC):%Y-%m-%d}/{dataset_name}-{datetime.datetime.now(datetime.UTC):%H-%M-%S}",
-        max_video_files=20,
+        # max_video_files=20,
         # num_processes=1,
     )
 

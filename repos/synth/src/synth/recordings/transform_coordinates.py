@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from enum import Enum
 from fractions import Fraction
 
 from pydantic import BaseModel
@@ -21,12 +22,21 @@ class ScreenInfo(BaseModel):
     logical_pixel_height: int
 
 
+class Platform(str, Enum):
+    win32 = "win32"
+
+    @property
+    def is_windows(self) -> bool:
+        return self == Platform.win32
+
+
 class RecordingMetadata(BaseModel):
     timestamp: float
     username: str
     screen_info: ScreenInfo
     video_segment_buffer_length: int
     time_base: Fraction
+    platform: Platform
 
 
 def transform_coordinates(
