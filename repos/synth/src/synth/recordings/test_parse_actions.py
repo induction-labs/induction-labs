@@ -155,7 +155,7 @@ def test_hotkey_then_type():
             timestamp=0.1,
             end_timestamp=0.2,
         ),
-        action_model(TypeAction(content="<shift>\\n</shift>"), 0.4, end_t=0.7),
+        action_model(TypeAction(content="<shift>\\n</shift>"), 0.5, end_t=0.7),
     ]
     assert parse_actions(ev) == expected
 
@@ -231,7 +231,7 @@ def test_shifting():
         key("a", False, 0.8),
     ]
     expected = [
-        action_model(TypeAction(content="AA"), 0.4, end_t=0.8),
+        action_model(TypeAction(content="AA"), 0.5, end_t=0.8),
     ]
     assert parse_actions(ev) == expected
 
@@ -249,7 +249,7 @@ def test_weird_shift_behaviour():
         key("a", True, 0.6),
         key("a", False, 0.7),
     ]
-    expected = [action_model(TypeAction(content="QWPa"), 0.0, end_t=0.7)]
+    expected = [action_model(TypeAction(content="QWPa"), 0.1, end_t=0.7)]
     assert parse_actions(ev) == expected
 
 
@@ -262,7 +262,7 @@ def test_weird_shift_behaviour2():
         key("a", True, 0.4),
         key("a", False, 0.5),
     ]
-    expected = [action_model(TypeAction(content="Qa"), 0.0, end_t=0.5)]
+    expected = [action_model(TypeAction(content="Qa"), 0.1, end_t=0.5)]
     assert parse_actions(ev) == expected
 
 
@@ -275,7 +275,7 @@ def test_weird_shift_behaviour3():
         key("a", True, 0.4),
         key("a", False, 0.5),
     ]
-    expected = [action_model(TypeAction(content="Qa"), 0.0, end_t=0.5)]
+    expected = [action_model(TypeAction(content="Qa"), 0.1, end_t=0.5)]
     assert parse_actions(ev) == expected
 
 
@@ -288,7 +288,7 @@ def test_weird_shift_behaviour4():
         key("a", True, 0.4),
         key("a", False, 0.5),
     ]
-    expected = [action_model(TypeAction(content="Qa"), 0.0, end_t=0.5)]
+    expected = [action_model(TypeAction(content="Qa"), 0.1, end_t=0.5)]
     assert parse_actions(ev) == expected
 
 
@@ -301,7 +301,7 @@ def test_weird_shift_behaviour5():
         key("a", True, 0.4),
         key("a", False, 0.5),
     ]
-    expected = [action_model(TypeAction(content="$a"), 0.0, end_t=0.5)]
+    expected = [action_model(TypeAction(content="$a"), 0.1, end_t=0.5)]
     assert parse_actions(ev) == expected
 
 
@@ -314,7 +314,7 @@ def test_weird_shift_behaviour6():
         key("a", True, 0.4),
         key("a", False, 0.5),
     ]
-    expected = [action_model(TypeAction(content="<a"), 0.0, end_t=0.5)]
+    expected = [action_model(TypeAction(content="<a"), 0.1, end_t=0.5)]
     assert parse_actions(ev) == expected
 
 
@@ -327,7 +327,7 @@ def test_weird_shift_behaviour7():
         key("a", True, 0.4),
         key("a", False, 0.5),
     ]
-    expected = [action_model(TypeAction(content="<a"), 0.0, end_t=0.5)]
+    expected = [action_model(TypeAction(content="<a"), 0.1, end_t=0.5)]
     assert parse_actions(ev) == expected
 
 
@@ -362,7 +362,7 @@ def test_backspace_behaviour():
     expected = [
         action_model(TypeAction(content="a"), 0.0, end_t=0.25),  # 'b' removed
         # XXX: backspace timeings are slightly off right now
-        action_model(TypeAction(content="<Backspace>"), 2.3, end_t=2.30),  # standalone
+        action_model(TypeAction(content="<Backspace>"), 2.3, end_t=2.35),  # standalone
     ]
     assert out == expected
 
@@ -579,6 +579,31 @@ def test_multiple_scrolls_with_stuff_between():
             0.5,
             end_t=0.7,
         ),
+    ]
+    assert out == expected
+
+
+def test_interleaved_backspace():
+    ev = [
+        key("a", True, 0.0),
+        key("a", False, 0.05),
+        key("b", True, 0.1),
+        key("b", False, 0.15),
+        key("backspace", True, 0.2),
+        key("backspace", False, 0.25),
+        key("backspace", True, 0.3),
+        key("backspace", False, 0.35),
+        key("backspace", True, 0.4),
+        key("backspace", False, 0.45),
+        key("c", True, 0.5),
+        key("c", False, 0.55),
+    ]
+    out = parse_actions(ev)
+    expected = [
+        action_model(
+            TypeAction(content="<Backspace>"), 0.4, end_t=0.45
+        ),  # nothing left
+        action_model(TypeAction(content="c"), 0.5, end_t=0.55),
     ]
     assert out == expected
 
