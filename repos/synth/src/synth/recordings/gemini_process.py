@@ -304,31 +304,29 @@ def segment_actions_by_time_gaps(
 
 
 def is_arrow_action(action: Action) -> bool:
-    return isinstance(action.action, HotkeyAction) and (
-        action.action.key in ["up", "down", "left", "right"]
+    # Return true if arrow action without modifiers
+    return (
+        isinstance(action.action, HotkeyAction)
+        and (action.action.key in ["up", "down", "left", "right"])
+        and not action.action.modifiers
     )
 
 
-def combine_arrow_actions(actions: list[Action]) -> list[Action]:
+def combine_arrow_actions(actions: list[Action], time_threshold=1.0) -> list[Action]:
     new_actions: list[Action] = []
     i = 0
     while i < len(actions):
         action = actions[i]
         i += 1
-        if (
-            not isinstance(action.action, HotkeyAction)
-            or not is_arrow_action(action)
-            or not action.action.modifiers
-        ):
+        if not is_arrow_action(action):
             new_actions.append(action)
             continue
         combined_arrow_action = action
         while (
             i < len(actions)
-            and isinstance(actions[i].action, HotkeyAction)
             and is_arrow_action(actions[i])
-            and not actions[i].action.modifiers
-            and actions[i].end_timestamp - combined_arrow_action.timestamp < 0.5
+            and actions[i].end_timestamp - combined_arrow_action.timestamp
+            < time_threshold
         ):
             next_action = actions[i]
             combined_arrow_action.action.key += " " + next_action.action.key
@@ -368,6 +366,12 @@ def combine_scroll_actions(actions: list[Action]) -> list[Action]:
         )
         new_actions.append(combined_scroll_action)
     return new_actions
+
+
+def combine_actions(actions: list[Action]) -> list[Action]:
+    actions = combine_arrow_actions(actions)
+    actions = combine_scroll_actions(actions)
+    return actions
 
 
 SS_DELAY = 0.20
@@ -1208,7 +1212,7 @@ def process_videos(
     }
     action_sets = {
         k: transform_action_coords_list(
-            combine_scroll_actions(combine_arrow_actions(parse_actions(v))),
+            combine_actions(parse_actions(v)),
             target_resolutions[k],
             video_metadatas[k],
         )
