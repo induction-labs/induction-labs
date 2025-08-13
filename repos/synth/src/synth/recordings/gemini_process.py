@@ -468,6 +468,7 @@ You are evaluating whether a user recording shows productive, goal-oriented work
 Look for patterns of intentional action sequences that demonstrate the user working toward completing specific tasks.
 
 After analyzing the screenshots and actions, finish your response with:
+
 ### REMOVE: yes or no
 """.strip(),
         }
@@ -689,7 +690,7 @@ def process_actions_range(
     try:
         should_filter = get_should_filter(
             base_prompt,
-            model_name="gpt-5",
+            model_name="o3",
         )
         logger.debug("Got filter decision")
         if should_filter is None:
@@ -812,6 +813,7 @@ def get_video_index(recording_metadata: RecordingMetadata, timestamp: float) -> 
         Video index as a string
     """
     rel_timestamp = timestamp - recording_metadata.timestamp
+
     if rel_timestamp < 0:
         logger.warning(
             f"Timestamp {timestamp} is before recording start time {recording_metadata.timestamp}. Returning index 0."
@@ -1186,8 +1188,45 @@ def progress_listener[T](
     pbar.close()
 
 
+def filter_actions_time_bounds(
+    actions: list[dict],
+    time_bounds: tuple[float | None, float | None],
+) -> list[dict]:
+    """
+    Filter actions based on time bounds.
+
+    Args:
+        actions: List of Action objects to filter
+        time_bounds: Tuple of (start_time, end_time) to filter actions
+
+    Returns:
+        List of Action objects that fall within the specified time bounds
+    """
+    start_time, end_time = time_bounds
+    if start_time is None and end_time is None:
+        return actions
+    filtered_actions = []
+    for action in actions:
+        if (start_time is None or action["timestamp"] >= start_time) and (
+            end_time is None or action["timestamp"] <= end_time
+        ):
+            filtered_actions.append(action)
+    if start_time:
+        assert filtered_actions[0]["timestamp"] >= start_time, (
+            f"First action timestamp {filtered_actions[0]['timestamp']} is before start time {start_time}"
+        )
+    if end_time:
+        assert filtered_actions[-1]["timestamp"] <= end_time, (
+            f"Last action end timestamp {filtered_actions[-1]['timestamp']} is after end time {end_time}"
+        )
+    logger.info(
+        f"Filtered actions from {len(actions)} to {len(filtered_actions)} based on time bounds {time_bounds}"
+    )
+    return filtered_actions
+
+
 def process_videos(
-    source_folders: list[str],
+    source_folders: list[tuple[str, tuple[float | None, float | None]]],
     output_dir: str,
     num_processes: int | None = None,
     threads_per_process: int = 12,
@@ -1205,8 +1244,11 @@ def process_videos(
     """
     # Discover all video files in the source folders
 
-    raw_action_sets = {k: get_actions(k) for k in source_folders}
-    video_metadatas = {k: load_metadata(k) for k in source_folders}
+    raw_action_sets = {
+        k: filter_actions_time_bounds(get_actions(k[0]), k[1]) for k in source_folders
+    }
+
+    video_metadatas = {k: load_metadata(k[0]) for k in source_folders}
     target_resolutions = {
         k: get_target_resolution(v) for k, v in video_metadatas.items()
     }
@@ -1251,9 +1293,11 @@ def process_videos(
     # Build mappings for efficiency
 
     # Prepare arguments for each video
-    process_args = [
+    process_args: list[
+        tuple[str, str, RecordingMetadata, VideoResolution, list[Action]]
+    ] = [
         (
-            source_dir,
+            source_dir[0],
             output_dir,
             video_metadatas[source_dir],
             target_resolutions[source_dir],
@@ -1323,17 +1367,29 @@ def process_videos(
 
 
 def main() -> None:
+    dataset_name = "aryan_data_long_video"
     process_videos(
         [
             # "gs://induction-labs-data-ext/action_capture/jeffrey/2025-08-10_133207_0V8HU",
             # "gs://induction-labs-data-ext/action_capture/Jarry/2025-08-10_121140_Q4KI9",
             # "gs://induction-labs-data-ext/action_capture/jonathan/2025-07-17_093647_KZ3CG",
             # "gs://induction-labs-data-ext/action_capture/Jarry/2025-08-11_185116_OXFUY",
-            "gs://induction-labs-data-ext/action_capture/aryan_91532/2025-07-07_170814_A2QD2",  # This one has second monitor stuffs
-            "gs://induction-labs-data-ext/action_capture/aryan_91532/2025-07-07_143610_SBK20",
-            # "gs://induction-labs-data-ext/action_capture/aryan_91532/2025-07-08_160952_VX5RU",
+            # (
+            #     # This one has second monitor stuffs
+            #     "gs://induction-labs-data-ext/action_capture/aryan_91532/2025-07-07_170814_A2QD2",
+            #     (None, None),
+            # ),
+            # (
+            #     "gs://induction-labs-data-ext/action_capture/aryan_91532/2025-07-07_143610_SBK20",
+            #     (None, None),
+            # ),
+            (
+                "gs://induction-labs-data-ext/action_capture/aryan_91532/2025-07-08_160952_VX5RU",
+                # Filters to video 414. TODO: write auto filter based on timestamps
+                (None, 1752017846.856214),
+            ),
         ],
-        f"gs://induction-labs/passive_data/2025-08-11/aryan_data/{datetime.datetime.now(datetime.UTC):%Y-%m-%d}",
+        f"gs://induction-labs/passive_data/{datetime.datetime.now(datetime.UTC):%Y-%m-%d}/{dataset_name}-{datetime.datetime.now(datetime.UTC):%H-%M-%S}",
         # max_video_files=1,
         # num_processes=1,
     )

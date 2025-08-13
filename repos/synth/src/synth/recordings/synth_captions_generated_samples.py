@@ -170,7 +170,7 @@ def format_cot_with_action(chain_of_thought_with_action):
     return "\n\n".join(formatted)
 
 
-def get_actions(gs_path):
+def get_actions(gs_path: str):
     gs_path = gs_path.replace("gs://", "")
     fs = gcsfs.GCSFileSystem(project="induction-labs")
     all_files = fs.ls(gs_path)
