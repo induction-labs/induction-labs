@@ -8,10 +8,13 @@ import secrets
 import string
 import tempfile
 import threading
+import time
 import traceback
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from copy import deepcopy
 from enum import Enum
+from functools import wraps
 from multiprocessing import Manager, Process
 from multiprocessing.managers import ListProxy
 from queue import Empty, Queue
@@ -66,11 +69,70 @@ litellm.drop_params = True
 DEFAULT_MODEL = "o3"
 
 
+def retry_with_backoff(
+    max_retries: int = 3,
+    base_delay: float = 1.0,
+    max_delay: float = 60.0,
+    exponential_base: float = 2.0,
+    exceptions: tuple[type[Exception], ...] = (Exception,),
+):
+    """
+    Retry decorator with exponential backoff.
+
+    Args:
+        max_retries: Maximum number of retry attempts
+        base_delay: Initial delay between retries in seconds
+        max_delay: Maximum delay between retries in seconds
+        exponential_base: Base for exponential backoff calculation
+        exceptions: Tuple of exception types to catch and retry on
+
+    Returns:
+        Decorated function that retries on failure
+    """
+
+    def decorator(func: Callable) -> Callable:
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            last_exception = None
+
+            for attempt in range(max_retries + 1):
+                try:
+                    return func(*args, **kwargs)
+                except exceptions as e:
+                    last_exception = e
+
+                    if attempt == max_retries:
+                        # Final attempt failed, re-raise the exception
+                        logger.error(
+                            f"Function {func.__name__} failed after {max_retries + 1} attempts: {e}"
+                        )
+                        raise e
+
+                    # Calculate delay with exponential backoff
+                    delay = min(base_delay * (exponential_base**attempt), max_delay)
+
+                    logger.warning(
+                        f"Function {func.__name__} failed on attempt {attempt + 1}/{max_retries + 1}: {e}. "
+                        f"Retrying in {delay:.2f} seconds..."
+                    )
+
+                    time.sleep(delay)
+
+            # This should never be reached, but just in case
+            if last_exception:
+                raise last_exception
+
+        return wrapper
+
+    return decorator
+
+
+# In addition, take note of whether the screen is ready or is in a transition state. Sometimes, the screenshot is taken before the page has finished loading or the application has finished rendering. In these rare cases, add `is_loading: true`. Default to `is_loading: false` unless there's clear evidence it's still loading.
+
 COMMON_INSTRUCTION = """
 # Instruction
 Simulate the user's internal monologue as they perform a computer task. You are given the action the user just took in the current screenshot. In a first-person, present-tense inner voice, explain why this specific action is the right move to advance or complete the task. Be concrete and insightful—reference on-screen cues, trade-offs, and how this step helps solve the problem. Focus strictly on the action just taken; you may briefly allude to prior or next steps, but do not directly reference them.
 
-In addition, take note of whether the screen is ready or is in a transition state. Sometimes, the screenshot is taken before the page has finished loading or the application has finished rendering. In these rare cases, add `is_loading: true`. Default to `is_loading: false` unless there's clear evidence it's still loading.
 ## Style
 - Write in the future tense (i.e., "I'll do X") and in a simple, concise tone. It should only be a few sentences long, no Markdown. 
 - Avoid fancy words and physical-world metaphors—stick to what's on screen. 
@@ -109,6 +171,13 @@ class ModelProvider(Enum):
     CLAUDE = "claude"
 
 
+@retry_with_backoff(
+    max_retries=3,
+    base_delay=1.0,
+    max_delay=30.0,
+    exponential_base=2.0,
+    exceptions=(Exception,),
+)
 def call_model(
     model_name: str,
     messages: list[dict],
@@ -647,7 +716,7 @@ class TrainSample(BaseModel):
 
 class ThinkingTextResponse(BaseModel):
     user_monologue: str
-    is_loading: bool = False
+    # is_loading: bool = False
 
 
 def get_thinking_texts(
@@ -703,9 +772,7 @@ def get_thinking_texts(
             fallback_text = (
                 f"Next, I need to perform this action: {action.dump_to_text()}"
             )
-            thinking_texts.append(
-                ThinkingTextResponse(user_monologue=fallback_text, is_loading=True)
-            )
+            thinking_texts.append(ThinkingTextResponse(user_monologue=fallback_text))
             # Add empty cost info for fallback
             cost_infos.append(
                 {
@@ -818,7 +885,7 @@ def process_actions_range(
             return None
         if not video_instruction[0].is_productive:
             logger.info(
-                f"Recording marked as not productive {video_instruction[0].instruction=}, {source_dir=} {first_t=} skipping."
+                f"Recording marked as not productive {video_instruction[0].instruction=}, {source_dir=} skipping."
             )
             return None
         instruction_response, instruction_cost = video_instruction
@@ -844,7 +911,8 @@ def process_actions_range(
             text=f"Thought: {thinking_texts[i].user_monologue}\nAction: {action.dump_to_text()}",
             thinking=thinking_texts[i].user_monologue,
             frame_metadata=frame_metadatas[i],
-            reward=0.0 if thinking_texts[i].is_loading else 1.0,
+            reward=1.0,
+            # reward=0.0 if thinking_texts[i].is_loading else 1.0,
         )
         for i, action in enumerate(actions)
     ]
@@ -1586,70 +1654,101 @@ def process_videos(
 
 
 def main() -> None:
-    dataset_name = "reprocess_all"
+    dataset_name = "kunal_data"
     process_videos(
         [
             # # Jeffrey
-            (
-                "gs://induction-labs-data-ext/action_capture/jeffrey/2025-08-10_133207_0V8HU",
-                (None, None),
-            ),
-            # Jonathan
-            (
-                "gs://induction-labs-data-ext/action_capture/jonathan/2025-07-17_093647_KZ3CG",
-                (None, None),
-            ),
-            # Jarry
-            (
-                "gs://induction-labs-data-ext/action_capture/Jarry/2025-07-07_002920_0SPCN",
-                (None, None),
-            ),
-            (
-                "gs://induction-labs-data-ext/action_capture/Jarry/2025-08-10_121140_Q4KI9",
-                (None, None),
-            ),
-            (
-                "gs://induction-labs-data-ext/action_capture/Jarry/2025-08-11_185116_OXFUY",
-                (None, None),
-            ),
-            # Aryan
-            (
-                # This one has second monitor stuffs
-                "gs://induction-labs-data-ext/action_capture/aryan_91532/2025-07-07_170814_A2QD2",
-                (None, None),
-            ),
-            (
-                "gs://induction-labs-data-ext/action_capture/aryan_91532/2025-07-07_143610_SBK20",
-                (None, None),
-            ),
-            (
-                "gs://induction-labs-data-ext/action_capture/aryan_91532/2025-07-08_160952_VX5RU",
-                # Filters to video 414. TODO: write auto filter based on timestamps
-                (None, 1752017846.856214),
-            ),
-            # Joyce
+            # (
+            #     "gs://induction-labs-data-ext/action_capture/jeffrey/2025-08-10_133207_0V8HU",
+            #     (None, None),
+            # ),
+            # # Jonathan
+            # (
+            #     "gs://induction-labs-data-ext/action_capture/jonathan/2025-07-17_093647_KZ3CG",
+            #     (None, None),
+            # ),
+            # # Jarry
+            # (
+            #     "gs://induction-labs-data-ext/action_capture/Jarry/2025-07-07_002920_0SPCN",
+            #     (None, None),
+            # ),
+            # (
+            #     "gs://induction-labs-data-ext/action_capture/Jarry/2025-08-10_121140_Q4KI9",
+            #     (None, None),
+            # ),
+            # (
+            #     "gs://induction-labs-data-ext/action_capture/Jarry/2025-08-11_185116_OXFUY",
+            #     (None, None),
+            # ),
+            # # Aryan
+            # (
+            #     # This one has second monitor stuffs
+            #     "gs://induction-labs-data-ext/action_capture/aryan_91532/2025-07-07_170814_A2QD2",
+            #     (None, None),
+            # ),
+            # (
+            #     "gs://induction-labs-data-ext/action_capture/aryan_91532/2025-07-07_143610_SBK20",
+            #     (None, None),
+            # ),
+            # (
+            #     "gs://induction-labs-data-ext/action_capture/aryan_91532/2025-07-08_160952_VX5RU",
+            #     # Filters to video 414. TODO: write auto filter based on timestamps
+            #     (None, 1752017846.856214),
+            # ),
+            # # Joyce
+            # *(
+            #     (
+            #         data,
+            #         (None, None),
+            #     )
+            #     for data in [
+            #         "gs://induction-labs-data-ext/action_capture/joyceliu/2025-07-04_110139_B6VYF/",
+            #         "gs://induction-labs-data-ext/action_capture/joyceliu/2025-07-06_112602_9ZEFH/",
+            #         "gs://induction-labs-data-ext/action_capture/joyceliu/2025-07-09_160136_WVNHY/",
+            #         "gs://induction-labs-data-ext/action_capture/joyceliu/2025-07-12_100706_2RKVJ/",
+            #         "gs://induction-labs-data-ext/action_capture/joyceliu/2025-07-14_111643_P725G/",
+            #         "gs://induction-labs-data-ext/action_capture/joyceliu/2025-07-14_162035_B9PM6/",
+            #         "gs://induction-labs-data-ext/action_capture/joyceliu/2025-07-15_100419_MAESY/",
+            #         "gs://induction-labs-data-ext/action_capture/joyceliu/2025-07-15_101847_913IO/",
+            #         "gs://induction-labs-data-ext/action_capture/joyceliu/2025-07-15_102313_K967C/",
+            #         "gs://induction-labs-data-ext/action_capture/joyceliu/2025-07-18_203324_YL5VM/",
+            #         "gs://induction-labs-data-ext/action_capture/joyceliu/2025-07-27_192513_2FNA0/",
+            #         "gs://induction-labs-data-ext/action_capture/joyceliu/2025-07-27_192852_E59D8/",
+            #         "gs://induction-labs-data-ext/action_capture/joyceliu/2025-07-27_193551_TX1BD/",
+            #         "gs://induction-labs-data-ext/action_capture/joyceliu/2025-07-29_193316_LSEM8/",
+            #         "gs://induction-labs-data-ext/action_capture/joyceliu/2025-07-30_111301_8RVWD/",
+            #         "gs://induction-labs-data-ext/action_capture/joyceliu/2025-07-31_200548_0Z5EH/",
+            #     ]
+            # ),
+            # Kunal
             *(
                 (
                     data,
                     (None, None),
                 )
                 for data in [
-                    "gs://induction-labs-data-ext/action_capture/joyceliu/2025-07-04_110139_B6VYF/",
-                    "gs://induction-labs-data-ext/action_capture/joyceliu/2025-07-06_112602_9ZEFH/",
-                    "gs://induction-labs-data-ext/action_capture/joyceliu/2025-07-09_160136_WVNHY/",
-                    "gs://induction-labs-data-ext/action_capture/joyceliu/2025-07-12_100706_2RKVJ/",
-                    "gs://induction-labs-data-ext/action_capture/joyceliu/2025-07-14_111643_P725G/",
-                    "gs://induction-labs-data-ext/action_capture/joyceliu/2025-07-14_162035_B9PM6/",
-                    "gs://induction-labs-data-ext/action_capture/joyceliu/2025-07-15_100419_MAESY/",
-                    "gs://induction-labs-data-ext/action_capture/joyceliu/2025-07-15_101847_913IO/",
-                    "gs://induction-labs-data-ext/action_capture/joyceliu/2025-07-15_102313_K967C/",
-                    "gs://induction-labs-data-ext/action_capture/joyceliu/2025-07-18_203324_YL5VM/",
-                    "gs://induction-labs-data-ext/action_capture/joyceliu/2025-07-27_192513_2FNA0/",
-                    "gs://induction-labs-data-ext/action_capture/joyceliu/2025-07-27_192852_E59D8/",
-                    "gs://induction-labs-data-ext/action_capture/joyceliu/2025-07-27_193551_TX1BD/",
-                    "gs://induction-labs-data-ext/action_capture/joyceliu/2025-07-29_193316_LSEM8/",
-                    "gs://induction-labs-data-ext/action_capture/joyceliu/2025-07-30_111301_8RVWD/",
-                    "gs://induction-labs-data-ext/action_capture/joyceliu/2025-07-31_200548_0Z5EH/",
+                    "gs://induction-labs-data-ext/action_capture/Kunal/2025-07-18_101735_MIELX",
+                    "gs://induction-labs-data-ext/action_capture/Kunal/2025-07-19_121221_3A4PN",
+                    "gs://induction-labs-data-ext/action_capture/Kunal/2025-07-18_133213_FN0VR",
+                    "gs://induction-labs-data-ext/action_capture/Kunal/2025-07-18_172629_2RBSA",
+                    "gs://induction-labs-data-ext/action_capture/Kunal/2025-07-19_125156_PQS8V",
+                    "gs://induction-labs-data-ext/action_capture/Kunal/2025-07-19_150406_A27L7",
+                    "gs://induction-labs-data-ext/action_capture/Kunal/2025-07-21_111019_IF3S0",
+                    "gs://induction-labs-data-ext/action_capture/Kunal/2025-07-21_172805_4KV69",
+                    "gs://induction-labs-data-ext/action_capture/Kunal/2025-07-21_195634_CHHBR",
+                ]
+            ),
+            *(
+                (
+                    data,
+                    (None, None),
+                )
+                for data in [
+                    "gs://induction-labs-data-ext/action_capture/Mahdi_lumio/2025-07-19_202437_BSGP6",
+                    "gs://induction-labs-data-ext/action_capture/Mahdi_lumio/2025-07-19_202545_R9AN9",
+                    "gs://induction-labs-data-ext/action_capture/Mahdi_lumio/2025-07-21_145524_Y5HX2",
+                    "gs://induction-labs-data-ext/action_capture/Mahdi_lumio/2025-07-24_141207_3TWWR",
+                    "gs://induction-labs-data-ext/action_capture/Mahdi_lumio/2025-08-06_155356_WIGKJ",
                 ]
             ),
         ],
