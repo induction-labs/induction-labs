@@ -340,16 +340,19 @@ def parse_actions(raw_actions: list[dict]) -> list[Action]:
 
         # Handle mouse button events
         if action["action"] == "mouse_button":
-            # Mouse activity interrupts typing session
-            mouse_activity_since_typing = True
-            if typing_buffer:
-                content = "".join(text for text, _ in typing_buffer)
-                type_action = TypeAction(content=content)
-                add_parsed_action(
-                    type_action, key_timestamp(typing_buffer), last_key_time_cosmetic
-                )
-                typing_buffer = []
-                last_key_time = None
+            if action["is_down"]:
+                # Mouse down interrupts typing session
+                mouse_activity_since_typing = True
+                if typing_buffer:
+                    content = "".join(text for text, _ in typing_buffer)
+                    type_action = TypeAction(content=content)
+                    add_parsed_action(
+                        type_action,
+                        key_timestamp(typing_buffer),
+                        last_key_time_cosmetic,
+                    )
+                    typing_buffer = []
+                    last_key_time = None
 
             if action["button"] == "left":
                 if action["is_down"]:

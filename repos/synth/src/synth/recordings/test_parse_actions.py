@@ -430,6 +430,55 @@ def test_tab_enter():
     assert parse_actions(ev) == expected
 
 
+def test_click_typing():
+    ev = [
+        {
+            "action": {
+                "action": "mouse_button",
+                "button": "left",
+                "x": 498,
+                "y": 635,
+                "is_down": True,
+            },
+            "timestamp": 0,
+        },
+        {
+            "action": {"action": "key_button", "key": "a", "is_down": True},
+            "timestamp": 0.05,
+        },
+        {
+            "action": {
+                "action": "mouse_button",
+                "button": "left",
+                "x": 498,
+                "y": 635,
+                "is_down": False,
+            },
+            "timestamp": 0.1,
+        },
+        {
+            "action": {"action": "key_button", "key": "a", "is_down": False},
+            "timestamp": 0.15,
+        },
+    ]
+    expected = [
+        Action(
+            action=ClickAction(
+                action_type="click", modifiers=set(), point=Point(x=498, y=635)
+            ),
+            timestamp=0,
+            end_timestamp=0.1,
+        ),
+        Action(
+            action=TypeAction(action_type="type", content="a"),
+            timestamp=0.05,
+            end_timestamp=0.15,
+        ),
+    ]
+
+    assert parse_actions(ev) == expected
+
+
 def test_composite_timings():
     ev = [
         scroll(0, 3, 100, 100, 0.0),
