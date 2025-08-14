@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 from enum import Enum
-from typing import Literal, cast
+from typing import Literal
 
 from pydantic import BaseModel
 from synth.recordings.action_models import (
@@ -24,11 +24,34 @@ class SpecialKeys(str, Enum):
     CAPSLOCK = "caps_lock"
     NUMLOCK = "num_lock"
     SCROLLLOCK = "scroll_lock"
+    BACKSPACE = "backspace"
+    SPACE = "space"
+    TAB = "tab"
+
+    # Arrows
+    SHIFT = "shift"
+    L_ARROW = "left"
+    R_ARROW = "right"
+    U_ARROW = "up"
+    D_ARROW = "down"
 
 
 type LockKeys = Literal[
     SpecialKeys.CAPSLOCK, SpecialKeys.NUMLOCK, SpecialKeys.SCROLLLOCK
 ]
+
+type ArrowKeys = Literal[
+    SpecialKeys.L_ARROW,
+    SpecialKeys.R_ARROW,
+    SpecialKeys.U_ARROW,
+    SpecialKeys.D_ARROW,
+]
+ArrowKeysSet: set[ArrowKeys] = {
+    SpecialKeys.L_ARROW,
+    SpecialKeys.R_ARROW,
+    SpecialKeys.U_ARROW,
+    SpecialKeys.D_ARROW,
+}
 
 
 # State for Capslock, Numlock, Scrolllock
@@ -509,9 +532,7 @@ def parse_actions(raw_actions: list[dict]) -> list[Action]:
                 continue
             # Check for lock keys
             if key in lock_keys:
-                key = cast(LockKeys, key)
                 lock_keys[key] = lock_keys[key].press(action["is_down"])
-
                 continue
 
             if action["is_down"]:
@@ -570,29 +591,86 @@ def parse_actions(raw_actions: list[dict]) -> list[Action]:
                     keys_currently_pressed[physical_key] = True
 
                     # Handle special keys
-                    if final_char.lower() == "backspace":
-                        if (
-                            typing_buffer
-                            and last_key_time
-                            and timestamp - last_key_time <= 2.0
-                            and not mouse_activity_since_typing
-                        ):
-                            last_char, last_char_time = typing_buffer.pop()
-                            if last_char == "</shift>":
-                                shift = last_char
-                                poped_other_shift = False
-                                if typing_buffer:
-                                    _, last_char_time = typing_buffer.pop()
+                    match final_char.lower():
+                        case SpecialKeys.BACKSPACE:
+                            if (
+                                typing_buffer
+                                and last_key_time
+                                and timestamp - last_key_time <= 2.0
+                                and not mouse_activity_since_typing
+                            ):
+                                last_char, last_char_time = typing_buffer.pop()
+                                if last_char == "</shift>":
+                                    shift = last_char
+                                    poped_other_shift = False
                                     if typing_buffer:
-                                        keep_next = typing_buffer[-1][0]
-                                        if keep_next == "<shift>":
-                                            typing_buffer.pop()
-                                            poped_other_shift = True
+                                        _, last_char_time = typing_buffer.pop()
+                                        if typing_buffer:
+                                            keep_next = typing_buffer[-1][0]
+                                            if keep_next == "<shift>":
+                                                typing_buffer.pop()
+                                                poped_other_shift = True
 
-                                if not poped_other_shift:
-                                    typing_buffer.append((shift, last_char_time))
-                        else:
-                            # Standalone backspace
+                                    if not poped_other_shift:
+                                        typing_buffer.append((shift, last_char_time))
+                            else:
+                                # Standalone backspace
+                                if typing_buffer:
+                                    content = "".join(text for text, _ in typing_buffer)
+                                    type_action = TypeAction(content=content)
+                                    add_parsed_action(
+                                        type_action,
+                                        key_timestamp(typing_buffer),
+                                        last_key_time_cosmetic,
+                                    )
+                                    typing_buffer = []
+
+                                backspace_action = TypeAction(content="<Backspace>")
+                                hotkey_endtime = find_next_key_action(
+                                    i, timestamp + 0.5
+                                )
+                                add_parsed_action(
+                                    backspace_action, timestamp, hotkey_endtime
+                                )
+                        case SpecialKeys.ESCAPE:
+                            if typing_buffer:
+                                content = "".join(text for text, _ in typing_buffer)
+                                type_action = TypeAction(content=content)
+                                add_parsed_action(
+                                    type_action,
+                                    key_timestamp(typing_buffer),
+                                    last_key_time_cosmetic,
+                                )
+                                typing_buffer = []
+                            escape_action = HotkeyAction(
+                                key=final_char.lower(),
+                                modifiers=get_modifiers(),
+                            )
+                            end_timestamp = find_next_key_action(i, timestamp + 0.5)
+                            add_parsed_action(escape_action, timestamp, end_timestamp)
+                        case SpecialKeys.SPACE:
+                            typing_buffer.append((" ", timestamp))
+                            mouse_activity_since_typing = False
+
+                        case SpecialKeys.TAB:
+                            typing_buffer.append(("\\t", timestamp))
+                            mouse_activity_since_typing = False
+
+                        case SpecialKeys.ENTER:
+                            if not enter_pressed_before_shift_up and modifier_keys.get(
+                                "shift", False
+                            ):
+                                typing_buffer.append(("<shift>", timestamp))
+                                enter_pressed_before_shift_up = True
+
+                            typing_buffer.append(("\\n", timestamp))
+                            mouse_activity_since_typing = False
+                        case (
+                            SpecialKeys.L_ARROW
+                            | SpecialKeys.R_ARROW
+                            | SpecialKeys.U_ARROW
+                            | SpecialKeys.D_ARROW
+                        ):
                             if typing_buffer:
                                 content = "".join(text for text, _ in typing_buffer)
                                 type_action = TypeAction(content=content)
@@ -603,61 +681,28 @@ def parse_actions(raw_actions: list[dict]) -> list[Action]:
                                 )
                                 typing_buffer = []
 
-                            backspace_action = TypeAction(content="<Backspace>")
-                            hotkey_endtime = find_next_key_action(i, timestamp + 0.5)
-                            add_parsed_action(
-                                backspace_action, timestamp, hotkey_endtime
+                            arrow_action = HotkeyAction(
+                                key=final_char.lower(),
+                                modifiers=get_modifiers(),
                             )
-                    elif final_char.lower() == "space":
-                        typing_buffer.append((" ", timestamp))
-                        mouse_activity_since_typing = False
-                    elif final_char.lower() == "tab":
-                        typing_buffer.append(("\\t", timestamp))
-                        mouse_activity_since_typing = False
-                    elif final_char.lower() == "escape":
-                        typing_buffer.append(("<Escape>", timestamp))
-                        mouse_activity_since_typing = False
-                    elif final_char.lower() == "enter":
-                        if not enter_pressed_before_shift_up and modifier_keys.get(
-                            "shift", False
-                        ):
-                            typing_buffer.append(("<shift>", timestamp))
-                            enter_pressed_before_shift_up = True
-
-                        typing_buffer.append(("\\n", timestamp))
-                        mouse_activity_since_typing = False
-                    elif final_char.lower() in {"left", "right", "up", "down"}:
-                        if typing_buffer:
-                            content = "".join(text for text, _ in typing_buffer)
-                            type_action = TypeAction(content=content)
-                            add_parsed_action(
-                                type_action,
-                                key_timestamp(typing_buffer),
-                                last_key_time_cosmetic,
-                            )
-                            typing_buffer = []
-
-                        arrow_action = HotkeyAction(
-                            key=final_char.lower(),
-                            modifiers=get_modifiers(),
-                        )
-                        add_parsed_action(arrow_action, timestamp, timestamp)
-                    elif len(final_char) == 1:  # Single character
-                        typing_buffer.append((final_char, timestamp))
-                        mouse_activity_since_typing = False
-                    else:
-                        # Other special keys - flush typing buffer
-                        print(f"Unhandled key: {final_char}")
-                        if typing_buffer:
-                            content = "".join(text for text, _ in typing_buffer)
-                            type_action = TypeAction(content=content)
-                            add_parsed_action(
-                                type_action,
-                                key_timestamp(typing_buffer),
-                                last_key_time_cosmetic,
-                            )
-                            typing_buffer = []
-                        mouse_activity_since_typing = False
+                            end_timestamp = find_next_key_action(i, timestamp + 0.5)
+                            add_parsed_action(arrow_action, timestamp, end_timestamp)
+                        case n if len(n) == 1:  # Single character
+                            typing_buffer.append((final_char, timestamp))
+                            mouse_activity_since_typing = False
+                        case final_char:
+                            # Other special keys - flush typing buffer
+                            print(f"Unhandled key: {final_char}")
+                            if typing_buffer:
+                                content = "".join(text for text, _ in typing_buffer)
+                                type_action = TypeAction(content=content)
+                                add_parsed_action(
+                                    type_action,
+                                    key_timestamp(typing_buffer),
+                                    last_key_time_cosmetic,
+                                )
+                                typing_buffer = []
+                            mouse_activity_since_typing = False
 
                     last_key_time = timestamp
             else:

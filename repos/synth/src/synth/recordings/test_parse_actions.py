@@ -711,12 +711,12 @@ def test_arrow_keys_with_space():
         Action(
             action=HotkeyAction(action_type="hotkey", modifiers=set(), key="left"),
             timestamp=1754667368.6583781,
-            end_timestamp=1754667368.6583781,
+            end_timestamp=1754667368.7578633,
         ),
         Action(
             action=HotkeyAction(action_type="hotkey", modifiers=set(), key="left"),
             timestamp=1754667368.8691633,
-            end_timestamp=1754667368.8691633,
+            end_timestamp=1754667368.8965094,
         ),
         Action(
             action=TypeAction(action_type="type", content=" "),
@@ -726,12 +726,12 @@ def test_arrow_keys_with_space():
         Action(
             action=HotkeyAction(action_type="hotkey", modifiers=set(), key="right"),
             timestamp=1754667369.8629737,
-            end_timestamp=1754667369.8629737,
+            end_timestamp=1754667369.9980738,
         ),
         Action(
             action=HotkeyAction(action_type="hotkey", modifiers=set(), key="right"),
             timestamp=1754667370.0774493,
-            end_timestamp=1754667370.0774493,
+            end_timestamp=1754667370.5774493,
         ),
     ]
     assert out == expected
