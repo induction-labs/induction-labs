@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 from enum import Enum
-from typing import cast
+from typing import Literal, cast
 
 from pydantic import BaseModel
 from synth.recordings.action_models import (
@@ -19,9 +19,16 @@ from synth.recordings.action_models import (
 
 
 class SpecialKeys(str, Enum):
+    ENTER = "enter"
+    ESCAPE = "esc"
     CAPSLOCK = "caps_lock"
     NUMLOCK = "num_lock"
     SCROLLLOCK = "scroll_lock"
+
+
+type LockKeys = Literal[
+    SpecialKeys.CAPSLOCK, SpecialKeys.NUMLOCK, SpecialKeys.SCROLLLOCK
+]
 
 
 # State for Capslock, Numlock, Scrolllock
@@ -243,7 +250,7 @@ def parse_scroll(
 
 def convert_key_for_lock_state(
     original_key: str,
-    lock_keys: dict[SpecialKeys, LockState],
+    lock_keys: dict[LockKeys, LockState],
     modifier_keys: dict[str, bool],
 ) -> str:
     physical_key = normalize_key_to_physical(original_key)
@@ -286,9 +293,6 @@ WINDOWS_ESCAPE_SEQS = {
     "\x18": "x",
     "\x19": "y",
     "\x1a": "z",
-    "\x1b": "esc",
-    "\x1c": "enter",
-    "\x1d": "ctrl",
     "shift_r": "shift",
     "shift_l": "shift",
     "ctrl_l": "ctrl",
@@ -325,7 +329,7 @@ def parse_actions(raw_actions: list[dict]) -> list[Action]:
     mouse_activity_since_typing = False
 
     modifier_keys = {"ctrl": False, "alt": False, "shift": False, "cmd": False}
-    lock_keys = {
+    lock_keys: dict[LockKeys, LockState] = {
         SpecialKeys.CAPSLOCK: LockState(),
         SpecialKeys.NUMLOCK: LockState(),
         SpecialKeys.SCROLLLOCK: LockState(),
@@ -505,7 +509,7 @@ def parse_actions(raw_actions: list[dict]) -> list[Action]:
                 continue
             # Check for lock keys
             if key in lock_keys:
-                key = cast(SpecialKeys, key)
+                key = cast(LockKeys, key)
                 lock_keys[key] = lock_keys[key].press(action["is_down"])
 
                 continue
