@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Literal, Union
+from typing import Literal, Self, Union
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class Point(BaseModel):
@@ -151,6 +151,18 @@ class Action(BaseModel):
     action: actionType = Field(discriminator="action_type")
     timestamp: float
     end_timestamp: float
+
+    @model_validator(mode="after")
+    def check_start_before_end(self) -> Self:
+        """
+        Validate that the module and datapack configurations are compatible.
+        This method is called after the model is initialized to ensure compatibility.
+        """
+        assert self.timestamp <= self.end_timestamp, (
+            f"Action start timestamp {self.timestamp} must be before end timestamp {self.end_timestamp}."
+        )
+
+        return self
 
     def dump_to_text(self) -> str:
         """Dump the action to its original text format"""

@@ -259,6 +259,50 @@ def convert_key_for_lock_state(
     return physical_key
 
 
+WINDOWS_ESCAPE_SEQS = {
+    "\x01": "a",
+    "\x02": "b",
+    "\x03": "c",
+    "\x04": "d",
+    "\x05": "e",
+    "\x06": "f",
+    "\x07": "g",
+    "\x08": "h",
+    "\x09": "i",
+    "\x0a": "j",
+    "\x0b": "k",
+    "\x0c": "l",
+    "\x0d": "m",
+    "\x0e": "n",
+    "\x0f": "o",
+    "\x10": "p",
+    "\x11": "q",
+    "\x12": "r",
+    "\x13": "s",
+    "\x14": "t",
+    "\x15": "u",
+    "\x16": "v",
+    "\x17": "w",
+    "\x18": "x",
+    "\x19": "y",
+    "\x1a": "z",
+    "\x1b": "esc",
+    "\x1c": "enter",
+    "\x1d": "ctrl",
+    "shift_r": "shift",
+    "shift_l": "shift",
+    "ctrl_l": "ctrl",
+    "ctrl_r": "ctrl",
+}
+
+
+def normalize_windows_escape_seqs(key: str) -> str:
+    if key in WINDOWS_ESCAPE_SEQS:
+        return WINDOWS_ESCAPE_SEQS[key]
+
+    return key
+
+
 def key_timestamp(typing_buffer: list[tuple[str, float]]) -> float:
     # either return the time of shift (if set) or typing start time
     assert typing_buffer, "Typing buffer should not be empty"
@@ -438,10 +482,8 @@ def parse_actions(raw_actions: list[dict]) -> list[Action]:
 
         # Handle keyboard events
         elif action["action"] == "key_button":
+            action["key"] = normalize_windows_escape_seqs(action["key"])
             key = action["key"].lower()
-
-            if key == "shift_r":
-                key = "shift"
 
             if key in modifier_keys:
                 # Track modifier key state
@@ -568,6 +610,9 @@ def parse_actions(raw_actions: list[dict]) -> list[Action]:
                     elif final_char.lower() == "tab":
                         typing_buffer.append(("\\t", timestamp))
                         mouse_activity_since_typing = False
+                    elif final_char.lower() == "escape":
+                        typing_buffer.append(("<Escape>", timestamp))
+                        mouse_activity_since_typing = False
                     elif final_char.lower() == "enter":
                         if not enter_pressed_before_shift_up and modifier_keys.get(
                             "shift", False
@@ -598,6 +643,7 @@ def parse_actions(raw_actions: list[dict]) -> list[Action]:
                         mouse_activity_since_typing = False
                     else:
                         # Other special keys - flush typing buffer
+                        print(f"Unhandled key: {final_char}")
                         if typing_buffer:
                             content = "".join(text for text, _ in typing_buffer)
                             type_action = TypeAction(content=content)

@@ -657,6 +657,36 @@ def test_interleaved_backspace():
     assert out == expected
 
 
+def test_windows_special_keys():
+    ev = [
+        {
+            "action": {"action": "key_button", "key": "ctrl_l", "is_down": True},
+            "timestamp": 0,
+        },
+        {
+            "action": {"action": "key_button", "key": "\x03", "is_down": True},
+            "timestamp": 0.1,
+        },
+        {
+            "action": {"action": "key_button", "key": "\x03", "is_down": False},
+            "timestamp": 0.2,
+        },
+        {
+            "action": {"action": "key_button", "key": "ctrl_l", "is_down": False},
+            "timestamp": 0.3,
+        },
+    ]
+    out = parse_actions(ev)
+    expected = [
+        Action(
+            action=HotkeyAction(action_type="hotkey", modifiers={"ctrl"}, key="c"),
+            timestamp=0.1,
+            end_timestamp=0.2,
+        )
+    ]
+    assert out == expected
+
+
 def test_arrow_keys_with_space():
     ev = [
         ({"action": "key_button", "key": "left", "is_down": True}, 1754667368.6583781),
