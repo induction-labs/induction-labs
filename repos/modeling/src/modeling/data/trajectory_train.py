@@ -294,11 +294,16 @@ class VlDataset(BaseDataset[VlDataSample, VlDatasetArgs]):
                     }
                 )
             if turn_start <= i < turn_end:
+                text = (
+                    "Thought: " + turn["text"]
+                    if not turn["text"].startswith("Thought: ")
+                    else turn["text"]
+                )
                 messages.append(
                     {
                         "role": "assistant",
                         "content": [
-                            {"type": "text", "text": turn["text"]},
+                            {"type": "text", "text": text},
                         ],
                     }
                 )

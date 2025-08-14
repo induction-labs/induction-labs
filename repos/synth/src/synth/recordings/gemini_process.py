@@ -47,11 +47,12 @@ from synth.recordings.parse_actions import (
     parse_actions,
 )
 from synth.recordings.synth_captions_generated_samples import (
-    COMMON_INSTRUCTION,
+    # COMMON_INSTRUCTION,
     extract_frames_by_pts_from_container,
     get_actions,
 )
 from synth.recordings.transform_coordinates import (
+    Platform,
     RecordingMetadata,
     transform_action_coords_list,
 )
@@ -64,6 +65,25 @@ litellm.drop_params = True
 # DEFAULT_MODEL = "anthropic/claude-sonnet-4-20250514"
 DEFAULT_MODEL = "o3"
 
+
+COMMON_INSTRUCTION = """
+# Instruction
+Simulate the user's internal monologue as they perform a computer task. You are given the action the user just took in the current screenshot. In a first-person, present-tense inner voice, explain why this specific action is the right move to advance or complete the task. Be concrete and insightful—reference on-screen cues, trade-offs, and how this step helps solve the problem. Focus strictly on the action just taken; you may briefly allude to prior or next steps, but do not directly reference them.
+
+In addition, take note of whether the screen is ready or is in a transition state. Sometimes, the screenshot is taken before the page has finished loading or the application has finished rendering. In these rare cases, add `is_loading: true`. Default to `is_loading: false` unless there's clear evidence it's still loading.
+## Style
+- Write in the future tense (i.e., "I'll do X") and in a simple, concise tone. It should only be a few sentences long, no Markdown. 
+- Avoid fancy words and physical-world metaphors—stick to what's on screen. 
+- Include exact text typed and any keyboard shortcuts used.
+- When referencing elements on the screen, include their position in the screenshot, e.g., "the button in the top right corner" or "the text field in the middle of the screen".
+- Click positions have been highlighted with a red circle in the screenshot they are taken from. Do not reference the red circle in the screenshot, it is only there to help you see where the click was made.
+- Start with a description of what is on the screen or what has changed since the last action. Then write the reasoning to decide on what action to perform next.
+
+## Example
+Here's an example of the style I'm looking for:
+
+Chrome is open on the screen, but I don't see a favorites folder. To add it, I first need to open the settings menu in the browser. I noticed there's a three-dot icon in the upper right corner of the browser window, which is the entry point for the settings menu. I'll click on it to reveal more options.
+""".strip()
 
 PROMPT_WITHOUT_NEXT = (
     COMMON_INSTRUCTION
@@ -78,7 +98,7 @@ Here's the reasoning the user has done so far:
 **Here's the new action the user took that you should write the monolouge for**:
 {new_action}
 
-Now, write the user's internal monologue about why they took this action, and what they plan to do next. The monologue should be focused on the action just taken.
+Now, write the user's internal monologue about what is on the screen, how they decided to take this action, and what they plan to do next. The monologue should be focused on the action just taken.
 """
 )
 
@@ -94,6 +114,7 @@ def call_model(
     messages: list[dict],
     max_tokens: int = 4096,
     reasoning_effort: Literal["low", "medium", "high"] = "high",
+    response_format: dict | None = None,
 ) -> tuple[str, dict]:
     """
     Unified interface for calling different AI models using LiteLLM.
@@ -124,6 +145,7 @@ def call_model(
             messages=messages,
             max_tokens=max_tokens,
             reasoning_effort=reasoning_effort,
+            response_format=response_format,
         )
 
         # Extract cost information from the response
@@ -172,9 +194,6 @@ def call_model(
         else:
             cost_info["cost_usd"] = 0.0
         content = response.choices[0].message.content.strip()
-        # print(response.choices[0].message)
-        # if response.choices[0].message.reasoning_content:
-        #     content = response.choices[0].message.reasoning_content + "\n" + content
 
         return content, cost_info
 
@@ -187,10 +206,10 @@ def is_close(a: Point, b: Point, tol: float = 10) -> bool:
     return abs(a.x - b.x) <= tol and abs(a.y - b.y) <= tol
 
 
-def is_good_action_sequence(actions: list[Action]) -> bool:
+def is_good_action_sequence(actions: list[Action], min_typing_percent=0.2) -> bool:
     # Check that there is at least one typing action
     typing_actions = sum(isinstance(action.action, TypeAction) for action in actions)
-    if typing_actions == 0:
+    if typing_actions / len(actions) < min_typing_percent:
         return False
     hotkey_actions = sum(isinstance(action.action, HotkeyAction) for action in actions)
     if hotkey_actions >= 5:
@@ -202,7 +221,8 @@ def is_good_action_sequence(actions: list[Action]) -> bool:
 
 def reverse_chunk_actions_to_length(
     actions: list[Action],
-    length: int = 5,
+    min_length: int = 5,
+    max_length: int = 10,
 ) -> list[list[Action]]:
     """
     Create action blocks using a sliding window approach from the end.
@@ -227,7 +247,7 @@ def reverse_chunk_actions_to_length(
             end_timestamp=actions[-1].end_timestamp + SS_DELAY + BEFORE_ACTION_BUFFER,
         )
     )
-    if len(actions) < length:
+    if len(actions) < min_length:
         return []
 
     action_blocks = []
@@ -236,13 +256,16 @@ def reverse_chunk_actions_to_length(
     window_end = len(actions)
 
     # Continue sliding window backwards
-    while (window_start := window_end - length) >= 0:
+    while True:
         # Extract current window
         assert window_end <= len(actions)
+        window_start = max(0, window_end - max_length)
+        if window_end - window_start < min_length:
+            break
         block = actions[window_start:window_end]
         # Skip if block is too short
-        assert len(block) == length, (
-            f"{len(block)=}, {length=} {window_end=}, {window_start=}"
+        assert len(block) == window_end - window_start, (
+            f"{len(block)=}, {max_length=} {window_end=}, {window_start=}"
         )
 
         # Check if this block is good
@@ -388,10 +411,14 @@ def get_timesteps_range(actions: list[Action]) -> tuple[float, list[float]]:
     timestamps.append(actions[0].timestamp - SS_DELAY)
     for i, prev_action in enumerate(actions[:-1]):
         next_action = actions[i + 1]
-        end_timestamp = mean(
-            prev_action.end_timestamp + SS_DELAY,
-            next_action.timestamp - BEFORE_ACTION_BUFFER,
-            0.2,
+        end_timestamp = prev_action.end_timestamp + SS_DELAY
+        end_timestamp = max(
+            end_timestamp,
+            mean(
+                prev_action.end_timestamp,
+                next_action.timestamp - BEFORE_ACTION_BUFFER,
+                0.4,
+            ),
         )
         end_timestamp = min(
             end_timestamp,
@@ -436,10 +463,38 @@ def convert_image_detail(content: dict, detail: ImageDetail) -> dict:
     return content
 
 
+def json_schema(schema: dict) -> dict:
+    return {
+        "type": "json_schema",
+        "json_schema": {"name": "Response", "schema": schema},
+        "strict": True,  # ask the provider to strictly enforce the schema
+    }
+
+
+def pyd_model_to_response_format(
+    model: type[BaseModel], *, name: str | None = None, strict: bool = True
+):
+    schema = model.model_json_schema()
+    # (Optional belt & suspenders) ensure providers see no extras allowed
+    schema.setdefault("additionalProperties", False)
+    return {
+        "type": "json_schema",
+        "json_schema": {
+            "name": name or model.__name__,
+            "schema": schema,
+        },
+    }
+
+
+class FilterResponseSchema(BaseModel):
+    analysis_summary: str
+    remove: bool
+
+
 def get_should_filter(
     base_prompt: list[dict],
     model_name: str = DEFAULT_MODEL,
-) -> tuple[bool, str, dict] | None:
+) -> tuple[FilterResponseSchema, dict] | None:
     content = base_prompt.copy()
     content.append(
         {
@@ -476,39 +531,44 @@ You are evaluating whether a user recording shows productive, goal-oriented work
 - Purposeful navigation with clear intent
 
 Look for patterns of intentional action sequences that demonstrate the user working toward completing specific tasks.
-
-After analyzing the screenshots and actions, finish your response with:
-
-### REMOVE: yes or no
 """.strip(),
         }
     )
+
+    response_format = pyd_model_to_response_format(FilterResponseSchema)
     try:
         model_response_text, cost_info = call_model(
             model_name=model_name,
             messages=[{"role": "user", "content": content}],
-            max_tokens=2048,
+            max_tokens=4096,
+            response_format=response_format,
         )
-        if not model_response_text:
-            print("Model response is empty")
-            return None
-        model_response_text = model_response_text.strip().lower()
-        model_decision = model_response_text.split("### remove:")[-1].strip()
-        if model_decision not in ["yes", "no"]:
-            print(
-                f"Model response did not contain 'yes' or 'no': {model_response_text}"
-            )
-            return None
-        return False, model_response_text, cost_info
-        return model_decision == "yes", model_response_text, cost_info
+
     except Exception as e:
         logger.error(f"Error determining if content should be filtered: {e}")
+        return None
+
+    try:
+        response = FilterResponseSchema.model_validate_json(model_response_text)
+
+    except Exception as e:
+        logger.error(f"{model_response_text=}")
+        logger.error(f"Error validating filter response: {e}")
+        return None
+
+    # return False, model_response_text, cost_info
+    return response, cost_info
+
+
+class VideoInstructionResponse(BaseModel):
+    is_productive: bool
+    instruction: str
 
 
 def get_video_instruction(
     base_prompt: list[dict],
     model_name: str = DEFAULT_MODEL,
-) -> tuple[str, str, dict] | None:
+) -> tuple[VideoInstructionResponse, dict] | None:
     """
     Generate an instruction based on the first frame and the actions.
 
@@ -524,39 +584,49 @@ def get_video_instruction(
         {
             "type": "text",
             "text": """
-Analyze what action the user took in the screenshots and then write a plausible instruction that would result in the behaviour shown in the screenshots.
-After reviewing the screenshots and actions, end your response with:
-### Instruction: <instruction>""",
+# Instruction
+Analyze what action the user took in the screenshots.
+You have two tasks:
+1. Decide whether the user is performing a productive task that would be valuable for training an AI assistant.
+2. Write a plausible instruction that would result in the behavior shown in the screenshots.
+
+## Task 1: Decide whether to keep or filter the recording
+Mark `is_productive: false` for recordings that show:
+**Passive consumption activities:** such as watching videos, reading articles, or aimless browsing without clear purpose.
+**Aimless or idle behavior:** such as random clicking, switching between tabs without progress, or extended inactivity.
+
+Mark `is_productive: true` for recordings that show:
+- Clear task completion or progress toward goals
+- Problem-solving activities
+- Purposeful navigation with clear intent
+
+
+## Task 2: Write a plausible instruction that would result in the behaviour shown in the screenshots.
+If you marked the recording as productive, write a clear, actionable instruction that an AI assistant could follow to replicate the observed behavior. The instruction should:
+Be specific and actionable: Include the exact steps, applications, or websites involved.
+Capture the user's intent: Explain what the user is trying to accomplish, not just the mechanical actions.
+Use natural language: Write as if you're giving instructions to a helpful assistant.
+Include relevant context: Mention any specific data, files, or information being worked with.
+
+If the recording is not productive, simply write `instruction: "This recording is not productive."` followed by a short explanation of why it is not productive.
+""".strip(),
         }
     )
+    response_format = pyd_model_to_response_format(VideoInstructionResponse)
     try:
         model_response_text, cost_info = call_model(
             model_name=model_name,
             messages=[{"role": "user", "content": content}],
             max_tokens=4096,
+            response_format=response_format,
         )
-
-        if not model_response_text:
-            print("Model response is empty")
-            return None
-
-        response_parts = model_response_text.split("### Instruction:")
-        if len(response_parts) < 2:
-            print(
-                f"Model response did not contain instruction part: {model_response_text}"
-            )
-            return None
-
-        model_instruction = response_parts[-1].strip()
-        if not model_instruction:
-            print("Model instruction is empty")
-            return None
-
-        return model_response_text, model_instruction, cost_info
 
     except Exception as e:
         logger.error(f"Error generating video instruction: {e}")
         return None
+    response = VideoInstructionResponse.model_validate_json(model_response_text)
+
+    return response, cost_info
 
 
 class SaveAction(BaseModel):
@@ -565,6 +635,7 @@ class SaveAction(BaseModel):
     action: str
     text: str
     thinking: str
+    reward: float
     frame_metadata: FrameMetadata
 
 
@@ -574,21 +645,27 @@ class TrainSample(BaseModel):
     metadata: dict | None = None
 
 
+class ThinkingTextResponse(BaseModel):
+    user_monologue: str
+    is_loading: bool = False
+
+
 def get_thinking_texts(
     base_prompt: list[dict],
     instruction: str,
     actions: list[Action],
     model_name: str = DEFAULT_MODEL,
-) -> tuple[list[str], list[dict]]:
+) -> tuple[list[ThinkingTextResponse], list[dict]]:
     """
     Generate thinking texts for each action.
 
     Returns:
         Tuple of (thinking_texts, cost_infos) where cost_infos is a list of cost dicts for each call
     """
-    thinking_texts = []
+    thinking_texts: list[ThinkingTextResponse] = []
     cost_infos = []
     old_turns: list[str] = []
+    response_format = pyd_model_to_response_format(ThinkingTextResponse)
     for i, action in enumerate(actions):
         text_prompt = PROMPT_WITHOUT_NEXT.format(
             instruction=instruction,
@@ -607,13 +684,17 @@ def get_thinking_texts(
                 model_name=model_name,
                 messages=[{"role": "user", "content": content}],
                 max_tokens=4096,
+                response_format=response_format,
+            )
+            model_response = ThinkingTextResponse.model_validate_json(
+                model_response_text
             )
 
-            thinking_texts.append(model_response_text)
+            thinking_texts.append(model_response)
             cost_infos.append(cost_info)
-            logger.debug(f"Thinking text for action {i}: {model_response_text}")
+            logger.debug(f"Thinking text for action {i}: {model_response}")
             old_turns.append(
-                f"Action #{i + 1}: {model_response_text}\n{action.dump_to_text()}"
+                f"Action #{i + 1}: {model_response.user_monologue}\n{action.dump_to_text()}"
             )
 
         except Exception as e:
@@ -622,7 +703,9 @@ def get_thinking_texts(
             fallback_text = (
                 f"Next, I need to perform this action: {action.dump_to_text()}"
             )
-            thinking_texts.append(fallback_text)
+            thinking_texts.append(
+                ThinkingTextResponse(user_monologue=fallback_text, is_loading=True)
+            )
             # Add empty cost info for fallback
             cost_infos.append(
                 {
@@ -660,7 +743,7 @@ def build_base_prompt(
         text = f"Action #{i + 1}: {action.dump_to_text()}."
         if hasattr(action.action, "point") and action.action.action_type != "scroll":
             point = action.action.point
-            text += f" (Point ({point.x}, {point.y}) highlighted in red)"
+            text += f" (The point that was clicked ({point.x}, {point.y}) is highlighted in red.)"
             frame = frame.copy()
             draw = ImageDraw.Draw(frame)
             draw.ellipse(
@@ -724,26 +807,6 @@ def process_actions_range(
         actions=actions,
     )
     frame_buffers = [pil_to_bytes(frame, format="PNG") for frame in frames]
-    try:
-        should_filter = get_should_filter(
-            base_prompt,
-            model_name="o3",
-        )
-        logger.debug("Got filter decision")
-        if should_filter is None:
-            logger.warning("Failed to determine if content should be filtered")
-            return None
-        filter_decision, filter_text, filter_cost = should_filter
-        if filter_decision:
-            logger.debug(
-                f"Filtering out recording from {source_dir} due to: {filter_text}"
-            )
-            return None
-    except Exception as e:
-        logger.error(
-            f"Error determining if content should be filtered: {e}", exc_info=True
-        )
-        return None
 
     try:
         video_instruction = get_video_instruction(
@@ -753,14 +816,19 @@ def process_actions_range(
         if video_instruction is None:
             logger.warning("Failed to generate video instruction ")
             return None
-        instruction_text, instruction, instruction_cost = video_instruction
+        if not video_instruction[0].is_productive:
+            logger.info(
+                f"Recording marked as not productive {video_instruction[0].instruction=}, {source_dir=} {first_t=} skipping."
+            )
+            return None
+        instruction_response, instruction_cost = video_instruction
     except Exception as e:
         logger.error(f"Error generating video instruction {e}", exc_info=True)
         return None
     try:
         thinking_texts, thinking_costs = get_thinking_texts(
             base_prompt,
-            instruction,
+            instruction_response.instruction,
             actions,
         )
         logger.debug("Got thinking texts")
@@ -773,9 +841,10 @@ def process_actions_range(
             step=i,
             image=b64_images[i],
             action=action.dump_to_text(),
-            text=f"Thought: {thinking_texts[i]}\nAction: {action.dump_to_text()}",
-            thinking=thinking_texts[i],
+            text=f"Thought: {thinking_texts[i].user_monologue}\nAction: {action.dump_to_text()}",
+            thinking=thinking_texts[i].user_monologue,
             frame_metadata=frame_metadatas[i],
+            reward=0.0 if thinking_texts[i].is_loading else 1.0,
         )
         for i, action in enumerate(actions)
     ]
@@ -787,18 +856,20 @@ def process_actions_range(
             text="Action: finished()",
             thinking="",
             frame_metadata=frame_metadatas[-1],  # Use the last frame metadata
+            reward=0.0,
         )
     )
 
     return TrainSample(
         actions=save_actions,
-        instruction=instruction,
+        instruction=instruction_response.instruction,
         metadata={
             "source_dir": source_dir,
             "start_time": float(frame_metadatas[0].timestamp),
             "end_time": float(frame_metadatas[-1].timestamp),
-            "instruction_text": instruction_text,
-            "filter_text": filter_text,
+            "instruction_response": instruction_response.model_dump(),
+            # "filter_response": filter_decision.model_dump(),
+            "thinking_responses": [t.model_dump() for t in thinking_texts],
             "original_resolution": {
                 "width": recording_metadata.screen_info.video_width,
                 "height": recording_metadata.screen_info.video_height,
@@ -811,7 +882,7 @@ def process_actions_range(
             "costs": {
                 "instruction_generation": instruction_cost,
                 "thinking_texts_generation": thinking_costs,
-                "filter_cost": filter_cost,
+                # "filter_cost": filter_cost,
             },
         },
     )
@@ -884,6 +955,88 @@ def get_target_resolution(
     return output_resolution
 
 
+def get_frames_at_timestamps_from_video(
+    video_path: str,
+    video_timestamps: list[float],
+    recording_metadata: RecordingMetadata,
+    target_resolution: VideoResolution | None = None,
+) -> list[tuple[PIL.Image.Image, FrameMetadata]]:
+    """
+    Extract frames at specific timestamps from a video file.
+    """
+    input_resolution = VideoResolution(
+        width=recording_metadata.screen_info.video_width,
+        height=recording_metadata.screen_info.video_height,
+    )
+    buffer_src, buffer_sink, filter_graph = None, None, None
+    with tempfile.NamedTemporaryFile(suffix=".mp4", delete=True) as f:
+        download_video_with_ffmpeg_copy(
+            source_path=video_path,
+            dest_path=f.name,
+            ffmpeg_path="/nix/store/q7j5awbg80d38p9my5b5zgn0xadgvbmb-ffmpeg-7.1.1-bin/bin/ffmpeg",
+        )
+
+        with av.open(f.name) as video_container:
+            # Use consistent filter based on RecordingMetadata
+            container_metadata = VideoMetadataFetcher.get_video_metadata(
+                video_container.streams.video[0]
+            )
+
+            assert container_metadata.time_base == recording_metadata.time_base, (
+                f"Container time base {container_metadata.time_base} does not match recording metadata time base {recording_metadata.time_base}"
+            )
+            assert container_metadata.resolution == input_resolution, (
+                f"Container resolution {container_metadata.resolution} {video_path=} does not match input resolution {input_resolution}"
+            )
+
+            for timestamp in video_timestamps:
+                assert (
+                    container_start := float(
+                        container_metadata.start_pts * container_metadata.time_base
+                    )
+                ) <= timestamp, (
+                    f"Container start_pts {container_start} {video_path=} does not match recording metadata timestamp {timestamp}"
+                )
+                assert (
+                    container_end := float(
+                        container_metadata.end_pts * container_metadata.time_base
+                    )
+                ) >= timestamp, (
+                    f"Container end_pts {container_end} does not match recording metadata timestamp {timestamp}"
+                )
+            if target_resolution is not None:
+                buffer_src, buffer_sink, filter_graph = get_resize_filter(
+                    video_container.streams.video[0].format,
+                    input_resolution,
+                    target_resolution,
+                    recording_metadata.time_base,
+                )
+
+            # Extract frames at the relative timestamps
+            frame_tuples = extract_frames_by_pts_from_container(
+                video_container,
+                video_timestamps,
+                buffer_src,
+                buffer_sink,
+            )
+
+            # Store frames in the correct positions in results
+            frames_with_metadata = [
+                (
+                    frame,
+                    FrameMetadata(
+                        timestamp=frame_timestamp,
+                        video_path=video_path,
+                        original_timestamp=original_timestamp,
+                    ),
+                )
+                for (frame_timestamp, frame), original_timestamp in zip(
+                    frame_tuples, video_timestamps, strict=True
+                )
+            ]
+            return frames_with_metadata
+
+
 def get_frames_at_timestamps(
     source_dir: str,
     recording_metadata: RecordingMetadata,
@@ -917,87 +1070,88 @@ def get_frames_at_timestamps(
         timestamps
     )
 
-    # Set up resize filter once using RecordingMetadata screen info
-    screen_info = recording_metadata.screen_info
-    #
-    buffer_src, buffer_sink, filter_graph = None, None, None
-    input_resolution = VideoResolution(
-        width=screen_info.video_width, height=screen_info.video_height
-    )
-
     # Process each video index
     for video_index, timestamp_pairs in video_groups.items():
         video_path = f"{source_dir}/screen_capture_{video_index:06d}.mp4"
 
         # Extract just the timestamps for this video
         video_timestamps = [ts for _, ts in timestamp_pairs]
+        # assert video_timestamps are sorted
+        assert video_timestamps == sorted(video_timestamps), (
+            f"Timestamps for video {video_index} are not sorted: {video_timestamps}"
+        )
+        video_metadata = get_video_metadata(video_path)
 
-        # Download and process video
-        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=True) as f:
-            download_video_with_ffmpeg_copy(
-                source_path=video_path,
-                dest_path=f.name,
-                ffmpeg_path="/nix/store/q7j5awbg80d38p9my5b5zgn0xadgvbmb-ffmpeg-7.1.1-bin/bin/ffmpeg",
+        container_start = float(video_metadata.start_pts * video_metadata.time_base)
+        container_end = float(video_metadata.end_pts * video_metadata.time_base)
+        before_video_start_timestamps = [
+            ts for ts in video_timestamps if ts < container_start
+        ]
+        after_video_end_timestamps = [
+            ts for ts in video_timestamps if ts > container_end
+        ]
+        in_video_timestamps = [
+            ts for ts in video_timestamps if container_start <= ts <= container_end
+        ]
+        before_video_frames = []
+        after_video_frames = []
+
+        if before_video_start_timestamps:
+            logger.warning(
+                f"Some timestamps {before_video_start_timestamps} are before the start of the video {video_path}. "
+                f"They will be fetched from video {video_index - 1}"
+            )
+            before_video_path = f"{source_dir}/screen_capture_{video_index - 1:06d}.mp4"
+            before_video_frames = get_frames_at_timestamps_from_video(
+                before_video_path,
+                before_video_start_timestamps,
+                recording_metadata,
+                target_resolution=target_resolution,
             )
 
-            with av.open(f.name) as video_container:
-                # Use consistent filter based on RecordingMetadata
-                container_metadata = VideoMetadataFetcher.get_video_metadata(
-                    video_container.streams.video[0]
-                )
-                assert container_metadata.time_base == recording_metadata.time_base, (
-                    f"Container time base {container_metadata.time_base} does not match recording metadata time base {recording_metadata.time_base}"
-                )
-                assert container_metadata.resolution == input_resolution, (
-                    f"Container resolution {container_metadata.resolution} {video_index=} does not match input resolution {input_resolution}"
-                )
+        if after_video_end_timestamps:
+            logger.warning(
+                f"Some timestamps {after_video_end_timestamps} are after the end of the video {video_path}. "
+                f"They will be fetched from video {video_index + 1}"
+            )
+            after_video_path = f"{source_dir}/screen_capture_{video_index + 1:06d}.mp4"
+            after_video_frames = get_frames_at_timestamps_from_video(
+                after_video_path,
+                after_video_end_timestamps,
+                recording_metadata,
+                target_resolution=target_resolution,
+            )
 
-                for timestamp in video_timestamps:
-                    assert (
-                        container_start := float(
-                            container_metadata.start_pts * container_metadata.time_base
-                        )
-                    ) <= timestamp, (
-                        f"Container start_pts {container_start} {video_index=} does not match recording metadata timestamp {timestamp}"
-                    )
-                    assert (
-                        container_end := float(
-                            container_metadata.end_pts * container_metadata.time_base
-                        )
-                    ) >= timestamp, (
-                        f"Container end_pts {container_end} does not match recording metadata timestamp {timestamp}"
-                    )
-                if target_resolution is not None:
-                    buffer_src, buffer_sink, filter_graph = get_resize_filter(
-                        video_container.streams.video[0].format,
-                        input_resolution,
-                        target_resolution,
-                        recording_metadata.time_base,
-                    )
-
-                # Extract frames at the relative timestamps
-                frame_tuples = extract_frames_by_pts_from_container(
-                    video_container,
-                    video_timestamps,
-                    buffer_src,
-                    buffer_sink,
-                )
-
-                # Store frames in the correct positions in results
-                for (frame_timestamp, image), (
-                    original_index,
-                    original_timestamp,
-                ) in zip(frame_tuples, timestamp_pairs, strict=True):
-                    frame_metadata = FrameMetadata(
-                        timestamp=frame_timestamp,
-                        video_path=video_path,
-                        original_timestamp=original_timestamp,
-                    )
-                    results[original_index] = (image, frame_metadata)
+        # Get frames for the in-video timestamps
+        in_video_frames = get_frames_at_timestamps_from_video(
+            video_path,
+            in_video_timestamps,
+            recording_metadata,
+            target_resolution=target_resolution,
+        )
+        video_frames = before_video_frames + in_video_frames + after_video_frames
+        # Store frames in the correct positions in results
+        for (frame, metadata), (
+            original_index,
+            _,
+        ) in zip(video_frames, timestamp_pairs, strict=True):
+            results[original_index] = (frame, metadata)
     results = [result for result in results if result is not None]
     assert len(results) == len(timestamps), "Results length mismatch with timestamps"
     # Filter out None values and return only successful frames
     return results  # type: ignore  # noqa: PGH003
+
+
+fs = gcsfs.GCSFileSystem()
+
+
+def get_video_metadata(
+    video_path: str,
+):
+    with fs.open(video_path, "rb") as f:
+        video_container = av.open(f)
+        video_stream = video_container.streams.video[0]
+        return VideoMetadataFetcher.get_video_metadata(video_stream)
 
 
 def load_metadata(source_dir: str) -> RecordingMetadata:
@@ -1014,7 +1168,6 @@ def load_metadata(source_dir: str) -> RecordingMetadata:
         Exception: If metadata.json cannot be loaded or is invalid
     """
     source_dir = source_dir.rstrip("/")
-    fs = gcsfs.GCSFileSystem()
 
     try:
         # Remove gs:// prefix and construct metadata path
@@ -1037,15 +1190,17 @@ def load_metadata(source_dir: str) -> RecordingMetadata:
     try:
         # Validate first video
         # We need to do this because action recorder is not saving video timestamp in utc prior to 0.1.2 mac build
-        with fs.open(first_video_path, "rb") as f:
-            video_container = av.open(f)
-            video_stream = video_container.streams.video[0]
-            video_metadata = VideoMetadataFetcher.get_video_metadata(video_stream)
+        video_metadata = get_video_metadata(first_video_path)
         first_video_start_time = float(
             video_metadata.start_pts * video_metadata.time_base
         )
         metadata_dict["timestamp"] = first_video_start_time
         metadata_dict["time_base"] = video_metadata.time_base
+        if metadata_dict.get("platform", None) is None:
+            logger.warning(
+                f"Platform not specified in metadata {metadata_path=}. Setting to unknown."
+            )
+            metadata_dict["platform"] = Platform.unknown.value
 
         metadata = RecordingMetadata(**metadata_dict)
 
@@ -1328,7 +1483,9 @@ def process_videos(
         (source_dir, action_chunk)
         for source_dir, segments in action_segments
         for actions in segments
-        for action_chunk in reverse_chunk_actions_to_length(actions, 10)
+        for action_chunk in reverse_chunk_actions_to_length(
+            actions,
+        )
     ]
     action_segment_lens_df = pd.DataFrame(
         [
@@ -1429,47 +1586,47 @@ def process_videos(
 
 
 def main() -> None:
-    dataset_name = "joyce_data"
+    dataset_name = "reprocess_all"
     process_videos(
         [
             # # Jeffrey
-            # (
-            #     "gs://induction-labs-data-ext/action_capture/jeffrey/2025-08-10_133207_0V8HU",
-            #     (None, None),
-            # ),
-            # # # Jonathan
-            # (
-            #     "gs://induction-labs-data-ext/action_capture/jonathan/2025-07-17_093647_KZ3CG",
-            #     (None, None),
-            # ),
-            # # # Jarry
-            # (
-            #     "gs://induction-labs-data-ext/action_capture/Jarry/2025-07-07_002920_0SPCN",
-            #     (None, None),
-            # ),
-            # (
-            #     "gs://induction-labs-data-ext/action_capture/Jarry/2025-08-10_121140_Q4KI9",
-            #     (None, None),
-            # ),
-            # (
-            #     "gs://induction-labs-data-ext/action_capture/Jarry/2025-08-11_185116_OXFUY",
-            #     (None, None),
-            # ),
-            # # Aryan
-            # (
-            #     # This one has second monitor stuffs
-            #     "gs://induction-labs-data-ext/action_capture/aryan_91532/2025-07-07_170814_A2QD2",
-            #     (None, None),
-            # ),
-            # (
-            #     "gs://induction-labs-data-ext/action_capture/aryan_91532/2025-07-07_143610_SBK20",
-            #     (None, None),
-            # ),
-            # (
-            #     "gs://induction-labs-data-ext/action_capture/aryan_91532/2025-07-08_160952_VX5RU",
-            #     # Filters to video 414. TODO: write auto filter based on timestamps
-            #     (None, 1752017846.856214),
-            # ),
+            (
+                "gs://induction-labs-data-ext/action_capture/jeffrey/2025-08-10_133207_0V8HU",
+                (None, None),
+            ),
+            # Jonathan
+            (
+                "gs://induction-labs-data-ext/action_capture/jonathan/2025-07-17_093647_KZ3CG",
+                (None, None),
+            ),
+            # Jarry
+            (
+                "gs://induction-labs-data-ext/action_capture/Jarry/2025-07-07_002920_0SPCN",
+                (None, None),
+            ),
+            (
+                "gs://induction-labs-data-ext/action_capture/Jarry/2025-08-10_121140_Q4KI9",
+                (None, None),
+            ),
+            (
+                "gs://induction-labs-data-ext/action_capture/Jarry/2025-08-11_185116_OXFUY",
+                (None, None),
+            ),
+            # Aryan
+            (
+                # This one has second monitor stuffs
+                "gs://induction-labs-data-ext/action_capture/aryan_91532/2025-07-07_170814_A2QD2",
+                (None, None),
+            ),
+            (
+                "gs://induction-labs-data-ext/action_capture/aryan_91532/2025-07-07_143610_SBK20",
+                (None, None),
+            ),
+            (
+                "gs://induction-labs-data-ext/action_capture/aryan_91532/2025-07-08_160952_VX5RU",
+                # Filters to video 414. TODO: write auto filter based on timestamps
+                (None, 1752017846.856214),
+            ),
             # Joyce
             *(
                 (
@@ -1494,7 +1651,7 @@ def main() -> None:
                     "gs://induction-labs-data-ext/action_capture/joyceliu/2025-07-30_111301_8RVWD/",
                     "gs://induction-labs-data-ext/action_capture/joyceliu/2025-07-31_200548_0Z5EH/",
                 ]
-            )
+            ),
         ],
         f"gs://induction-labs/passive_data/{datetime.datetime.now(datetime.UTC):%Y-%m-%d}/{dataset_name}-{datetime.datetime.now(datetime.UTC):%H-%M-%S}",
         # max_video_files=20,

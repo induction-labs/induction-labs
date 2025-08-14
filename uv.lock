@@ -5173,7 +5173,7 @@ requires-dist = [
     { name = "gcsfs", specifier = ">=2025.3.0" },
     { name = "google-genai", specifier = ">=1.28.0" },
     { name = "jsonlines", specifier = ">=4.0.0" },
-    { name = "litellm", extras = ["proxy"], specifier = ">=1.75.3" },
+    { name = "litellm", extras = ["proxy"], specifier = ">=1.75.0" },
     { name = "numpy" },
     { name = "openai", specifier = ">=1.90.0" },
     { name = "pillow", specifier = ">=11.2.1" },

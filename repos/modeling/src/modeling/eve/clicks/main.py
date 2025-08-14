@@ -26,7 +26,7 @@ from modeling.checkpoints.save import upload_to_gcs
 from modeling.eve.os_world.agents.uitars15 import (
     COMPUTER_USE_15,
     COMPUTER_USE_15_ONLY_CLICKS,
-    THOUGHT_LONG,
+    THOUGHT_LONG_REPEAT,
 )
 from modeling.eve.vllm_utils import wait_for_servers_ready
 from modeling.utils.cloud_path import CloudPath
@@ -214,7 +214,7 @@ async def run_clicks_evaluation(
     local_output_folder, cloud_output_path = setup_output_folder(output_folder)
     prompt_template_str = prompt_templates[prompt_template].format(
         language="en",
-        thought_mode=THOUGHT_LONG,
+        thought_mode=THOUGHT_LONG_REPEAT,
         instruction="{instruction}",
     )
 

@@ -24,6 +24,8 @@ class ScreenInfo(BaseModel):
 
 class Platform(str, Enum):
     win32 = "win32"
+    unknown = "unknown"
+    darwin = "darwin"
 
     @property
     def is_windows(self) -> bool:
