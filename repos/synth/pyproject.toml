@@ -9,7 +9,7 @@ dependencies = [
     "gcsfs>=2025.3.0",
     "google-genai>=1.28.0",
     "jsonlines>=4.0.0",
-    "litellm[proxy]>=1.75.0",
+    "litellm[proxy]==1.75.0",
     "numpy",
     "openai>=1.90.0",
     "pillow>=11.2.1",

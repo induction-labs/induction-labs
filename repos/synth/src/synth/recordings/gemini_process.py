@@ -212,7 +212,7 @@ def call_model(
         response = litellm.completion(
             model=model_name,
             messages=messages,
-            max_tokens=max_tokens,
+            max_completion_tokens=max_tokens,
             reasoning_effort=reasoning_effort,
             response_format=response_format,
         )
@@ -475,7 +475,7 @@ def mean(a: float, b: float, weight=0.5) -> float:
     return a * (1 - weight) + b * weight
 
 
-def get_timesteps_range(actions: list[Action]) -> tuple[float, list[float]]:
+def get_timesteps_range(actions: list[Action]) -> list[float]:
     timestamps: list[float] = []
     timestamps.append(actions[0].timestamp - SS_DELAY)
     for i, prev_action in enumerate(actions[:-1]):
@@ -498,7 +498,7 @@ def get_timesteps_range(actions: list[Action]) -> tuple[float, list[float]]:
     timestamps.append(actions[-1].end_timestamp + SS_DELAY)
 
     assert len(timestamps) >= 1, "No timestamps generated from actions"
-    return (timestamps[0], timestamps[1:])
+    return timestamps
 
 
 def text_content(text: str):
@@ -519,7 +519,7 @@ def image_content(image: bytes, detail=ImageDetail.HIGH):
         "type": "image_url",
         "image_url": {
             "url": f"data:image/png;base64,{image_b64}",
-            # "detail": detail.value,
+            "detail": detail.value,
         },
     }
 
@@ -798,18 +798,21 @@ def get_thinking_texts(
 
 
 def draw_red_circle(
-    image: PIL.Image.Image, point: Point, radius: int = 8
+    image: PIL.Image.Image, point: Point, radius: int = 40, width: int = 10
 ) -> PIL.Image.Image:
     """
     Draw a red circle on the image at the specified point.
     """
     image = image.copy()
+    image = image.copy()
+    image = image.convert("L").convert(
+        "RGB"
+    )  # L = grayscale, then back to RGB for color drawing
     draw = ImageDraw.Draw(image)
     draw.ellipse(
         [point.x - radius, point.y - radius, point.x + radius, point.y + radius],
-        fill="red",
-        outline="black",
-        width=2,
+        outline="red",
+        width=width,
     )
     return image
 
@@ -1423,10 +1426,19 @@ def progress_listener[T](
     total: int,
     update_queue: Queue[tuple[T | None, str | None]],
     results_collector: ListProxy[T],
+    output_dir: str,
+    save_frequency: int = 100,
 ):
     """
     Runs in a thread in main process to consume updates and show progress bar.
-    Also collects results from all processes.
+    Also collects results from all processes and saves them incrementally.
+
+    Args:
+        total: Total number of items to process
+        update_queue: Queue for receiving updates from worker processes
+        results_collector: Shared list for collecting results
+        output_dir: Directory to save results to
+        save_frequency: How often to save results (every N successful samples)
     """
     pbar = tqdm.tqdm(total=total, desc="Processing videos", unit="video")
     completed = 0
@@ -1435,6 +1447,11 @@ def progress_listener[T](
     success_count = 0
     none_count = 0
     error_count = 0
+
+    # Track incremental saving
+    local_results = []
+    file_counter = 0
+    total_saved = 0
 
     while completed < total:
         try:
@@ -1458,6 +1475,17 @@ def progress_listener[T](
         elif save_action is not None:
             success_count += 1
             results_collector.append(save_action)
+            local_results.append(save_action)
+
+            # Save every save_frequency successful samples
+            if len(local_results) >= save_frequency:
+                _save_results_batch(local_results, output_dir, file_counter)
+                total_saved += len(local_results)
+                tqdm.tqdm.write(
+                    f"Saved batch {file_counter} with {len(local_results)} samples (total saved: {total_saved})"
+                )
+                local_results = []
+                file_counter += 1
         else:
             none_count += 1
 
@@ -1476,12 +1504,41 @@ def progress_listener[T](
                 f"Successes: {success_count}, None returns: {none_count}, Errors: {error_count}"
             )
 
+    # Save any remaining results
+    if local_results:
+        _save_results_batch(local_results, output_dir, file_counter)
+        total_saved += len(local_results)
+        tqdm.tqdm.write(
+            f"Saved final batch {file_counter} with {len(local_results)} samples"
+        )
+
     # Final summary
     tqdm.tqdm.write(
         f"Final results: {success_count} successes, {none_count} None returns, "
-        f"{error_count} errors out of {total} total"
+        f"{error_count} errors out of {total} total. Total saved: {total_saved} samples in {file_counter} files."
     )
     pbar.close()
+
+
+def _save_results_batch(results: list, output_dir: str, file_counter: int) -> None:
+    """
+    Save a batch of results to a JSONL file.
+
+    Args:
+        results: List of results to save
+        output_dir: Output directory
+        file_counter: Counter for the filename
+    """
+    try:
+        results_df = pd.DataFrame(results)
+        output_file = f"{output_dir}/samples_{file_counter}.jsonl"
+        results_df.to_json(
+            output_file,
+            orient="records",
+            lines=True,
+        )
+    except Exception as e:
+        tqdm.tqdm.write(f"[!] Error saving batch {file_counter}: {e}")
 
 
 def filter_actions_time_bounds(
@@ -1631,7 +1688,7 @@ def process_videos(
     # Start progress listener thread
     listener = threading.Thread(
         target=progress_listener,
-        args=(len(process_args), update_queue, results_collector),
+        args=(len(process_args), update_queue, results_collector, output_dir),
         daemon=True,
     )
     listener.start()
@@ -1665,17 +1722,10 @@ def process_videos(
     # Wait until listener sees all updates
     listener.join()
 
-    # Convert results to regular list and save
-    results = list(results_collector)
-    if results:
-        train_samples_df = pd.DataFrame(results)
-        train_samples_df.to_json(
-            f"{output_dir}/samples.jsonl",
-            orient="records",
-            lines=True,
-        )
-
-    print(f"Saved {len(results)} train samples to {output_dir}/samples.jsonl")
+    # Results are now saved incrementally by progress_listener
+    print(
+        f"Processing completed. Results saved incrementally in batches to {output_dir}/samples_*.jsonl files"
+    )
 
 
 def main() -> None:
@@ -1752,7 +1802,7 @@ def main() -> None:
                     (None, None),
                 )
                 for data in [
-                    "gs://induction-labs-data-ext/action_capture/Kunal/2025-07-18_101735_MIELX",
+                    # "gs://induction-labs-data-ext/action_capture/Kunal/2025-07-18_101735_MIELX",
                     "gs://induction-labs-data-ext/action_capture/Kunal/2025-07-19_121221_3A4PN",
                     "gs://induction-labs-data-ext/action_capture/Kunal/2025-07-18_133213_FN0VR",
                     "gs://induction-labs-data-ext/action_capture/Kunal/2025-07-18_172629_2RBSA",

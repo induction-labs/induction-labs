@@ -27,6 +27,8 @@ class SpecialKeys(str, Enum):
     BACKSPACE = "backspace"
     SPACE = "space"
     TAB = "tab"
+    ALT = "alt"
+    OPTION = "option"
 
     # Arrows
     SHIFT = "shift"
@@ -320,6 +322,8 @@ WINDOWS_ESCAPE_SEQS = {
     "shift_l": "shift",
     "ctrl_l": "ctrl",
     "ctrl_r": "ctrl",
+    "alt_l": SpecialKeys.ALT,
+    "alt_r": SpecialKeys.ALT,
 }
 
 
