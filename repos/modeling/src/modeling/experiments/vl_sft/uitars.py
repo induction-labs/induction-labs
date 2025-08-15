@@ -52,7 +52,7 @@ UITarsActionExperimentConfig_GPU = ExperimentConfig(
         optimizer=OptimizerType.ADAMW,
         compile=CompileConfig(),
         # compile=None,
-        freeze_vision=True,
+        freeze_vision=False,
         # use_liger_kernel=False,
     ),
     train_datapack=VlDatapackConfig(
@@ -362,13 +362,11 @@ UITarsActionSweep = (
         ],
         lambda values, exp: (
             exp.train_datapack.__setattr__(
-                "dataset_path", values["data"].format(set="train")
+                "dataset_paths", [k[0] for k in values["data"]]
             ),
-            exp.validation_datapack.__setattr__(
-                "dataset_path", values["data"].format(set="test")
-            ),
-            exp.run.__setattr__("num_steps", values["num_steps"]),
-            exp.module.__setattr__("freeze_vision", True),
+            exp.validation_datapack.__setattr__("dataset_paths", values["val_data"]),
+            exp.run.__setattr__("num_steps", values["num_steps"] * values["epochs"]),
+            exp.module.__setattr__("freeze_vision", False),
             exp.module.__setattr__(
                 "checkpoint_path",
                 CloudPath.from_str(values["init"]) if values["init"] else None,

@@ -45,6 +45,8 @@ class Qwen25VLActionLIT(BaseVlSft[MODEL_TYPE, "VlSftLITConfig"]):
         return MODEL_TYPE
 
     def patch_model(self) -> Qwen2_5_VLForConditionalGeneration:
+        for param in self.model.model.visual.parameters():
+            param.requires_grad = not self.module_config.freeze_vision
         if self.module_config.use_liger_kernel:
             logger.debug("Applying Liger Kernel to Qwen2.5 VL model")
             apply_liger_kernel_to_qwen2_5_vl(model=self.model)
@@ -77,8 +79,6 @@ class Qwen25VLActionLIT(BaseVlSft[MODEL_TYPE, "VlSftLITConfig"]):
         )
 
         model = MODEL_TYPE(config)
-        for param in model.model.visual.parameters():
-            param.requires_grad = not self.module_config.freeze_vision
 
         assert isinstance(model, MODEL_TYPE), (
             f"Expected model to be of type Qwen2_5OmniThinkerForActionModelling, "
