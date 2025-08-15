@@ -22,7 +22,7 @@ from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 
 from modeling.config import DatapackConfig, ExperimentConfig, ModuleConfig
 from modeling.config.data import BaseDataSample, BaseDataset
-from modeling.eve.os_world.agents.uitars15 import COMPUTER_USE_15, THOUGHT_LONG
+from modeling.eve.os_world.agents.uitars15 import COMPUTER_USE_15, LANG_EN, THOUGHT_LONG
 
 if TYPE_CHECKING:
     from modeling.modules.vl_sft.qwen_25vl import VlSftLITConfig
@@ -263,7 +263,7 @@ class VlDataset(BaseDataset[VlDataSample, VlDatasetArgs]):
                         "type": "text",
                         "text": COMPUTER_USE_15.format(
                             instruction=instruction,
-                            language="en",
+                            language=LANG_EN,
                             thought_mode=THOUGHT_LONG,
                         ),
                     }

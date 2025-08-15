@@ -667,7 +667,9 @@ drag(start_box='<|box_start|>(x1,y1)<|box_end|>', end_box='<|box_start|>(x3,y3)<
 
 THOUGHT_BRIEF = "Generate a well-defined and practical strategy in the `Thought` section, summarizing your next move and its objective."
 THOUGHT_LONG = "Compose a step-by-step approach in the `Thought` part, specifying your next action and its focus."
-THOUGHT_LONG_REPEAT = "First, restate the task, and then compose a step-by-step approach in the `Thought` part, specifying your next action and its focus."
+THOUGHT_LONG_REPEAT = "First restate the task, and then compose a step-by-step approach in the `Thought` part, specifying your next action and its focus."
+# THOUGHT_LONG_REPEAT = "First restate the task. Then compose a step-by-step approach in the `Thought` part, specifying your next action and its focus."
+
 LANG_EN = "English"
 LANG_ZH = "Chinese"
 

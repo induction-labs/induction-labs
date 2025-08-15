@@ -29,7 +29,7 @@ import PIL
 import PIL.Image
 import tqdm
 from PIL import ImageDraw
-from pydantic import BaseModel
+from pydantic import BaseModel, computed_field
 from smart_open import open as smart_open
 from synapse.utils.logging import configure_logging, logging
 from synapse.video_loader.typess import VideoResolution, resolution_1080p
@@ -480,7 +480,7 @@ def get_timesteps_range(actions: list[Action]) -> tuple[float, list[float]]:
     timestamps.append(actions[0].timestamp - SS_DELAY)
     for i, prev_action in enumerate(actions[:-1]):
         next_action = actions[i + 1]
-        end_timestamp = prev_action.end_timestamp + SS_DELAY
+        end_timestamp = prev_action.end_timestamp - BEFORE_ACTION_BUFFER
         end_timestamp = max(
             end_timestamp,
             mean(
@@ -702,10 +702,17 @@ class SaveAction(BaseModel):
     step: int
     image: str
     action: str
-    text: str
     thinking: str
     reward: float
     frame_metadata: FrameMetadata
+
+    @computed_field
+    @property
+    def text(self) -> str:
+        """
+        Generate a text representation of the action.
+        """
+        return f"Thought: {self.thinking}\nAction: {self.action}"
 
 
 class TrainSample(BaseModel):
@@ -790,6 +797,23 @@ def get_thinking_texts(
     return thinking_texts, cost_infos
 
 
+def draw_red_circle(
+    image: PIL.Image.Image, point: Point, radius: int = 8
+) -> PIL.Image.Image:
+    """
+    Draw a red circle on the image at the specified point.
+    """
+    image = image.copy()
+    draw = ImageDraw.Draw(image)
+    draw.ellipse(
+        [point.x - radius, point.y - radius, point.x + radius, point.y + radius],
+        fill="red",
+        outline="black",
+        width=2,
+    )
+    return image
+
+
 def build_base_prompt(
     last_frame: PIL.Image.Image,
     rest_frames: list[PIL.Image.Image],
@@ -811,14 +835,7 @@ def build_base_prompt(
         if hasattr(action.action, "point") and action.action.action_type != "scroll":
             point = action.action.point
             text += f" (The point that was clicked ({point.x}, {point.y}) is highlighted in red.)"
-            frame = frame.copy()
-            draw = ImageDraw.Draw(frame)
-            draw.ellipse(
-                [point.x - 8, point.y - 8, point.x + 8, point.y + 8],
-                fill="red",
-                outline="black",
-                width=2,
-            )
+            frame = draw_red_circle(frame, point)
         prompt.append(image_content(pil_to_bytes(frame, format="PNG")))
         prompt.append(text_content(text))
     prompt.append(
@@ -1146,7 +1163,7 @@ def get_frames_at_timestamps(
         video_timestamps = [ts for _, ts in timestamp_pairs]
         # assert video_timestamps are sorted
         assert video_timestamps == sorted(video_timestamps), (
-            f"Timestamps for video {video_index} are not sorted: {video_timestamps}"
+            f"Timestamps for video {video_index} are not sorted: {video_timestamps} {video_path=}"
         )
         video_metadata = get_video_metadata(video_path)
 
@@ -1319,7 +1336,11 @@ def save_and_get_metadata(
         List of dictionaries with train sample metadata
     """
 
-    train_sample_id = gen_id(12)
+    train_sample_id = (
+        train_sample.metadata.get("train_sample_id", gen_id(12))
+        if train_sample.metadata
+        else gen_id(12)
+    )
 
     # Save the train sample to file
     with smart_open(
@@ -1376,12 +1397,11 @@ def thread_worker(
         return (None, traceback.format_exc())
 
 
-def process_worker(
-    video_args_chunk: list[
-        tuple[str, str, RecordingMetadata, VideoResolution, list[Action]]
-    ],
+def process_worker[*T](
+    thread_worker: Callable[[*T], tuple[dict | None, str | None]],
     threads_per_proc: int,
     update_queue: Queue[tuple[dict | None, str | None]],
+    video_args_chunk: list[tuple[*T]],
 ):
     """
     Runs in each separate process. Spins up a thread pool to process its chunk of videos.
@@ -1603,8 +1623,8 @@ def process_videos(
 
     # Use multiprocessing + threading pattern
     manager = Manager()
-    update_queue: Queue[tuple[SaveAction | None, str | None]] = manager.Queue()
-    results_collector: ListProxy[SaveAction] = (
+    update_queue: Queue[tuple[dict | None, str | None]] = manager.Queue()
+    results_collector: ListProxy[dict] = (
         manager.list()
     )  # shared list to collect results
 
@@ -1618,12 +1638,17 @@ def process_videos(
 
     # Split video args among processes
     chunks = chunkify(process_args, num_processes)
+    worker = process_worker(
+        thread_worker,
+        threads_per_process,
+        update_queue,
+    )
     processes = []
     for chunk in chunks:
         if not chunk:
             continue
         p = Process(
-            target=process_worker,
+            target=worker,
             args=(chunk, threads_per_process, update_queue),
         )
         p.start()

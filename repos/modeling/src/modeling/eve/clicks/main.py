@@ -26,6 +26,9 @@ from modeling.checkpoints.save import upload_to_gcs
 from modeling.eve.os_world.agents.uitars15 import (
     COMPUTER_USE_15,
     COMPUTER_USE_15_ONLY_CLICKS,
+    LANG_EN,
+    THOUGHT_BRIEF,
+    THOUGHT_LONG,
     THOUGHT_LONG_REPEAT,
 )
 from modeling.eve.vllm_utils import wait_for_servers_ready
@@ -35,6 +38,8 @@ from modeling.utils.max_timeout import max_timeout
 logger = configure_logging(__name__, level=logging.INFO)
 
 app = AsyncTyper()
+
+k = [THOUGHT_LONG, THOUGHT_BRIEF, THOUGHT_LONG_REPEAT]
 
 
 class PromptTemplates(str, Enum):
@@ -85,32 +90,36 @@ class AugmentedEvaluationResult(EvaluationResult):
     @computed_field
     @property
     def center_coords(self) -> tuple[float, float] | None:
-        if self.pred_x is not None and self.pred_y is not None:
-            return (self.pred_x, self.pred_y)
+        if (
+            self.gt_x1 is not None
+            and self.gt_y1 is not None
+            and self.gt_x2 is not None
+            and self.gt_y2 is not None
+        ):
+            center_x = (self.gt_x1 + self.gt_x2) / 2.0
+            center_y = (self.gt_y1 + self.gt_y2) / 2.0
+            return (center_x, center_y)
         return None
 
     @computed_field
     @property
     def x_error(self) -> float | None:
-        if self.center_coords and self.gt_x1 is not None:
-            return self.gt_x1 - self.center_coords[0]
+        if self.center_coords and self.pred_x is not None:
+            return self.pred_x - self.center_coords[0]
         return None
 
     @computed_field
     @property
     def y_error(self) -> float | None:
-        if self.center_coords and self.gt_y1 is not None:
-            return self.gt_y1 - self.center_coords[1]
+        if self.center_coords and self.pred_y is not None:
+            return self.pred_y - self.center_coords[1]
         return None
 
     @computed_field
     @property
     def pixel_distance(self) -> float | None:
-        if self.center_coords and self.gt_x1 is not None and self.gt_y1 is not None:
-            return (
-                (self.gt_x1 - self.center_coords[0]) ** 2
-                + (self.gt_y1 - self.center_coords[1]) ** 2
-            ) ** 0.5
+        if self.x_error is not None and self.y_error is not None:
+            return ((self.x_error) ** 2 + (self.y_error) ** 2) ** 0.5
         return None
 
 
@@ -213,8 +222,8 @@ async def run_clicks_evaluation(
     # Setup output folder handling
     local_output_folder, cloud_output_path = setup_output_folder(output_folder)
     prompt_template_str = prompt_templates[prompt_template].format(
-        language="en",
-        thought_mode=THOUGHT_LONG_REPEAT,
+        language=LANG_EN,
+        thought_mode=THOUGHT_LONG,
         instruction="{instruction}",
     )
 
@@ -298,8 +307,8 @@ async def run_clicks_evaluation(
         results = [
             AugmentedEvaluationResult.model_validate(result.model_dump())
             for result in results
-            if isinstance(result, EvaluationResult)
         ]
+        print(f"len(results)={len(results)}")
 
         if results:
             print("\nEvaluation completed successfully!")
