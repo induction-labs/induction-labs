@@ -13,7 +13,6 @@ from typing import Never, cast
 import ray
 import torch
 import tqdm
-import wandb
 from ray.util.placement_group import (
     PlacementGroup,
     placement_group,
@@ -22,8 +21,8 @@ from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 from synapse.elapsed_timer import elapsed_timer
 from synapse.utils.logging import LOCAL_RANK, NODE_RANK, configure_logging
 from torch.utils.data import DataLoader
-from wandb.sdk.wandb_run import Run
 
+import wandb
 from modeling.actor import ActorArgs, ExperimentActor
 from modeling.checkpoints.save import upload_to_gcs
 from modeling.config import (
@@ -47,6 +46,7 @@ from modeling.utils.gen_id import gen_id
 from modeling.utils.max_timeout import max_timeout
 from modeling.utils.tmpdir import TmpDirContext
 from modeling.utils.typed_remote import RemoteArgs
+from wandb.sdk.wandb_run import Run
 
 logger = configure_logging(__name__, level=logging.DEBUG)
 
@@ -578,8 +578,7 @@ class ExperimentManager:
         runtime_config = ExperimentManager.create_runtime_config(tmp_dir)
         unified_config = UnifiedExperimentConfig(
             runtime_config=runtime_config,
-            train_datapack=exp_config.train_datapack,
-            validation_datapack=exp_config.validation_datapack,
+            data=exp_config.data,
             module=exp_config.module,
             run=exp_config.run,
             metadata=exp_config.metadata,
@@ -658,10 +657,10 @@ class ExperimentManager:
                     # We initialize dataloaders here because it is a head only operation and
                     # init distributed takes a long time.
                     train_dataset, validation_dataset = await asyncio.gather(
-                        unified_config.train_datapack._init_dataset(
+                        unified_config.data.init_train_dataset(
                             full_config=unified_config,
                         ),
-                        unified_config.validation_datapack._init_dataset(
+                        unified_config.data.init_validation_dataset(
                             full_config=unified_config,
                         ),
                     )

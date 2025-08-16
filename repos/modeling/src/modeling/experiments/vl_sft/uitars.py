@@ -4,6 +4,7 @@ from pathlib import Path
 
 from modeling.config import (
     AttentionImplementation,
+    CombinedDatapackConfig,
     DistributedConfig,
     ExperimentConfig,
     ExperimentMetadata,
@@ -25,11 +26,11 @@ from modeling.utils.cloud_path import CloudPath
 model_name = "ByteDance-Seed/UI-TARS-1.5-7B"
 # model_name = "Qwen/Qwen2.5-VL-3B-Instruct"
 processor_config = VideoProcessorConfig.Qwen25VL(model_name)
-run_name = "uitars_sft_7b_yehaw_two_epoch"
+run_name = "clicks_maxxing"
 num_devices = 8
 UITarsActionExperimentConfig_GPU = ExperimentConfig(
     metadata=ExperimentMetadata(
-        wandb=WandbConfig(project="UITars_7B_sft", name=run_name),
+        wandb=WandbConfig(project="UITars_7B_passive", name=run_name),
         # wandb=None,
         output_dir=Path("./output") / run_name,
         # checkpoint=None,
@@ -55,14 +56,22 @@ UITarsActionExperimentConfig_GPU = ExperimentConfig(
         freeze_vision=False,
         # use_liger_kernel=False,
     ),
-    train_datapack=VlDatapackConfig(
-        dataset_path="gs://induction-labs/jonathan/halluminate_v1_synth/hard_samples_correct_trajectories_expanded_under_50_train.jsonl"
-        # dataset_path="<PLACEHOLDER>",
-    ),
-    validation_datapack=VlDatapackConfig(
-        # dataset_path="gs://induction-labs/jonathan/sampled_trajectories/all_trajectories/samples_correct_trajectories_expanded_under_100.jsonl",
-        dataset_path="gs://induction-labs/jonathan/halluminate_v1_synth/hard_samples_correct_trajectories_expanded_under_50_test.jsonl"
-        # dataset_path="<PLACEHOLDER>",
+    data=CombinedDatapackConfig(
+        train_datapack=VlDatapackConfig(
+            dataset_paths=[
+                "gs://induction-labs/passive_data/smooth_brain_clicks/2025-08-15/reprocess_all_no_loading-01-36-47/samples.jsonl",
+                # "gs://induction-labs/passive_data/2025-08-13/all_data_reprocessed_good-04-19-14/expanded_samples.jsonl"
+            ]
+            # dataset_path="<PLACEHOLDER>",
+        ),
+        validation_datapack=VlDatapackConfig(
+            # dataset_path="gs://induction-labs/jonathan/sampled_trajectories/all_trajectories/samples_correct_trajectories_expanded_under_100.jsonl",
+            dataset_paths=[
+                "gs://induction-labs/passive_data/smooth_brain_clicks/2025-08-15/reprocess_all_no_loading-01-36-47/samples.jsonl",
+                # "gs://induction-labs/passive_data/2025-08-13/all_data_reprocessed_good-04-19-14/expanded_samples.jsonl"
+            ]
+            # dataset_path="<PLACEHOLDER>",
+        ),
     ),
     run=RunConfig(
         lr=LinearLRSchedule(
@@ -71,10 +80,10 @@ UITarsActionExperimentConfig_GPU = ExperimentConfig(
             warmup_steps=40,
             end_step=420 * 2,
         ),
-        sequence_length=1024 * 22,
-        batch_size=32,
+        sequence_length=1024 * 4,
+        batch_size=1,
         num_steps=420 * 2,
-        validation_every_n_steps=50,
+        validation_every_n_steps=20,
         distributed=DistributedConfig(
             devices_per_node=num_devices,
         ),
@@ -107,264 +116,60 @@ UITarsActionSweep = (
     .sweep(
         [
             # ------- b200 ------------
-            # GTE3
-            # rewrite to be like uitars
-            # {
-            #     "init": "gs://induction-labs/checkpoints/uitars_sft_7b_yehaw_two_epoch/2025-08-08T07-01-09.ZOqJv1rI/step_-1/step_-1/",
-            #     "data": "gs://induction-labs/jonathan/data_fixed_0807/all_human_snapshot_0808_postprocessed/gte3_samples_correct_trajectories_expanded_under_50_{set}.jsonl",
-            #     "num_steps": 208*3,
-            #     "batch_size": 64,
-            #     "start_lr": 2e-5,
-            #     "end_lr_ratio": 0.5,
-            #     "warmup_steps": 10,
-            #     "seed": 281938,
-            # },
-            {
-                "init": "gs://induction-labs/checkpoints/uitars_sft_7b_yehaw_two_epoch/2025-08-08T07-01-09.ZOqJv1rI/step_-1/step_-1/",
-                "data": "gs://induction-labs/jonathan/data_fixed_0807/all_human_snapshot_0808_postprocessed/gte3_samples_correct_trajectories_expanded_under_50_{set}.jsonl",
-                "num_steps": 208 * 3,
-                "batch_size": 64,
-                "start_lr": 4e-5,
-                "end_lr_ratio": 0.5,
-                "warmup_steps": 10,
-                "seed": 281938,
-            },
             {
                 "init": None,
-                "data": "gs://induction-labs/jonathan/data_fixed_0807/all_human_snapshot_0808_postprocessed/gte3_samples_correct_trajectories_expanded_under_50_{set}.jsonl",
-                "num_steps": 208 * 3,
+                "data": (
+                    data := [
+                        # (
+                        #     "gs://induction-labs/passive_data/2025-08-13/all_data_reprocessed_good-04-19-14/random_expanded_samples.jsonl",
+                        #     2352,
+                        # ),
+                        # (
+                        #     "gs://induction-labs/passive_data/2025-08-14/reprocess_all-01-20-24/expanded_samples.jsonl",
+                        #     1631,
+                        # ),
+                        # (
+                        #     "gs://induction-labs/passive_data/2025-08-14/reprocess_all-01-20-24/expanded_samples.jsonl",
+                        #     3425,
+                        # ),
+                        # (
+                        #     "gs://induction-labs/passive_data/2025-08-14/reprocess_all_no_loading-04-30-15/expanded_random_truncate.jsonl",
+                        #     3398,
+                        # ),
+                        (
+                            "gs://induction-labs/passive_data/smooth_brain_clicks/2025-08-15/reprocess_all_no_loading-01-36-47/samples.jsonl",
+                            2623,
+                        ),
+                        *(
+                            (
+                                f"gs://induction-labs/passive_data/smooth_brain_clicks/2025-08-15/click_kunal_mahdi-22-13-03/samples_{i}.jsonl",
+                                100,
+                            )
+                            for i in range(70)
+                        ),
+                    ]
+                ),
+                "epochs": 1,
                 "batch_size": 64,
+                "num_steps": int(sum(k[1] for k in data) / 64),
                 "start_lr": 2e-5,
                 "end_lr_ratio": 0.5,
-                "warmup_steps": 10,
-                "seed": 281938,
+                "warmup_steps": 30,
+                "seed": 38298,
+                "val_data": [
+                    "gs://induction-labs/passive_data/smooth_brain_clicks/2025-08-15/click_kunal_mahdi-22-13-03/samples_71.jsonl",
+                    "gs://induction-labs/passive_data/smooth_brain_clicks/2025-08-15/click_kunal_mahdi-22-13-03/samples_72.jsonl",
+                    "gs://induction-labs/passive_data/smooth_brain_clicks/2025-08-15/click_kunal_mahdi-22-13-03/samples_73.jsonl",
+                ],
             },
-            {
-                "init": None,
-                "data": "gs://induction-labs/jonathan/data_fixed_0807/all_human_snapshot_0808_postprocessed/gte3_samples_correct_trajectories_expanded_under_50_{set}.jsonl",
-                "num_steps": 208 * 3,
-                "batch_size": 64,
-                "start_lr": 4e-5,
-                "end_lr_ratio": 0.5,
-                "warmup_steps": 10,
-                "seed": 281938,
-            },
-            {
-                "init": "gs://induction-labs/checkpoints/uitars_sft_7b_yehaw_two_epoch/2025-08-08T07-01-09.ZOqJv1rI/step_-1/step_-1/",
-                "data": "gs://induction-labs/jonathan/data_fixed_0807/all_human_snapshot_0808_postprocessed/gte3_balanced_samples_correct_trajectories_expanded_under_50_{set}.jsonl",
-                "num_steps": 145 * 3,
-                "batch_size": 64,
-                "start_lr": 2e-5,
-                "end_lr_ratio": 0.5,
-                "warmup_steps": 10,
-                "seed": 281938,
-            },
-            # {
-            #     "init": "gs://induction-labs/checkpoints/uitars_sft_7b_yehaw_two_epoch/2025-08-08T07-01-09.ZOqJv1rI/step_-1/step_-1/",
-            #     "data": "gs://induction-labs/jonathan/data_fixed_0807/all_human_snapshot_0808_postprocessed/gte3_balanced_samples_correct_trajectories_expanded_under_50_{set}.jsonl",
-            #     "num_steps": 145*3,
-            #     "batch_size": 64,
-            #     "start_lr": 5e-5,
-            #     "end_lr_ratio": 0.5,
-            #     "warmup_steps": 10,
-            #     "seed": 281938,
-            # },
-            # use original voice
-            # {
-            #     "init": "gs://induction-labs/checkpoints/uitars_sft_7b_yehaw_two_epoch/2025-08-08T07-01-09.ZOqJv1rI/step_-1/step_-1/",
-            #     "data": "gs://induction-labs/jonathan/data_fixed_0807/all_human_snapshot_0807_actually_fixed/gte3_samples_correct_trajectories_expanded_under_50_{set}.jsonl",
-            #     "num_steps": 208*3,
-            #     "batch_size": 64,
-            #     "start_lr": 2e-5,
-            #     "end_lr_ratio": 0.5,
-            #     "warmup_steps": 10,
-            #     "seed": 281938,
-            # },
-            {
-                "init": "gs://induction-labs/checkpoints/uitars_sft_7b_yehaw_two_epoch/2025-08-08T07-01-09.ZOqJv1rI/step_-1/step_-1/",
-                "data": "gs://induction-labs/jonathan/data_fixed_0807/all_human_snapshot_0807_actually_fixed/gte3_samples_correct_trajectories_expanded_under_50_{set}.jsonl",
-                "num_steps": 208 * 3,
-                "batch_size": 64,
-                "start_lr": 4e-5,
-                "end_lr_ratio": 0.5,
-                "warmup_steps": 10,
-                "seed": 281938,
-            },
-            {
-                "init": None,
-                "data": "gs://induction-labs/jonathan/data_fixed_0807/all_human_snapshot_0807_actually_fixed/gte3_samples_correct_trajectories_expanded_under_50_{set}.jsonl",
-                "num_steps": 208 * 3,
-                "batch_size": 64,
-                "start_lr": 2e-5,
-                "end_lr_ratio": 0.5,
-                "warmup_steps": 10,
-                "seed": 281938,
-            },
-            {
-                "init": None,
-                "data": "gs://induction-labs/jonathan/data_fixed_0807/all_human_snapshot_0807_actually_fixed/gte3_samples_correct_trajectories_expanded_under_50_{set}.jsonl",
-                "num_steps": 208 * 3,
-                "batch_size": 64,
-                "start_lr": 4e-5,
-                "end_lr_ratio": 0.5,
-                "warmup_steps": 10,
-                "seed": 281938,
-            },
-            {
-                "init": "gs://induction-labs/checkpoints/uitars_sft_7b_yehaw_two_epoch/2025-08-08T07-01-09.ZOqJv1rI/step_-1/step_-1/",
-                "data": "gs://induction-labs/jonathan/data_fixed_0807/all_human_snapshot_0807_actually_fixed/gte3_balanced_samples_correct_trajectories_expanded_under_50_{set}.jsonl",
-                "num_steps": 145 * 3,
-                "batch_size": 64,
-                "start_lr": 2e-5,
-                "end_lr_ratio": 0.5,
-                "warmup_steps": 10,
-                "seed": 281938,
-            },
-            # {
-            #     "init": "gs://induction-labs/checkpoints/uitars_sft_7b_yehaw_two_epoch/2025-08-08T07-01-09.ZOqJv1rI/step_-1/step_-1/",
-            #     "data": "gs://induction-labs/jonathan/data_fixed_0807/all_human_snapshot_0807_actually_fixed/gte3_balanced_samples_correct_trajectories_expanded_under_50_{set}.jsonl",
-            #     "num_steps": 145*3,
-            #     "batch_size": 64,
-            #     "start_lr": 5e-5,
-            #     "end_lr_ratio": 0.5,
-            #     "warmup_steps": 10,
-            #     "seed": 281938,
-            # },
-            # ---------- h200 -----------
-            # # GTE 4
-            # # original voice
-            # # balanced
-            # # {
-            # #     "init": "gs://induction-labs/checkpoints/uitars_sft_7b_yehaw_two_epoch/2025-08-08T07-01-09.ZOqJv1rI/step_-1/step_-1/",
-            # #     "data": "gs://induction-labs/jonathan/data_fixed_0807/all_human_snapshot_0807_actually_fixed/gte4_balanced_samples_correct_trajectories_expanded_under_50_{set}.jsonl",
-            # #     "num_steps": 39*3,
-            # #     "batch_size": 32,
-            # #     "start_lr": 2e-5,
-            # #     "end_lr_ratio": 0.5,
-            # #     "warmup_steps": 5,
-            # #     "seed": 281938,
-            # # },
-            # {
-            #     "init": "gs://induction-labs/checkpoints/uitars_sft_7b_yehaw_two_epoch/2025-08-08T07-01-09.ZOqJv1rI/step_-1/step_-1/",
-            #     "data": "gs://induction-labs/jonathan/data_fixed_0807/all_human_snapshot_0807_actually_fixed/gte4_balanced_samples_correct_trajectories_expanded_under_50_{set}.jsonl",
-            #     "num_steps": 39*3,
-            #     "batch_size": 32,
-            #     "start_lr": 5e-5,
-            #     "end_lr_ratio": 0.5,
-            #     "warmup_steps": 5,
-            #     "seed": 281938,
-            # },
-            # {
-            #     "init": "gs://induction-labs/checkpoints/uitars_sft_7b_yehaw_two_epoch/2025-08-08T07-01-09.ZOqJv1rI/step_-1/step_-1/",
-            #     "data": "gs://induction-labs/jonathan/data_fixed_0807/all_human_snapshot_0807_actually_fixed/gte4_balanced_samples_correct_trajectories_expanded_under_50_{set}.jsonl",
-            #     "num_steps": 39*3,
-            #     "batch_size": 32,
-            #     "start_lr": 1e-4,
-            #     "end_lr_ratio": 0.1,
-            #     "warmup_steps": 5,
-            #     "seed": 281938,
-            # },
-            # # all
-            # # {
-            # #     "init": "gs://induction-labs/checkpoints/uitars_sft_7b_yehaw_two_epoch/2025-08-08T07-01-09.ZOqJv1rI/step_-1/step_-1/",
-            # #     "data": "gs://induction-labs/jonathan/data_fixed_0807/all_human_snapshot_0807_actually_fixed/gte4_samples_correct_trajectories_expanded_under_50_{set}.jsonl",
-            # #     "num_steps": 90*3,
-            # #     "batch_size": 32,
-            # #     "start_lr": 2e-5,
-            # #     "end_lr_ratio": 0.5,
-            # #     "warmup_steps": 5,
-            # #     "seed": 281938,
-            # # },
-            # {
-            #     "init": "gs://induction-labs/checkpoints/uitars_sft_7b_yehaw_two_epoch/2025-08-08T07-01-09.ZOqJv1rI/step_-1/step_-1/",
-            #     "data": "gs://induction-labs/jonathan/data_fixed_0807/all_human_snapshot_0807_actually_fixed/gte4_samples_correct_trajectories_expanded_under_50_{set}.jsonl",
-            #     "num_steps": 90*3,
-            #     "batch_size": 32,
-            #     "start_lr": 5e-5,
-            #     "end_lr_ratio": 0.5,
-            #     "warmup_steps": 5,
-            #     "seed": 281938,
-            # },
-            # {
-            #     "init": "gs://induction-labs/checkpoints/uitars_sft_7b_yehaw_two_epoch/2025-08-08T07-01-09.ZOqJv1rI/step_-1/step_-1/",
-            #     "data": "gs://induction-labs/jonathan/data_fixed_0807/all_human_snapshot_0807_actually_fixed/gte4_samples_correct_trajectories_expanded_under_50_{set}.jsonl",
-            #     "num_steps": 90*3,
-            #     "batch_size": 32,
-            #     "start_lr": 1e-4,
-            #     "end_lr_ratio": 0.1,
-            #     "warmup_steps": 5,
-            #     "seed": 281938,
-            # },
-            # # new voice
-            # # original voice
-            # # balanced
-            # # {
-            # #     "init": "gs://induction-labs/checkpoints/uitars_sft_7b_yehaw_two_epoch/2025-08-08T07-01-09.ZOqJv1rI/step_-1/step_-1/",
-            # #     "data": "gs://induction-labs/jonathan/data_fixed_0807/all_human_snapshot_0808_postprocessed/gte4_balanced_samples_correct_trajectories_expanded_under_50_{set}.jsonl",
-            # #     "num_steps": 39*3,
-            # #     "batch_size": 32,
-            # #     "start_lr": 2e-5,
-            # #     "end_lr_ratio": 0.5,
-            # #     "warmup_steps": 5,
-            # #     "seed": 281938,
-            # # },
-            # {
-            #     "init": "gs://induction-labs/checkpoints/uitars_sft_7b_yehaw_two_epoch/2025-08-08T07-01-09.ZOqJv1rI/step_-1/step_-1/",
-            #     "data": "gs://induction-labs/jonathan/data_fixed_0807/all_human_snapshot_0808_postprocessed/gte4_balanced_samples_correct_trajectories_expanded_under_50_{set}.jsonl",
-            #     "num_steps": 39*3,
-            #     "batch_size": 32,
-            #     "start_lr": 5e-5,
-            #     "end_lr_ratio": 0.5,
-            #     "warmup_steps": 5,
-            #     "seed": 281938,
-            # },
-            # {
-            #     "init": "gs://induction-labs/checkpoints/uitars_sft_7b_yehaw_two_epoch/2025-08-08T07-01-09.ZOqJv1rI/step_-1/step_-1/",
-            #     "data": "gs://induction-labs/jonathan/data_fixed_0807/all_human_snapshot_0808_postprocessed/gte4_balanced_samples_correct_trajectories_expanded_under_50_{set}.jsonl",
-            #     "num_steps": 39*3,
-            #     "batch_size": 32,
-            #     "start_lr": 1e-4,
-            #     "end_lr_ratio": 0.1,
-            #     "warmup_steps": 5,
-            #     "seed": 281938,
-            # },
-            # # all
-            # # {
-            # #     "init": "gs://induction-labs/checkpoints/uitars_sft_7b_yehaw_two_epoch/2025-08-08T07-01-09.ZOqJv1rI/step_-1/step_-1/",
-            # #     "data": "gs://induction-labs/jonathan/data_fixed_0807/all_human_snapshot_0808_postprocessed/gte4_samples_correct_trajectories_expanded_under_50_{set}.jsonl",
-            # #     "num_steps": 90*3,
-            # #     "batch_size": 32,
-            # #     "start_lr": 2e-5,
-            # #     "end_lr_ratio": 0.5,
-            # #     "warmup_steps": 5,
-            # #     "seed": 281938,
-            # # },
-            # {
-            #     "init": "gs://induction-labs/checkpoints/uitars_sft_7b_yehaw_two_epoch/2025-08-08T07-01-09.ZOqJv1rI/step_-1/step_-1/",
-            #     "data": "gs://induction-labs/jonathan/data_fixed_0807/all_human_snapshot_0808_postprocessed/gte4_samples_correct_trajectories_expanded_under_50_{set}.jsonl",
-            #     "num_steps": 90*3,
-            #     "batch_size": 32,
-            #     "start_lr": 5e-5,
-            #     "end_lr_ratio": 0.5,
-            #     "warmup_steps": 5,
-            #     "seed": 281938,
-            # },
-            # {
-            #     "init": "gs://induction-labs/checkpoints/uitars_sft_7b_yehaw_two_epoch/2025-08-08T07-01-09.ZOqJv1rI/step_-1/step_-1/",
-            #     "data": "gs://induction-labs/jonathan/data_fixed_0807/all_human_snapshot_0808_postprocessed/gte4_samples_correct_trajectories_expanded_under_50_{set}.jsonl",
-            #     "num_steps": 90*3,
-            #     "batch_size": 32,
-            #     "start_lr": 1e-4,
-            #     "end_lr_ratio": 0.1,
-            #     "warmup_steps": 5,
-            #     "seed": 281938,
-            # },
         ],
         lambda values, exp: (
-            exp.train_datapack.__setattr__(
+            exp.data.train_datapack.__setattr__(
                 "dataset_paths", [k[0] for k in values["data"]]
             ),
-            exp.validation_datapack.__setattr__("dataset_paths", values["val_data"]),
+            exp.data.validation_datapack.__setattr__(
+                "dataset_paths", values["val_data"]
+            ),
             exp.run.__setattr__("num_steps", values["num_steps"] * values["epochs"]),
             exp.module.__setattr__("freeze_vision", False),
             exp.module.__setattr__(
@@ -389,7 +194,7 @@ UITarsActionSweep = (
                     peak_lr=values["start_lr"],
                     end_lr=values["start_lr"] * values["end_lr_ratio"],
                     warmup_steps=values["warmup_steps"],
-                    end_step=values["num_steps"],
+                    end_step=values["num_steps"] * values["epochs"],
                 ),
             ),
             exp.run.__setattr__("seed", values["seed"]),

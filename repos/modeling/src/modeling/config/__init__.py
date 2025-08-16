@@ -8,15 +8,15 @@ from typing import (
     TYPE_CHECKING,
     Annotated,
     Any,
-    Never,
+    Literal,
     Self,
     TypeVar,
 )
 
 from pydantic import (
     BaseModel,
-    ConfigDict,
     Field,
+    PlainValidator,
     computed_field,
     field_serializer,
     model_validator,
@@ -208,54 +208,6 @@ class ModuleConfig(BaseModel, ABC):
         raise NotImplementedError("Subclasses must implement this method.")
 
 
-class SerializedModuleConfig(ModuleConfig):
-    """
-    Configuration for a serialized Lightning module.
-    This class is used to load a Lightning module from a specified path.
-    """
-
-    @classmethod
-    def module_cls(cls) -> type[BaseLITModule]:
-        """
-        Return the class of the Lightning module.
-        This method should be implemented by subclasses to return the actual module class.
-        """
-        raise NotImplementedError(
-            "SerializedModuleConfig should never be used to start an experiment directly."
-        )
-
-    # Explicity allow extra config to go through, because this will be used to initialize the module
-    model_config = ConfigDict(extra="allow")
-
-    def check_config_path(self) -> Self:  # type: ignore[override]
-        # SerializedModuleConfig does not need to check the config_path,
-        # as it is expected to be loaded from a path specified in the config.
-        return self
-
-    def validate_datapack_compatibility(
-        self, datapack_config: DatapackConfig[Any]
-    ) -> SerializedDatapackConfig:
-        """
-        Validate that the Lightning module is compatible with the data module.
-        """
-        assert isinstance(datapack_config, SerializedDatapackConfig), (
-            "SerializedModuleConfig can only be used with SerializedDatapackConfig."
-        )
-        return datapack_config
-
-    def create_module(
-        self,
-        run_config: RunConfig,
-        instance_config: InstanceConfig,
-    ) -> BaseLITModule:
-        """
-        Create a Lightning module instance by loading it from the specified path.
-        """
-        raise NotImplementedError(
-            "SerializedModuleConfig should never be used to start an experiment directly."
-        )
-
-
 class DatapackConfig[DataSample: "BaseDataSample"](ABC, BaseModel):
     config_path: str
 
@@ -286,61 +238,13 @@ class DatapackConfig[DataSample: "BaseDataSample"](ABC, BaseModel):
 
     @abstractmethod
     async def _init_dataset(
-        self, full_config: ExperimentConfig[DataSample]
+        self, full_config: ExperimentConfig
     ) -> BaseDataset[DataSample, Any]:
         """
         Create a Lightning data module instance.
         This method should be implemented by subclasses to return an instance of the Lightning data module.
         """
         raise NotImplementedError("Subclasses must implement this method.")
-
-
-class SerializedDatapackConfig(DatapackConfig[DataSample]):
-    """
-    Configuration for a serialized Lightning data module.
-    This class is used to load a Lightning data module from a specified path.
-    """
-
-    # Explicity allow extra config to go through, because this will be used to initialize the module
-    model_config = ConfigDict(extra="allow")
-
-    def check_config_path(self) -> Self:  # type: ignore[override]
-        # SerializedDatapackConfig does not need to check the config_path,
-        # as it is expected to be loaded from a path specified in the config.
-        return self
-
-    def validate_module_compatibility(
-        self, module_config: ModuleConfig[Any]
-    ) -> SerializedModuleConfig:
-        """
-        Validate that the Lightning module is compatible with the data module.
-        """
-        assert isinstance(module_config, SerializedModuleConfig), (
-            "SerializedDatapackConfig can only be used with SerializedModuleConfig."
-        )
-        return module_config
-
-    def create_datapack(
-        self,
-        full_config: ExperimentConfig[DataSample],
-    ) -> DataSample:
-        """
-        Create a Lightning data module instance by loading it from the specified path.
-        """
-        raise NotImplementedError(
-            "SerializedDatapackConfig should never be used to start an experiment directly."
-        )
-
-    async def _init_dataset(  # type: ignore[override]
-        self, full_config: ExperimentConfig[DataSample]
-    ) -> BaseDataset[DataSample, Never]:
-        """
-        Create a Lightning data module instance for the training dataset.
-        This method should be implemented by subclasses to return an instance of the Lightning data module.
-        """
-        raise NotImplementedError(
-            "SerializedDatapackConfig should never be used directly."
-        )
 
 
 class LinearLRSchedule(BaseModel):
@@ -493,13 +397,107 @@ class RunConfig(BaseModel):
         )
 
 
+class BaseCombinedDatapackConfig[
+    TrainData: "BaseDataSample",
+    ValData: "BaseDataSample",
+](BaseModel):
+    @abstractmethod
+    async def init_train_dataset(
+        self, full_config: ExperimentConfig
+    ) -> BaseDataset[TrainData, Any]:
+        """
+        Create a Lightning data module instance.
+        This method should be implemented by subclasses to return an instance of the Lightning data module.
+        """
+        raise NotImplementedError("Subclasses must implement this method.")
+
+    @abstractmethod
+    async def init_validation_dataset(
+        self, full_config: ExperimentConfig
+    ) -> BaseDataset[ValData, Any]:
+        """
+        Create a Lightning data module instance for the validation dataset.
+        This method should be implemented by subclasses to return an instance of the Lightning data module.
+        """
+        raise NotImplementedError("Subclasses must implement this method.")
+
+    @abstractmethod
+    def datapack_configs(self) -> list[DatapackConfig[Any]]:
+        """
+        Return a list of datapack configurations.
+        This method should be implemented by subclasses to return the configurations for the training and validation datapacks.
+        """
+        raise NotImplementedError("Subclasses must implement this method.")
+
+
+def datapack_validator(value: Any) -> DatapackConfig[Any]:
+    if isinstance(value, DatapackConfig):
+        return value
+    assert isinstance(value, dict), (
+        f"Expected datapack to be a DatapackConfig or dict, got {type(value)} instead."
+    )
+    from modeling.utils.dynamic_import import import_from_string
+
+    datapack_config_cls = import_from_string(value["config_path"])
+    assert issubclass(datapack_config_cls, DatapackConfig)
+    return datapack_config_cls.model_validate(value)
+
+
+class CombinedDatapackConfig[TrainData: "BaseDataSample", ValData: "BaseDataSample"](
+    BaseCombinedDatapackConfig[TrainData, ValData]
+):
+    """
+    Configuration for a combined Lightning data module.
+    This class is used to load a Lightning data module from a specified path.
+    """
+
+    datapack_type: Literal["combined"] = "combined"
+
+    train_datapack: Annotated[
+        DatapackConfig[TrainData], PlainValidator(datapack_validator)
+    ]
+    validation_datapack: Annotated[
+        DatapackConfig[ValData], PlainValidator(datapack_validator)
+    ]
+
+    async def init_train_dataset(
+        self, full_config: ExperimentConfig
+    ) -> BaseDataset[TrainData, Any]:
+        return await self.train_datapack._init_dataset(full_config)
+
+    async def init_validation_dataset(
+        self, full_config: ExperimentConfig
+    ) -> BaseDataset[ValData, Any]:
+        return await self.validation_datapack._init_dataset(full_config)
+
+    def datapack_configs(self) -> list[DatapackConfig[Any]]:
+        """
+        Return a list of datapack configurations.
+        This method should be implemented by subclasses to return the configurations for the training and validation datapacks.
+        """
+        return [self.train_datapack, self.validation_datapack]
+
+
+def module_validator(value: Any) -> ModuleConfig[Any]:
+    if isinstance(value, ModuleConfig):
+        return value
+    assert isinstance(value, dict), (
+        f"Expected module to be a ModuleConfig or dict, got {type(value)} instead."
+    )
+    from modeling.utils.dynamic_import import import_from_string
+
+    module_config_path = value["config_path"]
+    module_config_cls = import_from_string(module_config_path)
+    assert issubclass(module_config_cls, ModuleConfig)
+    return module_config_cls.model_validate(value)
+
+
 class ExperimentConfig(BaseModel):
     metadata: ExperimentMetadata
     # For now, include distributed config here.
 
-    module: ModuleConfig
-    train_datapack: DatapackConfig
-    validation_datapack: DatapackConfig
+    module: Annotated[ModuleConfig, PlainValidator(module_validator)]
+    data: CombinedDatapackConfig
 
     # These maybe should be moved to module_config, but seem standard enough to keep here
     run: RunConfig
@@ -510,10 +508,11 @@ class ExperimentConfig(BaseModel):
         Validate that the module and datapack configurations are compatible.
         This method is called after the model is initialized to ensure compatibility.
         """
-        self.module.validate_datapack_compatibility(self.train_datapack)
-        self.train_datapack.validate_module_compatibility(self.module)
-        self.module.validate_datapack_compatibility(self.validation_datapack)
-        self.validation_datapack.validate_module_compatibility(self.module)
+        datapack_configs = self.data.datapack_configs()
+        for datapack_config in datapack_configs:
+            self.module.validate_datapack_compatibility(datapack_config)
+            datapack_config.validate_module_compatibility(self.module)
+
         return self
 
     def serialize_to_toml(self) -> str:
@@ -592,9 +591,3 @@ class UnifiedExperimentConfig(ExperimentConfig):
             self.metadata.checkpoint.checkpoint_prefix
             / f"{self.runtime_config.start_time:%Y-%m-%dT%H-%M-%S}.{self.runtime_config.id}"
         )
-
-
-class SerializedExperimentConfig(ExperimentConfig):
-    module: SerializedModuleConfig  # type: ignore[override]
-    train_datapack: SerializedDatapackConfig  # type: ignore[override]
-    validation_datapack: SerializedDatapackConfig  # type: ignore[override]
