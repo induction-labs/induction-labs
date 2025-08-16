@@ -417,8 +417,7 @@ Mark `useful_action: true` **ONLY** when the user's click or drag action is clea
 - Dragging an item to a specific location
 
 ## Task 2: Write a *simple* instruction that would result in the behaviour shown in the screenshots.
-If you marked the action as useful, write a clear, concise instruction that an AI assistant could follow to replicate the observed behavior. 
-Good instructions should be unambiguous and limited to a single sentence of a few words, for example "Change the orientation to landscape".
+If you marked the action as useful, write a clear, concise instruction that an AI assistant could follow to replicate the observed behavior. Good instructions should be unambiguous and limited to a single sentence of a few words. The instruction should describe *what to do*, not *how to do it*, for example "Change the orientation to landscape" is better than "Click the button in the top right corner to change the orientation to landscape."
 
 If the action is not useful, simply write `action_instruction: "NOT USEFUL."` followed by a short explanation of why it is not useful.
 
@@ -531,7 +530,7 @@ You then have two tasks:
 
 ## Task 1: Write a *simple* instruction that would result in the behaviour shown in the screenshots.
 Write a clear, concise instruction that an AI assistant could follow to replicate the observed behavior.
-Good instructions should be unambiguous and limited to a single sentence, for example "Switch Excel to manual calculation mode."
+Good instructions should be unambiguous and limited to a single sentence of a few words. The instruction should describe *what to do*, not *how to do it*, for example "Change the orientation to landscape" is better than "Click the button in the top right corner to change the orientation to landscape."
 
 ## Task 2: Write the user's reasoning.
 Write the user's reasoning for why they performed this action. In a first-person, present-tense inner voice, explain why this specific action is the right move to advance or complete the task. Be concrete and insightful—reference on-screen cues, trade-offs, and how this step helps solve the problem. When referencing elements on the screen, include their position in the screenshot, e.g., "the button in the top right corner" or "the text field in the middle of the screen".
@@ -788,29 +787,63 @@ def main():
 
 
 def main2():
-    dataset_name = "click_kunal_mahdi"
+    dataset_name = "click_tirador_sand_test"
     output_dir = f"gs://induction-labs/passive_data/smooth_brain_clicks/{datetime.datetime.now(datetime.UTC):%Y-%m-%d}/{dataset_name}-{datetime.datetime.now(datetime.UTC):%H-%M-%S}"
     source_folders = [
         # Kunal
         # "gs://induction-labs-data-ext/action_capture/Kunal/2025-07-18_101735_MIELX",
-        "gs://induction-labs-data-ext/action_capture/Kunal/2025-07-19_121221_3A4PN",
-        "gs://induction-labs-data-ext/action_capture/Kunal/2025-07-18_133213_FN0VR",
-        "gs://induction-labs-data-ext/action_capture/Kunal/2025-07-18_172629_2RBSA",
-        "gs://induction-labs-data-ext/action_capture/Kunal/2025-07-19_125156_PQS8V",
-        "gs://induction-labs-data-ext/action_capture/Kunal/2025-07-19_150406_A27L7",
-        "gs://induction-labs-data-ext/action_capture/Kunal/2025-07-21_111019_IF3S0",
-        "gs://induction-labs-data-ext/action_capture/Kunal/2025-07-21_172805_4KV69",
-        "gs://induction-labs-data-ext/action_capture/Kunal/2025-07-21_195634_CHHBR",
-        # Mahdi_lumio
-        "gs://induction-labs-data-ext/action_capture/Mahdi_lumio/2025-07-19_202437_BSGP6",
-        "gs://induction-labs-data-ext/action_capture/Mahdi_lumio/2025-07-19_202545_R9AN9",
-        "gs://induction-labs-data-ext/action_capture/Mahdi_lumio/2025-07-21_145524_Y5HX2",
-        "gs://induction-labs-data-ext/action_capture/Mahdi_lumio/2025-07-24_141207_3TWWR",
+        # "gs://induction-labs-data-ext/action_capture/Kunal/2025-07-19_121221_3A4PN",
+        # "gs://induction-labs-data-ext/action_capture/Kunal/2025-07-18_133213_FN0VR",
+        # "gs://induction-labs-data-ext/action_capture/Kunal/2025-07-18_172629_2RBSA",
+        # "gs://induction-labs-data-ext/action_capture/Kunal/2025-07-19_125156_PQS8V",
+        # "gs://induction-labs-data-ext/action_capture/Kunal/2025-07-19_150406_A27L7",
+        # "gs://induction-labs-data-ext/action_capture/Kunal/2025-07-21_111019_IF3S0",
+        # "gs://induction-labs-data-ext/action_capture/Kunal/2025-07-21_172805_4KV69",
+        # "gs://induction-labs-data-ext/action_capture/Kunal/2025-07-21_195634_CHHBR",
+        # # Mahdi_lumio
+        # "gs://induction-labs-data-ext/action_capture/Mahdi_lumio/2025-07-19_202437_BSGP6",
+        # "gs://induction-labs-data-ext/action_capture/Mahdi_lumio/2025-07-19_202545_R9AN9",
+        # "gs://induction-labs-data-ext/action_capture/Mahdi_lumio/2025-07-21_145524_Y5HX2",
+        # "gs://induction-labs-data-ext/action_capture/Mahdi_lumio/2025-07-24_141207_3TWWR",
         "gs://induction-labs-data-ext/action_capture/Mahdi_lumio/2025-08-06_155356_WIGKJ",
+        # Tirador
+        # "gs://induction-labs-data-ext/action_capture/Tirador/2025-07-06_213528_7A3GZ/",
+        # "gs://induction-labs-data-ext/action_capture/Tirador/2025-07-07_004523_YZCKT/",
+        # "gs://induction-labs-data-ext/action_capture/Tirador/2025-07-07_151909_EM1ZD/",
+        # "gs://induction-labs-data-ext/action_capture/Tirador/2025-07-07_181227_8C74U/",
+        # "gs://induction-labs-data-ext/action_capture/Tirador/2025-07-07_204719_ST5T0/",
+        # "gs://induction-labs-data-ext/action_capture/Tirador/2025-07-07_211120_94XGE/",
+        # "gs://induction-labs-data-ext/action_capture/Tirador/2025-07-08_182312_Y56YF/",
+        # "gs://induction-labs-data-ext/action_capture/Tirador/2025-07-08_214414_4TT3Z/",
+        # "gs://induction-labs-data-ext/action_capture/Tirador/2025-07-09_142027_DED1W/",
+        # "gs://induction-labs-data-ext/action_capture/Tirador/2025-07-09_144647_ECLHS/",
+        # "gs://induction-labs-data-ext/action_capture/Tirador/2025-07-09_155550_ZMYHV/",
+        # "gs://induction-labs-data-ext/action_capture/Tirador/2025-07-09_193418_SP3LZ/",
+        # "gs://induction-labs-data-ext/action_capture/Tirador/2025-07-10_162405_26O9J/",
+        # "gs://induction-labs-data-ext/action_capture/Tirador/2025-07-11_001850_5VUNA/",
+        # "gs://induction-labs-data-ext/action_capture/Tirador/2025-07-13_195531_RSWMW/",
+        # "gs://induction-labs-data-ext/action_capture/Tirador/2025-07-14_182906_WVWG5/",
+        # "gs://induction-labs-data-ext/action_capture/Tirador/2025-07-14_220158_LBGGM/",
+        # "gs://induction-labs-data-ext/action_capture/Tirador/2025-07-15_165347_KP6YW/",
+        # "gs://induction-labs-data-ext/action_capture/Tirador/2025-07-15_195134_KWILK/",
+        # "gs://induction-labs-data-ext/action_capture/Tirador/2025-07-16_212920_6DWYV/",
+        # "gs://induction-labs-data-ext/action_capture/Tirador/2025-07-17_163921_9Z25E/",
+        # "gs://induction-labs-data-ext/action_capture/Tirador/2025-07-19_144843_SYMA8/",
+        # "gs://induction-labs-data-ext/action_capture/Tirador/2025-07-21_204350_XA49Z/",
+        # "gs://induction-labs-data-ext/action_capture/Tirador/2025-07-22_224422_XFW5C/",
+        # Sand
+        # "gs://induction-labs-data-ext/action_capture/sand/2025-07-18_135456_RWJJN/",
+        # "gs://induction-labs-data-ext/action_capture/sand/2025-07-19_144144_8DI6M/",
+        # "gs://induction-labs-data-ext/action_capture/sand/2025-07-25_161125_1GJM0/",
+        # "gs://induction-labs-data-ext/action_capture/sand/2025-07-26_135348_88OVA/",
+        # "gs://induction-labs-data-ext/action_capture/sand/2025-07-26_144717_3IZP6/",
+        # "gs://induction-labs-data-ext/action_capture/sand/2025-07-27_203922_EPEL2/",
+        # "gs://induction-labs-data-ext/action_capture/sand/2025-07-28_195826_O03E3/",
+        # "gs://induction-labs-data-ext/action_capture/sand/2025-07-29_000123_NYUHB/",
+        # "gs://induction-labs-data-ext/action_capture/sand/2025-07-29_130733_029HN/",
     ]
     process_clicks_from_raw(
-        source_folders=source_folders,
-        output_dir=output_dir,
+        source_folders=source_folders, output_dir=output_dir, max_video_files=10
     )
     print(f"Results saved to {output_dir}/samples.jsonl")
 

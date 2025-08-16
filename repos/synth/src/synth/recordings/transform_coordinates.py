@@ -26,6 +26,7 @@ class Platform(str, Enum):
     win32 = "win32"
     unknown = "unknown"
     darwin = "darwin"
+    linux = "linux"
 
     @property
     def is_windows(self) -> bool:

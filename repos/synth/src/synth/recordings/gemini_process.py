@@ -4,6 +4,7 @@ import base64
 import datetime
 import json
 import multiprocessing
+import os
 import secrets
 import string
 import tempfile
@@ -66,7 +67,12 @@ logger = configure_logging(__file__, logging.INFO)
 
 litellm.drop_params = True
 # DEFAULT_MODEL = "anthropic/claude-sonnet-4-20250514"
-DEFAULT_MODEL = "o3"
+# DEFAULT_MODEL = "o3"
+DEFAULT_MODEL = "azure/o3"
+API_KEY = os.environ["AZURE_OPENAI_API_KEY"]
+
+API_BASE = os.environ["AZURE_OPENAI_ENDPOINT"]
+API_VERSION = os.environ.get("OPENAI_API_VERSION")
 
 
 def retry_with_backoff(
@@ -215,6 +221,9 @@ def call_model(
             max_completion_tokens=max_tokens,
             reasoning_effort=reasoning_effort,
             response_format=response_format,
+            api_key=API_KEY,
+            api_base=API_BASE,
+            api_version=API_VERSION,
         )
 
         # Extract cost information from the response
@@ -1372,9 +1381,9 @@ def save_and_get_metadata(
         "trajectory_length": len(train_sample.actions),
         "source_dir": source_dir,
         "image_turns_start": 0,
-        "image_turns_end": len(train_sample.actions) - 1,
+        "image_turns_end": len(train_sample.actions),
         "text_turns_start": 0,
-        "text_turns_end": len(train_sample.actions) - 1,
+        "text_turns_end": len(train_sample.actions),
         "unmask_last_only": False,
     }
 
