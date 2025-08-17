@@ -76,7 +76,7 @@ def start_screen_record(
             "-use_wallclock_as_timestamps",
             "1",
             "-draw_mouse",
-            "1",  # <-- equivalent to -capture_cursor 1
+            "0",  # <-- equivalent to -capture_cursor 1
             "-vsync",
             "vfr",
             "-i",
@@ -110,7 +110,7 @@ def start_screen_record(
             "-use_wallclock_as_timestamps",
             "1",
             "-capture_cursor",
-            "1",
+            "0",
             "-vsync",
             "vfr",
             "-i",
