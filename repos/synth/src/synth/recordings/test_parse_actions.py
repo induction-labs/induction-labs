@@ -737,6 +737,37 @@ def test_arrow_keys_with_space():
     assert out == expected
 
 
+def test_windows_clicks():
+    ev = [
+        {
+            "action": {"action": "key_button", "key": "v", "is_down": True},
+            "timestamp": 0,
+        },
+        {
+            "action": {"action": "key_button", "key": "left", "is_down": True},
+            "timestamp": 0.1,
+        },
+        {
+            "action": {"action": "key_button", "key": "v", "is_down": False},
+            "timestamp": 0.2,
+        },
+    ]
+    out = parse_actions(ev)
+    expected = [
+        Action(
+            action=TypeAction(action_type="type", content="v"),
+            timestamp=0.0,
+            end_timestamp=0.1,
+        ),
+        Action(
+            action=HotkeyAction(action_type="hotkey", modifiers=set(), key="left"),
+            timestamp=0.1,
+            end_timestamp=0.2,
+        ),
+    ]
+    assert out == expected
+
+
 # def test_multiple_scrolls_more_than_5():
 #     ev = [
 #         scroll(0, 1, 100, 100, 0.0),

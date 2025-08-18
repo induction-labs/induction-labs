@@ -24,6 +24,7 @@ from typing import Literal
 import av
 import dotenv
 import gcsfs
+import httpx
 import litellm
 import pandas as pd
 import PIL
@@ -31,7 +32,6 @@ import PIL.Image
 import tqdm
 from PIL import ImageDraw
 from pydantic import BaseModel, computed_field
-from smart_open import open as smart_open
 from synapse.utils.logging import configure_logging, logging
 from synapse.video_loader.typess import VideoResolution, resolution_1080p
 from synapse.video_loader.video import (
@@ -68,7 +68,11 @@ logger = configure_logging(__file__, logging.INFO)
 litellm.drop_params = True
 # DEFAULT_MODEL = "anthropic/claude-sonnet-4-20250514"
 # DEFAULT_MODEL = "o3"
-DEFAULT_MODEL = "azure/o3"
+# DEFAULT_MODEL = "azure/o3"
+DEFAULT_MODEL = "azure/gpt-5"
+API_KEY = None
+API_BASE = None
+API_VERSION = None
 API_KEY = os.environ["AZURE_OPENAI_API_KEY"]
 
 API_BASE = os.environ["AZURE_OPENAI_ENDPOINT"]
@@ -224,31 +228,30 @@ def call_model(
             api_key=API_KEY,
             api_base=API_BASE,
             api_version=API_VERSION,
+            timeout=httpx.Timeout(60 * 5),
         )
+        usage = response.usage
+        assert isinstance(usage, litellm.Usage)
 
         # Extract cost information from the response
         cost_info = {
-            "prompt_tokens": getattr(response.usage, "prompt_tokens", 0)
-            if response.usage
-            else 0,
-            "completion_tokens": getattr(response.usage, "completion_tokens", 0)
-            if response.usage
-            else 0,
-            "total_tokens": getattr(response.usage, "total_tokens", 0)
-            if response.usage
-            else 0,
+            "prompt_tokens": usage.prompt_tokens or 0,
+            "completion_tokens": usage.completion_tokens or 0,
+            "total_tokens": usage.total_tokens or 0,
             "model": model_name,
+            "reasoning_tokens": usage.completion_tokens_details.reasoning_tokens
+            if usage.completion_tokens_details
+            else 0 or 0,
+            "prompt_tokens_cached": (
+                usage.prompt_tokens_details.cached_tokens
+                if usage.prompt_tokens_details
+                else 0 or 0
+            ),
         }
 
         # Add cache hit information if available
-        if response.usage:
+        if usage:
             # OpenAI/Anthropic style cache hits
-            cost_info["prompt_tokens_cached"] = (
-                response.usage.prompt_tokens_details.cached_tokens
-                if hasattr(response.usage, "prompt_tokens_details")
-                and response.usage.prompt_tokens_details
-                else 0
-            )
 
             # Calculate cache hit rate
             cached_tokens = cost_info["prompt_tokens_cached"]
@@ -813,10 +816,9 @@ def draw_red_circle(
     Draw a red circle on the image at the specified point.
     """
     image = image.copy()
-    image = image.copy()
-    image = image.convert("L").convert(
-        "RGB"
-    )  # L = grayscale, then back to RGB for color drawing
+    # image = image.convert("L").convert(
+    #     "RGB"
+    # )  # L = grayscale, then back to RGB for color drawing
     draw = ImageDraw.Draw(image)
     draw.ellipse(
         [point.x - radius, point.y - radius, point.x + radius, point.y + radius],
@@ -1333,6 +1335,13 @@ def chunkify(lst, n):
     return [lst[i * k + min(i, m) : (i + 1) * k + min(i + 1, m)] for i in range(n)]
 
 
+@retry_with_backoff(
+    max_retries=3,
+    base_delay=1.0,
+    max_delay=30.0,
+    exponential_base=2.0,
+    exceptions=(Exception, ValueError),
+)
 def save_and_get_metadata(
     source_dir: str,
     output_dir: str,
@@ -1354,16 +1363,19 @@ def save_and_get_metadata(
         else gen_id(12)
     )
 
-    # Save the train sample to file
-    with smart_open(
-        f"{output_dir}/metadata/{train_sample_id}.json", "w", encoding="utf-8"
-    ) as f:
+    # Save the train sample to file using gcsfs
+    metadata_path = f"{output_dir}/metadata/{train_sample_id}.json"
+    train_sample_path = f"{output_dir}/train_samples/{train_sample_id}.metadata.json"
+
+    # Remove gs:// prefix if present for gcsfs
+    if metadata_path.startswith("gs://"):
+        metadata_path = metadata_path[5:]
+    if train_sample_path.startswith("gs://"):
+        train_sample_path = train_sample_path[5:]
+
+    with fs.open(metadata_path, "w", encoding="utf-8") as f:
         json.dump(train_sample.model_dump()["actions"], f, ensure_ascii=False, indent=0)
-    with smart_open(
-        f"{output_dir}/train_samples/{train_sample_id}.metadata.json",
-        "w",
-        encoding="utf-8",
-    ) as f:
+    with fs.open(train_sample_path, "w", encoding="utf-8") as f:
         json.dump(
             train_sample.model_dump(exclude={"actions"}),
             f,

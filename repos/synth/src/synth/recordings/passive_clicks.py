@@ -201,7 +201,7 @@ def process_click_action(
         return None
     element_description, ui_cost_info = ui_element_identification
     if not element_description.is_distinct_element:
-        logger.info(
+        logger.debug(
             f"Skipping non-distinct element for action {action.action} at {action.timestamp}"
         )
         return None
@@ -302,7 +302,7 @@ def crop_centered_at_cursor(
 
 class UIElementIdentification(BaseModel):
     is_distinct_element: bool
-    element_description: str | None
+    element_description: str | None = None
 
 
 def ui_element_identification_gpt(
@@ -313,6 +313,9 @@ def ui_element_identification_gpt(
 ) -> tuple[UIElementIdentification, dict] | None:
     point = get_point_from_click_action(action)
     frame_with_circle = draw_red_circle(frame, point)
+    cropped = crop_centered_at_cursor(
+        frame_with_circle, (point.x, point.y), crop_size=(320, 240)
+    )
     content = []
     content.append(
         text_content(
@@ -337,12 +340,23 @@ If you cannot find the cursor, simply return `{is_distinct_element: false}` and 
 
 Then, cross reference with the second image and the location information from the first image to determine what is the element in the red circle. Look for similar visual landmarks between the two images around the cursor. 
 Note that the red circle is not part of the original screenshot, it is added to help you focus on the clicked point. DO NOT reference the red circle in your response.
-Mark `is_distinct_element: true` **ONLY** when the cursor is clearly directed at a specific, identifiable UI element, such as:
-- Clicking a button, link, or menu item
-- Selecting a text field or checkbox
-- Dragging an item to a specific location
+Mark `is_distinct_element: true` **ONLY** when the cursor is clearly directed at a specific, identifiable UI element from the following list:
 
-If the cursor is on empty space, or if you cannot locate the cursor in the screenshot, mark `is_distinct_element: false`.
+### Acceptable UI Elements
+- Menus, including dropdown menus, context menus, bookmark menus and color pickers
+- Icons of any kind
+- Buttons, including text buttons, image buttons, and toggle buttons
+- Sliders, including volume sliders, brightness sliders, and scrollbars
+- NON-EMPTY Spreadsheet cells (only if they include content). 
+
+Mark `is_distinct_element: false` in all other cases, including but not limited to:
+
+### Unacceptable UI Elements
+- Empty space, such as blank areas of the screen or whitespace
+- Clicking a browser tab at the top of the screen
+- Clicking any application in the bottom taskbar
+- Any text that is not part of a button or menu
+- Empty spreadsheet cells (cells with no content)
 
 ## Task 3: Describe the UI element.
 If you marked the cursor as on a distinct UI element, write a clear, concise description of the element and its location in the screenshot.
@@ -359,7 +373,7 @@ Image with red circle added:
     """.strip()
         )
     )
-    content.append(image_content(pil_to_bytes(frame_with_circle, format="PNG")))
+    content.append(image_content(pil_to_bytes(cropped, format="PNG")))
     content.append(text_content("\nOriginal screenshot with no red circle:"))
     content.append(image_content(pil_to_bytes(frame, format="PNG")))
 
@@ -368,7 +382,7 @@ Image with red circle added:
         model_response_text, cost_info = call_model(
             model_name=model_name,
             messages=[{"role": "user", "content": content}],
-            max_tokens=40960,
+            max_tokens=4096,
             response_format=response_format,
         )
 
@@ -530,18 +544,19 @@ You then have two tasks:
 
 ## Task 1: Write a *simple* instruction that would result in the behaviour shown in the screenshots.
 Write a clear, concise instruction that an AI assistant could follow to replicate the observed behavior.
-Good instructions should be unambiguous and limited to a single sentence of a few words. The instruction should describe *what to do*, not *how to do it*, for example "Change the orientation to landscape" is better than "Click the button in the top right corner to change the orientation to landscape."
+Good instructions should be unambiguous and limited to a single sentence of a few words. The instruction should describe *what to do*. Do NOT describe *how to do it* or *where the element is*.
+For example "Change the orientation to landscape" is better than "Click the button in the top right corner to change the orientation to landscape", because the user needs to figure out how to complete the task themselves.
 
 ## Task 2: Write the user's reasoning.
-Write the user's reasoning for why they performed this action. In a first-person, present-tense inner voice, explain why this specific action is the right move to advance or complete the task. Be concrete and insightful—reference on-screen cues, trade-offs, and how this step helps solve the problem. When referencing elements on the screen, include their position in the screenshot, e.g., "the button in the top right corner" or "the text field in the middle of the screen".
+Write the user's thought process as they use the instruction and information on screen to deduce the action they need to take. In a first-person, present-tense inner voice, explain why this specific action is the right move to progress or accomplish the task. Be concrete and insightful—reference on-screen cues. When referencing elements on the screen, include their position in the screenshot, e.g., "the button in the top right corner" or "the dropdown is open in the middle of the screen".
 
-The user's reasoning should first briefly restate the goal of the action. Then describe the relevant elements on the screen, including their position. Finally, deduce which action to take based on the current state of the screen.
+The user's reasoning should first briefly restate what they need to accomplish. Then describe the relevant elements on the screen, including their position. Finally, deduce which action to take based on the current state of the screen.
 
 Here's an example of the style I'm looking for:
 ### Instruction: Change the calculation mode to "manual" in excel.
 
 ### Reasoning:
-My current goal is to select the "manual" calculation mode in Excel. I noticed that the dropdown menu for the calculation options is already open in the top right of the screen, and it includes the "Manual" option that I need. This is exactly what I was looking for, so I'll go ahead and click on it to switch to manual calculation mode.
+I need to select the "manual" calculation mode in Excel. I noticed that the dropdown menu for the calculation options is already open in the top right of the screen, and it includes the "Manual" option that I need. This is exactly what I was looking for, so I'll go ahead and click on it to switch to manual calculation mode.
 """.strip(),
         }
     )
@@ -573,7 +588,7 @@ The next image is the same screenshot with the point ({point.x, point.y}) highli
         model_response_text, cost_info = call_model(
             model_name=model_name,
             messages=[{"role": "user", "content": content}],
-            max_tokens=40960,
+            max_tokens=4096,
             response_format=response_format,
         )
 
@@ -667,7 +682,7 @@ def process_clicks_from_raw(
     source_folders: list[str],
     output_dir: str,
     num_processes: int | None = None,
-    threads_per_process: int = 12,
+    threads_per_process: int = 6,
     max_video_files: int | None = None,
 ):
     source_folders = [(source.rstrip("/")) for source in source_folders if source]
@@ -700,7 +715,7 @@ def process_clicks_from_raw(
         assert len(action_timestamps) == len(actions)
         for action, timestamp in zip(actions, action_timestamps, strict=True):
             original_start = action.timestamp
-            action.timestamp = timestamp
+            action.timestamp = max(timestamp, original_start - 0.5)
             action.end_timestamp = original_start
 
     mouse_actions = (
@@ -719,6 +734,12 @@ def process_clicks_from_raw(
     ]
     if num_processes is None:
         num_processes = multiprocessing.cpu_count()
+
+    # Shuffle the process_args to ensure random distribution across processes
+    import random
+
+    random.seed(42)  # for reproducibility
+    random.shuffle(process_args)
     if max_video_files is not None:
         process_args = process_args[:max_video_files]
         logger.info(f"Limiting to {max_video_files} video files")
@@ -737,13 +758,15 @@ def process_clicks_from_raw(
     # Start progress listener thread
     listener = threading.Thread(
         target=progress_listener,
-        args=(len(process_args), update_queue, results_collector, output_dir),
+        args=(len(process_args), update_queue, results_collector, output_dir, 500),
         daemon=True,
     )
     listener.start()
 
     # Split video args among processes
     chunks = chunkify(process_args, num_processes)
+    print("Starting processes...")
+    print(f"Saving to {output_dir}/samples_*.jsonl files")
 
     processes = []
     for chunk in chunks:
@@ -787,7 +810,7 @@ def main():
 
 
 def main2():
-    dataset_name = "click_tirador_sand_test"
+    dataset_name = "clicks_prob_good_cropped"
     output_dir = f"gs://induction-labs/passive_data/smooth_brain_clicks/{datetime.datetime.now(datetime.UTC):%Y-%m-%d}/{dataset_name}-{datetime.datetime.now(datetime.UTC):%H-%M-%S}"
     source_folders = [
         # Kunal
@@ -805,45 +828,73 @@ def main2():
         # "gs://induction-labs-data-ext/action_capture/Mahdi_lumio/2025-07-19_202545_R9AN9",
         # "gs://induction-labs-data-ext/action_capture/Mahdi_lumio/2025-07-21_145524_Y5HX2",
         # "gs://induction-labs-data-ext/action_capture/Mahdi_lumio/2025-07-24_141207_3TWWR",
-        "gs://induction-labs-data-ext/action_capture/Mahdi_lumio/2025-08-06_155356_WIGKJ",
+        # "gs://induction-labs-data-ext/action_capture/Mahdi_lumio/2025-08-06_155356_WIGKJ",
         # Tirador
-        # "gs://induction-labs-data-ext/action_capture/Tirador/2025-07-06_213528_7A3GZ/",
-        # "gs://induction-labs-data-ext/action_capture/Tirador/2025-07-07_004523_YZCKT/",
-        # "gs://induction-labs-data-ext/action_capture/Tirador/2025-07-07_151909_EM1ZD/",
-        # "gs://induction-labs-data-ext/action_capture/Tirador/2025-07-07_181227_8C74U/",
-        # "gs://induction-labs-data-ext/action_capture/Tirador/2025-07-07_204719_ST5T0/",
-        # "gs://induction-labs-data-ext/action_capture/Tirador/2025-07-07_211120_94XGE/",
-        # "gs://induction-labs-data-ext/action_capture/Tirador/2025-07-08_182312_Y56YF/",
-        # "gs://induction-labs-data-ext/action_capture/Tirador/2025-07-08_214414_4TT3Z/",
-        # "gs://induction-labs-data-ext/action_capture/Tirador/2025-07-09_142027_DED1W/",
-        # "gs://induction-labs-data-ext/action_capture/Tirador/2025-07-09_144647_ECLHS/",
-        # "gs://induction-labs-data-ext/action_capture/Tirador/2025-07-09_155550_ZMYHV/",
-        # "gs://induction-labs-data-ext/action_capture/Tirador/2025-07-09_193418_SP3LZ/",
-        # "gs://induction-labs-data-ext/action_capture/Tirador/2025-07-10_162405_26O9J/",
-        # "gs://induction-labs-data-ext/action_capture/Tirador/2025-07-11_001850_5VUNA/",
-        # "gs://induction-labs-data-ext/action_capture/Tirador/2025-07-13_195531_RSWMW/",
-        # "gs://induction-labs-data-ext/action_capture/Tirador/2025-07-14_182906_WVWG5/",
-        # "gs://induction-labs-data-ext/action_capture/Tirador/2025-07-14_220158_LBGGM/",
-        # "gs://induction-labs-data-ext/action_capture/Tirador/2025-07-15_165347_KP6YW/",
-        # "gs://induction-labs-data-ext/action_capture/Tirador/2025-07-15_195134_KWILK/",
-        # "gs://induction-labs-data-ext/action_capture/Tirador/2025-07-16_212920_6DWYV/",
-        # "gs://induction-labs-data-ext/action_capture/Tirador/2025-07-17_163921_9Z25E/",
-        # "gs://induction-labs-data-ext/action_capture/Tirador/2025-07-19_144843_SYMA8/",
-        # "gs://induction-labs-data-ext/action_capture/Tirador/2025-07-21_204350_XA49Z/",
-        # "gs://induction-labs-data-ext/action_capture/Tirador/2025-07-22_224422_XFW5C/",
+        "gs://induction-labs-data-ext/action_capture/Tirador/2025-07-06_213528_7A3GZ/",
+        "gs://induction-labs-data-ext/action_capture/Tirador/2025-07-07_004523_YZCKT/",
+        "gs://induction-labs-data-ext/action_capture/Tirador/2025-07-07_151909_EM1ZD/",
+        "gs://induction-labs-data-ext/action_capture/Tirador/2025-07-07_181227_8C74U/",
+        "gs://induction-labs-data-ext/action_capture/Tirador/2025-07-07_204719_ST5T0/",
+        "gs://induction-labs-data-ext/action_capture/Tirador/2025-07-07_211120_94XGE/",
+        "gs://induction-labs-data-ext/action_capture/Tirador/2025-07-08_182312_Y56YF/",
+        "gs://induction-labs-data-ext/action_capture/Tirador/2025-07-08_214414_4TT3Z/",
+        "gs://induction-labs-data-ext/action_capture/Tirador/2025-07-09_142027_DED1W/",
+        "gs://induction-labs-data-ext/action_capture/Tirador/2025-07-09_144647_ECLHS/",
+        "gs://induction-labs-data-ext/action_capture/Tirador/2025-07-09_155550_ZMYHV/",
+        "gs://induction-labs-data-ext/action_capture/Tirador/2025-07-09_193418_SP3LZ/",
+        "gs://induction-labs-data-ext/action_capture/Tirador/2025-07-10_162405_26O9J/",
+        "gs://induction-labs-data-ext/action_capture/Tirador/2025-07-11_001850_5VUNA/",
+        "gs://induction-labs-data-ext/action_capture/Tirador/2025-07-13_195531_RSWMW/",
+        "gs://induction-labs-data-ext/action_capture/Tirador/2025-07-14_182906_WVWG5/",
+        "gs://induction-labs-data-ext/action_capture/Tirador/2025-07-14_220158_LBGGM/",
+        "gs://induction-labs-data-ext/action_capture/Tirador/2025-07-15_165347_KP6YW/",
+        "gs://induction-labs-data-ext/action_capture/Tirador/2025-07-15_195134_KWILK/",
+        "gs://induction-labs-data-ext/action_capture/Tirador/2025-07-16_212920_6DWYV/",
+        "gs://induction-labs-data-ext/action_capture/Tirador/2025-07-17_163921_9Z25E/",
+        "gs://induction-labs-data-ext/action_capture/Tirador/2025-07-19_144843_SYMA8/",
+        "gs://induction-labs-data-ext/action_capture/Tirador/2025-07-21_204350_XA49Z/",
+        "gs://induction-labs-data-ext/action_capture/Tirador/2025-07-22_224422_XFW5C/",
         # Sand
-        # "gs://induction-labs-data-ext/action_capture/sand/2025-07-18_135456_RWJJN/",
-        # "gs://induction-labs-data-ext/action_capture/sand/2025-07-19_144144_8DI6M/",
-        # "gs://induction-labs-data-ext/action_capture/sand/2025-07-25_161125_1GJM0/",
-        # "gs://induction-labs-data-ext/action_capture/sand/2025-07-26_135348_88OVA/",
-        # "gs://induction-labs-data-ext/action_capture/sand/2025-07-26_144717_3IZP6/",
-        # "gs://induction-labs-data-ext/action_capture/sand/2025-07-27_203922_EPEL2/",
-        # "gs://induction-labs-data-ext/action_capture/sand/2025-07-28_195826_O03E3/",
-        # "gs://induction-labs-data-ext/action_capture/sand/2025-07-29_000123_NYUHB/",
-        # "gs://induction-labs-data-ext/action_capture/sand/2025-07-29_130733_029HN/",
+        "gs://induction-labs-data-ext/action_capture/sand/2025-07-18_135456_RWJJN/",
+        "gs://induction-labs-data-ext/action_capture/sand/2025-07-19_144144_8DI6M/",
+        "gs://induction-labs-data-ext/action_capture/sand/2025-07-25_161125_1GJM0/",
+        "gs://induction-labs-data-ext/action_capture/sand/2025-07-26_135348_88OVA/",
+        "gs://induction-labs-data-ext/action_capture/sand/2025-07-26_144717_3IZP6/",
+        "gs://induction-labs-data-ext/action_capture/sand/2025-07-27_203922_EPEL2/",
+        "gs://induction-labs-data-ext/action_capture/sand/2025-07-28_195826_O03E3/",
+        "gs://induction-labs-data-ext/action_capture/sand/2025-07-29_000123_NYUHB/",
+        "gs://induction-labs-data-ext/action_capture/sand/2025-07-29_130733_029HN/",
+        # Joyce
+        "gs://induction-labs-data-ext/action_capture/joyceliu/2025-07-04_110139_B6VYF/",
+        "gs://induction-labs-data-ext/action_capture/joyceliu/2025-07-06_112602_9ZEFH/",
+        "gs://induction-labs-data-ext/action_capture/joyceliu/2025-07-09_160136_WVNHY/",
+        "gs://induction-labs-data-ext/action_capture/joyceliu/2025-07-12_100706_2RKVJ/",
+        "gs://induction-labs-data-ext/action_capture/joyceliu/2025-07-14_111643_P725G/",
+        "gs://induction-labs-data-ext/action_capture/joyceliu/2025-07-14_162035_B9PM6/",
+        "gs://induction-labs-data-ext/action_capture/joyceliu/2025-07-15_100419_MAESY/",
+        "gs://induction-labs-data-ext/action_capture/joyceliu/2025-07-15_101847_913IO/",
+        "gs://induction-labs-data-ext/action_capture/joyceliu/2025-07-15_102313_K967C/",
+        "gs://induction-labs-data-ext/action_capture/joyceliu/2025-07-18_203324_YL5VM/",
+        "gs://induction-labs-data-ext/action_capture/joyceliu/2025-07-27_192513_2FNA0/",
+        "gs://induction-labs-data-ext/action_capture/joyceliu/2025-07-27_192852_E59D8/",
+        "gs://induction-labs-data-ext/action_capture/joyceliu/2025-07-27_193551_TX1BD/",
+        "gs://induction-labs-data-ext/action_capture/joyceliu/2025-07-29_193316_LSEM8/",
+        "gs://induction-labs-data-ext/action_capture/joyceliu/2025-07-30_111301_8RVWD/",
+        "gs://induction-labs-data-ext/action_capture/joyceliu/2025-07-31_200548_0Z5EH/",
+        # Aryan
+        "gs://induction-labs-data-ext/action_capture/aryan_91532/2025-07-07_170814_A2QD2",
+        "gs://induction-labs-data-ext/action_capture/aryan_91532/2025-07-07_143610_SBK20",
+        # Jarry
+        "gs://induction-labs-data-ext/action_capture/Jarry/2025-07-07_002920_0SPCN",
+        "gs://induction-labs-data-ext/action_capture/Jarry/2025-08-10_121140_Q4KI9",
+        "gs://induction-labs-data-ext/action_capture/Jarry/2025-08-11_185116_OXFUY",
+        "gs://induction-labs-data-ext/action_capture/Jarry/2025-08-11_184643_WU8RW",
+        "gs://induction-labs-data-ext/action_capture/Jarry/2025-08-12_224139_V8X0T",
+        # Excel guy
+        # "gs://induction-labs-data-ext-passive-mangodesk/action_capture/JayeshJadhav-Lumio/2025-08-13_200130_64GMN",
     ]
     process_clicks_from_raw(
-        source_folders=source_folders, output_dir=output_dir, max_video_files=10
+        source_folders=source_folders, output_dir=output_dir, max_video_files=None
     )
     print(f"Results saved to {output_dir}/samples.jsonl")
 
