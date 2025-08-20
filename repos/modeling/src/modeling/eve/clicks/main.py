@@ -59,15 +59,22 @@ prompt_templates: Mapping[PromptTemplates, str] = {
 
 
 class ClickDatasets(str, Enum):
-    click = (
-        "gs://click-eval/generalagents-showdown-clicks/showdown-clicks-dev/data.jsonl"
-    )
+    click = "click"
+    screenspot2_desktop = "screenspot2_desktop"
 
+
+CLICK_DATASET_URLS = {
+    ClickDatasets.click: "gs://click-eval/generalagents-showdown-clicks/showdown-clicks-dev/data.jsonl",
+    ClickDatasets.screenspot2_desktop: "gs://click-eval/generalagents-showdown-clicks/OS-Copilot-ScreenSpot-v2/desktop_v2.jsonl",
+}
 
 # Default values for command options
 DEFAULT_API_URL = "http://127.0.0.1:8080"
 DEFAULT_UI_TARS_MODEL = ""
-DEFAULT_DATASET = ClickDatasets.click
+DEFAULT_DATASETS = [
+    ClickDatasets.click,
+    ClickDatasets.screenspot2_desktop,
+]
 DEFAULT_NUM_WORKERS = 1
 DEFAULT_MAX_TOKENS = 256
 DEFAULT_TEMPERATURE = 0.0
@@ -133,9 +140,9 @@ async def run_clicks_evaluation(
     checkpoint_dir: Annotated[
         str, typer.Option("--checkpoint-dir", help="UI-TARS model name")
     ] = DEFAULT_UI_TARS_MODEL,
-    dataset: Annotated[
-        ClickDatasets, typer.Option("--dataset", help="Dataset to evaluate on")
-    ] = DEFAULT_DATASET,
+    datasets: Annotated[
+        list[ClickDatasets], typer.Option("--datasets", help="Datasets to evaluate on")
+    ] = DEFAULT_DATASETS,
     model_template: Annotated[
         ModelTemplateChoice,
         typer.Option(
@@ -181,8 +188,9 @@ async def run_clicks_evaluation(
             cmd_parts.extend(["--api-url", api_url])
         if checkpoint_dir != DEFAULT_UI_TARS_MODEL:
             cmd_parts.extend(["--checkpoint-dir", checkpoint_dir])
-        if dataset != DEFAULT_DATASET:
-            cmd_parts.extend(["--dataset", dataset])
+        if datasets != DEFAULT_DATASETS:
+            for ds in datasets:
+                cmd_parts.extend(["--datasets", ds])
         if num_workers != DEFAULT_NUM_WORKERS:
             cmd_parts.extend(["--num-workers", str(num_workers)])
         if max_tokens != DEFAULT_MAX_TOKENS:
@@ -217,6 +225,7 @@ async def run_clicks_evaluation(
         "Timeout waiting for vLLM server to be ready",
     )
     local_output_folder, cloud_output_path = setup_output_folder(output_folder)
+    dataset_urls = [CLICK_DATASET_URLS[ds] for ds in datasets]
 
     wandb.init(
         project="clicks-eval",
@@ -224,7 +233,8 @@ async def run_clicks_evaluation(
         config={
             "api_url": api_url,
             "checkpoint_dir": checkpoint_dir,
-            "dataset": dataset,
+            "datasets": datasets,
+            "dataset_urls": dataset_urls,
             "num_workers": num_workers,
             "max_tokens": max_tokens,
             "temperature": temperature,
@@ -250,115 +260,123 @@ async def run_clicks_evaluation(
         click_client=click_client,
         model_template=model_template_instance,
     )
-    data_df = pd.read_json(dataset, lines=True)
-    if sample_size is not None:
-        data_df = data_df.sample(n=sample_size, random_state=42)
-        print(f"limited dataset to {len(data_df)} samples")
-    data_inputs = [
-        ClickInput.model_validate(row) for row in data_df.to_dict(orient="records")
-    ]
-
     try:
-        results = await asyncio.to_thread(
-            run_mp,
-            items=data_inputs,
-            process_func=process_func,
-            output_cls=AugmentedEvaluationResult,
-            num_workers=num_workers,
-        )
+        for dataset_name in datasets:
+            dataset_url = CLICK_DATASET_URLS[dataset_name]
+            data_df = pd.read_json(dataset_url, lines=True)
+            if sample_size is not None:
+                data_df = data_df.sample(n=sample_size, random_state=42)
+            print(f"Processing dataset: {dataset_name}, num_samples: {len(data_df)}")
+            data_inputs = [
+                ClickInput.model_validate(row)
+                for row in data_df.to_dict(orient="records")
+            ]
 
-        # Run the evaluation using the evaluate_csv function from showdown
+            results = await asyncio.to_thread(
+                run_mp,
+                items=data_inputs,
+                process_func=process_func,
+                output_cls=AugmentedEvaluationResult,
+                num_workers=num_workers,
+            )
 
-        if results:
-            print("\nEvaluation completed successfully!")
-            print(f"Results: {len(results)} items processed")
+            # Run the evaluation using the evaluate_csv function from showdown
 
-            # Calculate accuracy
-            total_processed = len(results)
-            total_in_bbox = sum(1 for result in results if result.is_in_bbox)
-            accuracy = (
-                (total_in_bbox / total_processed) * 100 if total_processed > 0 else 0
-            )
-            err_x = (
-                sum(result.x_error for result in results if result.x_error is not None)
-                / total_processed
-            )
-            err_y = (
-                sum(result.y_error for result in results if result.y_error is not None)
-                / total_processed
-            )
-            avg_dist = (
-                sum(
-                    result.pixel_distance
-                    for result in results
-                    if result.pixel_distance is not None
+            if results:
+                print("\nEvaluation completed successfully!")
+                print(f"Results: {len(results)} items processed")
+
+                # Calculate accuracy
+                total_processed = len(results)
+                total_in_bbox = sum(1 for result in results if result.is_in_bbox)
+                accuracy = (
+                    (total_in_bbox / total_processed) * 100
+                    if total_processed > 0
+                    else 0
                 )
-                / total_processed
-                if total_processed > 0
-                else 0
-            )
-            avg_elapsed = (
-                sum(result.response.latency_seconds for result in results)
-                / total_processed
-                if total_processed > 0
-                else 0
-            )
+                err_x = (
+                    sum(
+                        result.x_error
+                        for result in results
+                        if result.x_error is not None
+                    )
+                    / total_processed
+                )
+                err_y = (
+                    sum(
+                        result.y_error
+                        for result in results
+                        if result.y_error is not None
+                    )
+                    / total_processed
+                )
+                avg_dist = (
+                    sum(
+                        result.pixel_distance
+                        for result in results
+                        if result.pixel_distance is not None
+                    )
+                    / total_processed
+                    if total_processed > 0
+                    else 0
+                )
+                avg_elapsed = (
+                    sum(result.response.latency_seconds for result in results)
+                    / total_processed
+                    if total_processed > 0
+                    else 0
+                )
 
-            print(f"Accuracy: {accuracy:.2f}% ({total_in_bbox}/{total_processed})")
+                print(f"Accuracy: {accuracy:.2f}% ({total_in_bbox}/{total_processed})")
 
-            # Save summary metrics
-            wandb_metrics = {
-                "accuracy": accuracy,
-                "total_processed": total_processed,
-                "total_in_bbox": total_in_bbox,
-                "accuracy_percentage": accuracy,
-                "success_rate": accuracy / 100.0,
-                "avg_x_error": err_x,
-                "avg_y_error": err_y,
-                "avg_pixel_distance": avg_dist,
-                "avg_latency_seconds": avg_elapsed,
-            }
+                # Save summary metrics
+                wandb_metrics = {
+                    "accuracy": accuracy,
+                    "total_processed": total_processed,
+                    "total_in_bbox": total_in_bbox,
+                    "accuracy_percentage": accuracy,
+                    "success_rate": accuracy / 100.0,
+                    "avg_x_error": err_x,
+                    "avg_y_error": err_y,
+                    "avg_pixel_distance": avg_dist,
+                    "avg_latency_seconds": avg_elapsed,
+                    "dataset_url": dataset_url,
+                    "max_tokens": max_tokens,
+                    "temperature": temperature,
+                    "num_workers": num_workers,
+                    "sample_size": sample_size,
+                    "api_url": api_url,
+                }
+                metric_columns = list(wandb_metrics.keys())
+                metrics_table = wandb.Table(
+                    columns=metric_columns,
+                    data=[[wandb_metrics[col] for col in metric_columns]],
+                )
+                wandb.log({f"{dataset_name}/summary_metrics": metrics_table})
 
-            metrics = {
-                "run_id": run_id,
-                "model": "ui-tars",
-                "dataset": dataset,
-                "api_url": api_url,
-                "max_tokens": max_tokens,
-                "temperature": temperature,
-                "num_workers": num_workers,
-                "sample_size": sample_size,
-                **wandb_metrics,
-            }
+                # Log the full results as a table for detailed analysis
+                results_dict = [result.model_dump() for result in results]
+                table_columns = list(results_dict[0].keys()) if results else []
+                results_table = wandb.Table(
+                    columns=table_columns,
+                    data=[
+                        [result[col] for col in table_columns]
+                        for result in results_dict
+                    ],
+                )
+                wandb.log({f"{dataset_name}/results_table": results_table})
+                results_df = pd.DataFrame(results_dict)
+                results_df.to_json(
+                    os.path.join(
+                        local_output_folder, f"{dataset_name.value}_results.jsonl"
+                    ),
+                    orient="records",
+                    lines=True,
+                )
 
-            # Log metrics to wandb
-            wandb.log(wandb_metrics)
-
-            # Log the full results as a table for detailed analysis
-            results_dict = [result.model_dump() for result in results]
-            table_columns = list(results_dict[0].keys()) if results else []
-            results_table = wandb.Table(
-                columns=table_columns,
-                data=[
-                    [result[col] for col in table_columns] for result in results_dict
-                ],
-            )
-            wandb.log({"results_table": results_table})
-            results_df = pd.DataFrame(results_dict)
-            results_df.to_json(
-                os.path.join(local_output_folder, "results.jsonl"),
-                orient="records",
-                lines=True,
-            )
-
-            import json
-
-            with open(os.path.join(local_output_folder, "metrics.json"), "w") as f:
-                json.dump(metrics, f, indent=2)
-
-        else:
-            print("Evaluation failed: No results returned.")
-            return
+            else:
+                print("Evaluation failed: No results returned.")
+                return
 
         # Upload to GCS if needed
         if cloud_output_path:
@@ -383,3 +401,6 @@ async def run_clicks_evaluation(
 
 if __name__ == "__main__":
     app()
+
+
+# eve clicks run --output gs://induction-labs/evals/clicks/inclusionAI/UI-Venus-Navi-7B/screenspot_desktop_v2_test_2  --sample-size 10 --model-template venus_ground

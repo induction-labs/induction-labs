@@ -124,7 +124,6 @@ class ClickModelClient:
 
         content = result.get("choices", [{}])[0].get("message", {}).get("content", "")
 
-        print(content)
         return ClickModelClientResponse(
             raw_response=json.dumps(result),
             content=content,
