@@ -54,7 +54,6 @@ class UITarsModelTemplate(BaseClickModelTemplate):
         action_match = re.search(r"Action:\s*(.*?)(?:\n|$)", content, re.DOTALL)
         action_text = action_match.group(1).strip() if action_match else content
 
-        print(f"{action_text=}")
         click_match = re.search(
             r"click\(start_box='<\|box_start\|>\((\d+),\s*(\d+)\)<\|box_end\|>'\)",
             action_text,

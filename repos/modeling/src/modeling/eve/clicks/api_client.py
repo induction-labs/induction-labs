@@ -56,7 +56,8 @@ class ClickModelClient:
         stop=stop_after_attempt(5), wait=wait_exponential(multiplier=1, min=2, max=15)
     )
     def call_model(
-        self, base64_image: str, prompt_text: str
+        self,
+        messages: list[dict],
     ) -> ClickModelClientResponse:
         # base64_image = self._encode_image(image_data_uri)
         # width, height = self._extract_image_dimensions(base64_image)
@@ -72,30 +73,9 @@ class ClickModelClient:
         #     instruction=prompt,
         # )
         # Prepare the multimodal message
-        assert base64_image.startswith("data:image/png;base64,"), (
-            f"Invalid image data URI {base64_image[:30]}..."
-        )
-        multimodal_message = {
-            "role": "user",
-            "content": [
-                {
-                    "type": "text",
-                    "text": prompt_text,
-                }
-            ],
-        }
-        image_message = {
-            "role": "user",
-            "content": [
-                {
-                    "type": "image_url",
-                    "image_url": {"url": base64_image},
-                }
-            ],
-        }
 
         request_data = {
-            "messages": [multimodal_message, image_message],
+            "messages": messages,
             "model": self.model_name,
             "max_tokens": self.max_tokens,
             "temperature": self.temperature,

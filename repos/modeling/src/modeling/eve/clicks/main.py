@@ -4,7 +4,6 @@ import asyncio
 import os
 import shutil
 import tempfile
-from collections.abc import Mapping
 from datetime import datetime, timedelta
 from enum import Enum
 from functools import partial
@@ -27,8 +26,6 @@ from modeling.eve.clicks.model_template import (
 from modeling.eve.clicks.mp import run_mp
 from modeling.eve.clicks.schemas import AugmentedEvaluationResult, ClickInput
 from modeling.eve.os_world.agents.uitars15 import (
-    COMPUTER_USE_15,
-    COMPUTER_USE_15_ONLY_CLICKS,
     THOUGHT_BRIEF,
     THOUGHT_LONG,
     THOUGHT_LONG_REPEAT,
@@ -50,12 +47,6 @@ PROMPT_TEMPLATE = """Outline the position corresponding to the instruction: {ins
 class PromptTemplates(str, Enum):
     uitars15 = "computer_use_15"
     only_clicks = "only_clicks"
-
-
-prompt_templates: Mapping[PromptTemplates, str] = {
-    PromptTemplates.uitars15: COMPUTER_USE_15,
-    PromptTemplates.only_clicks: COMPUTER_USE_15_ONLY_CLICKS,
-}
 
 
 class ClickDatasets(str, Enum):
@@ -113,9 +104,12 @@ def process_single_item(
 ) -> AugmentedEvaluationResult:
     base64_image = get_base64_from_image_path(item.image_url)
     prompt_text = model_template.instruction_text(item.instruction)
-    response: ClickModelClientResponse = click_client.call_model(
+    messages = model_template.format_messages(
         base64_image=base64_image,
         prompt_text=prompt_text,
+    )
+    response: ClickModelClientResponse = click_client.call_model(
+        messages=messages,
     )
     response_point = model_template.extract_coordinates(
         response.content, (item.width, item.height)
@@ -264,6 +258,9 @@ async def run_clicks_evaluation(
         for dataset_name in datasets:
             dataset_url = CLICK_DATASET_URLS[dataset_name]
             data_df = pd.read_json(dataset_url, lines=True)
+            data_df = data_df.sample(frac=1, random_state=42).reset_index(
+                drop=True
+            )  # Shuffle the dataset
             if sample_size is not None:
                 data_df = data_df.sample(n=sample_size, random_state=42)
             print(f"Processing dataset: {dataset_name}, num_samples: {len(data_df)}")

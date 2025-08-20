@@ -25,3 +25,22 @@ class VenusGroundModelTemplate(BaseClickModelTemplate):
         bbox = [abs_x1, abs_y1, abs_x2, abs_y2]
         point = ((bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2)
         return point
+
+    def format_messages(self, base64_image: str, prompt_text: str) -> list[dict]:
+        assert base64_image.startswith("data:image/png;base64,"), (
+            f"Invalid image data URI {base64_image[:30]}..."
+        )
+        multimodal_message = {
+            "role": "user",
+            "content": [
+                {
+                    "type": "image_url",
+                    "image_url": {"url": base64_image},
+                },
+                {
+                    "type": "text",
+                    "text": prompt_text,
+                },
+            ],
+        }
+        return [multimodal_message]
