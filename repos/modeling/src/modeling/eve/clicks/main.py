@@ -52,11 +52,13 @@ class PromptTemplates(str, Enum):
 class ClickDatasets(str, Enum):
     click = "click"
     screenspot2_desktop = "screenspot2_desktop"
+    screenspot_pro_excel = "screenspot_pro_excel"
 
 
 CLICK_DATASET_URLS = {
     ClickDatasets.click: "gs://click-eval/generalagents-showdown-clicks/showdown-clicks-dev/data.jsonl",
     ClickDatasets.screenspot2_desktop: "gs://click-eval/generalagents-showdown-clicks/OS-Copilot-ScreenSpot-v2/desktop_v2.jsonl",
+    ClickDatasets.screenspot_pro_excel: "gs://click-eval/ScreenSpot-Pro/annotations/excel_macos.jsonl",
 }
 
 # Default values for command options
@@ -65,6 +67,7 @@ DEFAULT_UI_TARS_MODEL = ""
 DEFAULT_DATASETS = [
     ClickDatasets.click,
     ClickDatasets.screenspot2_desktop,
+    ClickDatasets.screenspot_pro_excel,
 ]
 DEFAULT_NUM_WORKERS = 1
 DEFAULT_MAX_TOKENS = 256
