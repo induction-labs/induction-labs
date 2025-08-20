@@ -193,6 +193,7 @@ export function TrajectoryStepViewer({ steps }: TrajectoryStepViewerProps) {
                     }
                     {/* Click overlay */}
                     {showClickOverlay && currentStep.action && (() => {
+                      // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
                       const coords = extractClickCoordinates(currentStep.action);
                       if (coords) {
                         const normalizedCoords = normalizeCoordinates(coords);
@@ -238,8 +239,17 @@ export function TrajectoryStepViewer({ steps }: TrajectoryStepViewerProps) {
               <div className="space-y-2">
                 <h3 className="text-sm font-medium text-muted-foreground">Description</h3>
                 <div className="bg-muted p-3 rounded-lg">
-                  <p className="text-sm">{currentStep.text}</p>
+                  {/* eslint-disable-next-line @typescript-eslint/no-unsafe-member-access */}
+                  <p className="text-sm">{typeof currentStep.text == "string" ? currentStep.text : currentStep.text.full_plan}</p>
                 </div>
+              </div>
+            )}
+            {currentStep.frame_metadata && (
+              <div className="space-y-2">
+                <h4 className="text-sm font-medium">Frame Metadata</h4>
+                <pre className="bg-muted p-3 rounded text-xs overflow-auto">
+                  {JSON.stringify(currentStep.frame_metadata, null, 2)}
+                </pre>
               </div>
             )}
           </div>

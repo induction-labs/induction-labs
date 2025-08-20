@@ -26,8 +26,9 @@ export const gcsFilePathSchema = z.object({
 export const trajectoryStepSchema = z.object({
   step: z.number(),
   image: z.string(),
-  action: z.string(),
-  text: z.string(),
+  action: z.any(),
+  text: z.any(),
+  frame_metadata: z.record(z.any()).optional(),
 });
 
 // Schema for trajectory steps data

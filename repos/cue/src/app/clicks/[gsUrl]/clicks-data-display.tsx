@@ -10,6 +10,7 @@ import {
 import { ClickableId } from "../../trajectories/clickable-id";
 import { DataTable } from "~/components/data-table";
 import { type ClickEvalRecord } from "~/lib/schemas/clicks";
+import { useMemo } from "react";
 
 interface ClicksDataDisplayProps {
   data: {
@@ -29,14 +30,29 @@ export function ClicksDataDisplay({ data, gsUrl }: ClicksDataDisplayProps) {
     return `(${x1},${y1})-(${x2},${y2})`;
   };
 
+  const column_data = useMemo(() => data.records.map(x => ({
+    id: x.input.id,
+    instruction: x.input.instruction,
+    gt_x1: x.input.x1,
+    gt_y1: x.input.y1,
+    gt_x2: x.input.x2,
+    gt_y2: x.input.y2,
+    pred_x: x.prediction_point ? x.prediction_point[0] : null,
+    pred_y: x.prediction_point ? x.prediction_point[1] : null,
+    is_in_bbox: x.is_in_bbox,
+    pixel_distance: x.pixel_distance ?? null,
+  })), [data.records]);
+  type ClickColumn = typeof column_data[number];
+
   const columns = [
     {
-      key: 'id' as keyof ClickEvalRecord,
+      key: 'id' as keyof ClickColumn,
       label: 'ID',
-      render: (value: ClickEvalRecord[keyof ClickEvalRecord], record: ClickEvalRecord) => {
+      render: (record: ClickColumn) => {
+        const value = record.id;
         const encodedResultId = encodeURIComponent(String(value));
         const resultHref = `/clicks/${gsUrl}/results/${encodedResultId}`;
-        
+
         return (
           <Link href={resultHref} className="hover:underline">
             <ClickableId id={String(value)} />
@@ -45,45 +61,47 @@ export function ClicksDataDisplay({ data, gsUrl }: ClicksDataDisplayProps) {
       },
     },
     {
-      key: 'instruction' as keyof ClickEvalRecord,
+      key: 'instruction' as keyof ClickColumn,
       label: 'Instruction',
       sortable: false,
       className: 'max-w-xl',
-      render: (value: ClickEvalRecord[keyof ClickEvalRecord], record: ClickEvalRecord) => {
-        const encodedResultId = encodeURIComponent(record.id);
+      render: (record: ClickColumn) => {
+        const instruction = record.instruction;
+        const id = record.id;
+        const encodedResultId = encodeURIComponent(String(id));
         const resultHref = `/clicks/${gsUrl}/results/${encodedResultId}`;
-        
+
         return (
           <Tooltip>
             <TooltipTrigger asChild>
               <Link href={resultHref}>
                 <div className="line-clamp-2 cursor-pointer hover:text-primary transition-colors">
-                  {String(value)}
+                  {String(instruction)}
                 </div>
               </Link>
             </TooltipTrigger>
             <TooltipContent className="max-w-md">
-              <p className="whitespace-pre-wrap">{String(value)}</p>
+              <p className="whitespace-pre-wrap">{String(instruction)}</p>
             </TooltipContent>
           </Tooltip>
         );
       },
     },
     {
-      key: 'gt_x1' as keyof ClickEvalRecord,
+      key: 'gt_x1' as keyof ClickColumn,
       label: 'Ground Truth Box',
       sortable: false,
       className: 'text-center font-mono text-sm',
-      render: (value: ClickEvalRecord[keyof ClickEvalRecord], record: ClickEvalRecord) => (
+      render: (record: ClickColumn) => (
         <span>{formatCoords(record.gt_x1, record.gt_y1, record.gt_x2, record.gt_y2)}</span>
       ),
     },
     {
-      key: 'pred_x' as keyof ClickEvalRecord,
+      key: 'pred_x' as keyof ClickColumn,
       label: 'Predicted Coords',
       sortable: false,
       className: 'text-center font-mono text-sm',
-      render: (value: ClickEvalRecord[keyof ClickEvalRecord], record: ClickEvalRecord) => {
+      render: (record: ClickColumn) => {
         if (record.pred_x === null || record.pred_y === null) {
           return <span className="text-muted-foreground">No prediction</span>;
         }
@@ -91,20 +109,24 @@ export function ClicksDataDisplay({ data, gsUrl }: ClicksDataDisplayProps) {
       },
     },
     {
-      key: 'is_in_bbox' as keyof ClickEvalRecord,
+      key: 'is_in_bbox' as keyof ClickColumn,
       label: 'In Box',
       className: 'text-center',
-      render: (value: ClickEvalRecord[keyof ClickEvalRecord]) => (
-        <Badge variant={getAccuracyColor(Boolean(value))}>
-          {Boolean(value) ? 'Yes' : 'No'}
-        </Badge>
-      ),
+      render: (record: ClickColumn) => {
+        const value = record.is_in_bbox;
+        return (
+          <Badge variant={getAccuracyColor(Boolean(value))}>
+            {Boolean(value) ? 'Yes' : 'No'}
+          </Badge>
+        );
+      },
     },
     {
-      key: 'pixel_distance' as keyof ClickEvalRecord,
+      key: 'pixel_distance' as keyof ClickColumn,
       label: 'Pixel Distance',
       className: 'text-center',
-      render: (value: ClickEvalRecord[keyof ClickEvalRecord]) => {
+      render: (record: ClickColumn) => {
+        const value = record.pixel_distance;
         if (value === null) {
           return <span className="text-muted-foreground">N/A</span>;
         }
@@ -146,7 +168,7 @@ export function ClicksDataDisplay({ data, gsUrl }: ClicksDataDisplayProps) {
       </div>
 
       <DataTable
-        data={data.records}
+        data={column_data}
         columns={columns}
         title="Click Evaluation Results"
         emptyMessage="No click evaluation data available"

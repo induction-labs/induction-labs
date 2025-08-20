@@ -23,7 +23,7 @@ interface SortableColumn<T> {
   label: string;
   sortable?: boolean;
   className?: string;
-  render?: (value: T[keyof T], record: T, index: number) => React.ReactNode;
+  render?: (record: T, index: number) => React.ReactNode;
 }
 
 interface DataTableProps<T> {
@@ -159,7 +159,7 @@ export function DataTable<T extends Record<string, unknown>>({
                       {columns.map((column) => (
                         <TableCell key={String(column.key)} className={column.className}>
                           {column.render ?
-                            column.render(record[column.key], record, index) :
+                            column.render(record, index) :
                             String(record[column.key] ?? '')
                           }
                         </TableCell>

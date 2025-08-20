@@ -1,20 +1,29 @@
 import { z } from "zod";
 
 // Schema for individual click evaluation record
-export const clickEvalRecordSchema = z.object({
+
+export const clickInputSchema = z.object({
   id: z.string(),
+  image_url: z.string().url(),
   instruction: z.string(),
-  image_path: z.string(),
-  gt_x1: z.number().int(),
-  gt_x2: z.number().int(),
-  gt_y1: z.number().int(),
-  gt_y2: z.number().int(),
-  pred_x: z.number().int().nullable(),
-  pred_y: z.number().int().nullable(),
+  width: z.number().int().positive(),
+  height: z.number().int().positive(),
+  x1: z.number(),
+  y1: z.number(),
+  x2: z.number(),
+  y2: z.number(),
+});
+
+
+export const clickEvalRecordSchema = z.object({
+  input: clickInputSchema,
+  response: z.object({
+    raw_response: z.string(),
+  }).passthrough(),
+  prompt_text: z.string(),
+  prediction_point: z.tuple([z.number(), z.number()]).nullable(),
+  center_coords: z.tuple([z.number(), z.number()]),
   is_in_bbox: z.boolean(),
-  latency_seconds: z.number(),
-  raw_response: z.string(),
-  center_coords: z.tuple([z.number().int(), z.number().int()]).nullable(),
   x_error: z.number().nullable(),
   y_error: z.number().nullable(),
   pixel_distance: z.number().nullable(),

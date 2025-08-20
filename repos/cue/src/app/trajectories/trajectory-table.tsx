@@ -35,23 +35,30 @@ export function TrajectoryTable({ data, gsUrl }: TrajectoryTableProps) {
     {
       key: 'eval_task_id' as keyof TrajectoryRecord,
       label: 'Task ID',
-      render: (value: TrajectoryRecord[keyof TrajectoryRecord]) => (
-        <ClickableId id={String(value)} />
-      ),
+      render: (record: TrajectoryRecord) => {
+        const value = record.eval_task_id;
+        return (
+          <ClickableId id={String(value)} />
+        );
+      },
     },
     {
       key: 'attempt_id' as keyof TrajectoryRecord,
       label: 'Attempt ID',
-      render: (value: TrajectoryRecord[keyof TrajectoryRecord]) => (
-        <ClickableId id={String(value)} />
-      ),
+      render: (record: TrajectoryRecord) => {
+        const value = record.attempt_id;
+        return (
+          <ClickableId id={String(value)} />
+        )
+      }
     },
     {
       key: 'instruction' as keyof TrajectoryRecord,
       label: 'Instruction',
       sortable: false,
       className: 'max-w-xl',
-      render: (value: TrajectoryRecord[keyof TrajectoryRecord], record: TrajectoryRecord) => {
+      render: (record: TrajectoryRecord) => {
+        const value = record.instruction;
         const encodedAttemptId = encodeURIComponent(record.attempt_id);
         const trajectoryHref = gsUrl ? `/trajectories/${gsUrl}/attempts/${encodedAttemptId}` : '#';
 
@@ -75,15 +82,16 @@ export function TrajectoryTable({ data, gsUrl }: TrajectoryTableProps) {
       key: 'trajectory_length' as keyof TrajectoryRecord,
       label: 'Trajectory Length',
       className: 'text-center',
-      render: (value: TrajectoryRecord[keyof TrajectoryRecord]) => (
-        <Badge variant="outline">{String(value)}</Badge>
+      render: (record: TrajectoryRecord) => (
+        <Badge variant="outline">{String(record.trajectory_length)}</Badge>
       ),
     },
     {
       key: 'reward' as keyof TrajectoryRecord,
       label: 'Reward',
       className: 'text-center',
-      render: (value: TrajectoryRecord[keyof TrajectoryRecord]) => {
+      render: (record: TrajectoryRecord) => {
+        const value = record.reward;
         if (!value) return null;
         return (
           <Badge variant={getRewardColor(value)}>

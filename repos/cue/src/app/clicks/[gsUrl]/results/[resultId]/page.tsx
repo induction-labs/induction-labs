@@ -36,11 +36,11 @@ export default function ResultDetailPage({ params }: ResultDetailPageProps) {
       img.src = imageUrl;
     });
   }, []);
-  const resultData = data?.records.find(record => record.id === resultId);
+  const resultData = data?.records.find(record => record.input.id === resultId);
 
   useEffect(() => {
-    if (resultData?.image_path) {
-      const imageUrl = convertImagePath(resultData.image_path);
+    if (resultData?.input.image_url) {
+      const imageUrl = resultData.input.image_url;
       getImageDimensions(imageUrl)
         .then(setImageDimensions)
         .catch((error) => {
@@ -50,7 +50,7 @@ export default function ResultDetailPage({ params }: ResultDetailPageProps) {
     } else {
       setImageDimensions(null);
     }
-  }, [resultData?.image_path, getImageDimensions]);
+  }, [resultData?.input.image_url, getImageDimensions]);
 
 
   if (!gsUrl || !resultId) return null;
@@ -88,31 +88,21 @@ export default function ResultDetailPage({ params }: ResultDetailPageProps) {
     return `x:[${x1}, ${x2}] y:[${y1}, ${y2}]`;
   };
 
-  const convertImagePath = (imagePath: string) => {
-    // Extract the last two parts of the path
-    // e.g., `/tmp/clicks_dataset_eiv1svpl/showdown-clicks-dev/frames/396394CF-CCA3-49BB-8432-13E671950DEC/16.webp`
-    // becomes `396394CF-CCA3-49BB-8432-13E671950DEC/16.webp`
-    const pathParts = imagePath.split('/');
-    if (pathParts.length >= 2) {
-      const lastTwoParts = pathParts.slice(-2).join('/');
-      return `https://storage.googleapis.com/click-eval/generalagents-showdown-clicks/showdown-clicks-dev/frames/${lastTwoParts}`;
-    }
-    return imagePath; // fallback to original if parsing fails
-  };
 
   const parseRawResponse = (rawResponse: string) => {
     try {
       // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
       const parsed = JSON.parse(rawResponse);
+      // console.log(rawResponse)
       // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment,
       const responseContent = parsed?.choices?.[0]?.message?.content;
       if (responseContent) {
         // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
         return { success: true, content: responseContent, fullResponse: parsed };
       }
-      return { success: false, content: rawResponse, fullResponse: null };
+      return { success: false, content: JSON.stringify(rawResponse), fullResponse: null };
     } catch {
-      return { success: false, content: rawResponse, fullResponse: null };
+      return { success: false, content: JSON.stringify(rawResponse), fullResponse: null };
     }
   };
 
@@ -161,7 +151,7 @@ export default function ResultDetailPage({ params }: ResultDetailPageProps) {
               {/* Task Info */}
               <div>
                 <h3 className="text-sm font-medium text-muted-foreground mb-2">Task</h3>
-                <p className="text-sm">{resultData.instruction}</p>
+                <p className="text-sm">{resultData.input.instruction}</p>
               </div>
 
               {/* Main Content - Image and Stats */}
@@ -170,13 +160,13 @@ export default function ResultDetailPage({ params }: ResultDetailPageProps) {
                 <div className="lg:col-span-2 space-y-2">
                   <h3 className="text-sm font-medium text-muted-foreground">Screenshot</h3>
                   <div className="relative border rounded-lg overflow-hidden bg-muted aspect-video flex items-center justify-center">
-                    {resultData.image_path ? (
+                    {resultData.input.image_url ? (
                       <>
                         <div className="relative h-full">
                           {
                             // eslint-disable-next-line @next/next/no-img-element
                             <img
-                              src={convertImagePath(resultData.image_path)}
+                              src={resultData.input.image_url}
                               alt="Task screenshot"
                               style={{
                                 height: '100%',
@@ -188,10 +178,10 @@ export default function ResultDetailPage({ params }: ResultDetailPageProps) {
                           {/* Ground Truth Bounding Box Overlay */}
                           {(() => {
                             const normalizedBox = normalizeBoundingBox(
-                              resultData.gt_x1,
-                              resultData.gt_y1,
-                              resultData.gt_x2,
-                              resultData.gt_y2
+                              resultData.input.x1,
+                              resultData.input.y1,
+                              resultData.input.x2,
+                              resultData.input.y2
                             );
                             if (normalizedBox) {
                               return (
@@ -233,10 +223,10 @@ export default function ResultDetailPage({ params }: ResultDetailPageProps) {
                           })()}
 
                           {/* Predicted Click Overlay */}
-                          {resultData.pred_x !== null && resultData.pred_y !== null && (() => {
+                          {resultData.prediction_point && (() => {
                             const normalizedPred = normalizeCoordinates({
-                              x: resultData.pred_x,
-                              y: resultData.pred_y
+                              x: resultData.prediction_point[0],
+                              y: resultData.prediction_point[1]
                             });
                             if (normalizedPred) {
                               return (
@@ -294,7 +284,7 @@ export default function ResultDetailPage({ params }: ResultDetailPageProps) {
                   <div className="space-y-2">
                     <h3 className="text-sm font-medium text-muted-foreground">Target Coordinates</h3>
                     <div className="bg-muted p-3 rounded-lg">
-                      <p className="text-xs font-mono">{formatCoords(resultData.gt_x1, resultData.gt_y1, resultData.gt_x2, resultData.gt_y2)}</p>
+                      <p className="text-xs font-mono">{formatCoords(resultData.input.x1, resultData.input.y1, resultData.input.x2, resultData.input.y2)}</p>
                     </div>
                   </div>
 
@@ -302,8 +292,8 @@ export default function ResultDetailPage({ params }: ResultDetailPageProps) {
                   <div className="space-y-2">
                     <h3 className="text-sm font-medium text-muted-foreground">Predicted Click</h3>
                     <div className="bg-muted p-3 rounded-lg">
-                      {resultData.pred_x !== null && resultData.pred_y !== null ? (
-                        <p className="text-xs font-mono">({resultData.pred_x}, {resultData.pred_y})</p>
+                      {resultData.prediction_point ? (
+                        <p className="text-xs font-mono">({resultData.prediction_point[0]}, {resultData.prediction_point[1]})</p>
                       ) : (
                         <p className="text-xs text-muted-foreground">No prediction made</p>
                       )}
@@ -327,19 +317,19 @@ export default function ResultDetailPage({ params }: ResultDetailPageProps) {
                     <div className="space-y-2">
                       <h3 className="text-sm font-medium text-muted-foreground">Error Metrics</h3>
                       <div className="bg-muted p-3 rounded-lg space-y-2">
-                        {resultData.pixel_distance !== null && (
+                        {resultData.pixel_distance && (
                           <div className="flex justify-between">
                             <span className="text-xs">Distance:</span>
                             <span className="text-xs font-mono">{resultData.pixel_distance.toFixed(1)}px</span>
                           </div>
                         )}
-                        {resultData.x_error !== null && (
+                        {resultData.x_error && (
                           <div className="flex justify-between">
                             <span className="text-xs">X Error:</span>
                             <span className="text-xs font-mono">{resultData.x_error.toFixed(1)}px</span>
                           </div>
                         )}
-                        {resultData.y_error !== null && (
+                        {resultData.y_error && (
                           <div className="flex justify-between">
                             <span className="text-xs">Y Error:</span>
                             <span className="text-xs font-mono">{resultData.y_error.toFixed(1)}px</span>
@@ -350,7 +340,7 @@ export default function ResultDetailPage({ params }: ResultDetailPageProps) {
                   )}
 
                   {/* Performance */}
-                  <div className="space-y-2">
+                  {/* <div className="space-y-2">
                     <h3 className="text-sm font-medium text-muted-foreground">Performance</h3>
                     <div className="bg-muted p-3 rounded-lg">
                       <div className="flex justify-between">
@@ -358,13 +348,13 @@ export default function ResultDetailPage({ params }: ResultDetailPageProps) {
                         <span className="text-xs font-mono">{resultData.latency_seconds.toFixed(2)}s</span>
                       </div>
                     </div>
-                  </div>
+                  </div> */}
                 </div>
               </div>
 
               {/* Response Content */}
               {(() => {
-                const parsedResponse = parseRawResponse(resultData.raw_response);
+                const parsedResponse = parseRawResponse(resultData.response.raw_response);
                 if (parsedResponse.success) {
                   return (
                     <>
