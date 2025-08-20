@@ -352,7 +352,7 @@ async def run_clicks_evaluation(
                     columns=metric_columns,
                     data=[[wandb_metrics[col] for col in metric_columns]],
                 )
-                wandb.log({f"{dataset_name}/summary_metrics": metrics_table})
+                wandb.log({f"{dataset_name.value}/summary_metrics": metrics_table})
 
                 # Log the full results as a table for detailed analysis
                 results_dict = [result.model_dump() for result in results]
@@ -364,7 +364,7 @@ async def run_clicks_evaluation(
                         for result in results_dict
                     ],
                 )
-                wandb.log({f"{dataset_name}/results_table": results_table})
+                wandb.log({f"{dataset_name.value}/results_table": results_table})
                 results_df = pd.DataFrame(results_dict)
                 results_df.to_json(
                     os.path.join(

@@ -5,6 +5,7 @@ import asyncio
 import os
 import signal
 import subprocess
+import traceback
 from time import sleep
 from typing import Annotated
 
@@ -122,6 +123,7 @@ async def run_processes(
 
     except Exception as e:
         logger.error(f"Unexpected error: {e}")
+        traceback.print_exc()
     finally:
         cleanup_processes(processes, 30)
         # Restore default signal handlers to prevent hanging
