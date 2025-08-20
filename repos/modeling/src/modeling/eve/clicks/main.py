@@ -1,32 +1,41 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import io
 import os
+import re
 import shutil
 import tempfile
+import urllib.request
 from collections.abc import Mapping
 from datetime import datetime, timedelta
 from enum import Enum
+from functools import partial
 from pathlib import Path
 from typing import Annotated
 
 import pandas as pd
 import typer
+from PIL import Image, ImageOps
 
 # Import the evaluate_csv function from the showdown clicks package
-from clicks.eval import EvaluationResult, evaluate_csv
-from clicks.third_party import get_ui_tars_api_client
-from pydantic import computed_field
+from pydantic import BaseModel, computed_field
 from synapse.utils.async_typer import AsyncTyper
 from synapse.utils.logging import configure_logging, logging
 
 import wandb
-from modeling.checkpoints.load import download_gcs_folder
 from modeling.checkpoints.save import upload_to_gcs
+from modeling.eve.clicks.api_client import ClickModelClient, ClickModelClientResponse
+from modeling.eve.clicks.model_template import (
+    MODEL_TEMPLATES,
+    BaseClickModelTemplate,
+    ModelTemplateChoice,
+)
+from modeling.eve.clicks.mp import run_mp
 from modeling.eve.os_world.agents.uitars15 import (
     COMPUTER_USE_15,
     COMPUTER_USE_15_ONLY_CLICKS,
-    LANG_EN,
     THOUGHT_BRIEF,
     THOUGHT_LONG,
     THOUGHT_LONG_REPEAT,
@@ -41,6 +50,8 @@ app = AsyncTyper()
 
 k = [THOUGHT_LONG, THOUGHT_BRIEF, THOUGHT_LONG_REPEAT]
 
+PROMPT_TEMPLATE = """Outline the position corresponding to the instruction: {instruction}. The output should be only [x1,y1,x2,y2].'""".strip()
+
 
 class PromptTemplates(str, Enum):
     uitars15 = "computer_use_15"
@@ -51,16 +62,24 @@ prompt_templates: Mapping[PromptTemplates, str] = {
     PromptTemplates.uitars15: COMPUTER_USE_15,
     PromptTemplates.only_clicks: COMPUTER_USE_15_ONLY_CLICKS,
 }
+
+
+class ClickDatasets(str, Enum):
+    click = (
+        "gs://click-eval/generalagents-showdown-clicks/showdown-clicks-dev/data.jsonl"
+    )
+
+
 # Default values for command options
 DEFAULT_API_URL = "http://127.0.0.1:8080"
 DEFAULT_UI_TARS_MODEL = ""
-DEFAULT_DATASET = "dev"
+DEFAULT_DATASET = ClickDatasets.click
 DEFAULT_NUM_WORKERS = 1
 DEFAULT_MAX_TOKENS = 256
 DEFAULT_TEMPERATURE = 0.0
 DEFAULT_FREQUENCY_PENALTY = 0.0
 DEFAULT_OUTPUT_FOLDER = "gs://induction-labs/evals/clicks-evals/"
-DEFAULT_PROMPT_TEMPLATE = PromptTemplates.only_clicks
+DEFAULT_MODEL_TEMPLATE = ModelTemplateChoice.uitars
 
 
 def setup_output_folder(output_folder: str) -> tuple[str, CloudPath | None]:
@@ -86,33 +105,44 @@ def setup_output_folder(output_folder: str) -> tuple[str, CloudPath | None]:
         return output_folder, None
 
 
-class AugmentedEvaluationResult(EvaluationResult):
+class ClickInput(BaseModel):
+    id: str
+    image_url: str
+    instruction: str
+    id: str
+    width: int
+    height: int
+    x1: float
+    y1: float
+    x2: float
+    y2: float
+
+
+class AugmentedEvaluationResult(BaseModel):
+    input: ClickInput
+    response: ClickModelClientResponse
+    prompt_text: str
+    prediction_point: tuple[float, float] | None = None
+
     @computed_field
     @property
     def center_coords(self) -> tuple[float, float] | None:
-        if (
-            self.gt_x1 is not None
-            and self.gt_y1 is not None
-            and self.gt_x2 is not None
-            and self.gt_y2 is not None
-        ):
-            center_x = (self.gt_x1 + self.gt_x2) / 2.0
-            center_y = (self.gt_y1 + self.gt_y2) / 2.0
-            return (center_x, center_y)
-        return None
+        center_x = (self.input.x1 + self.input.x2) / 2.0
+        center_y = (self.input.y1 + self.input.y2) / 2.0
+        return (center_x, center_y)
 
     @computed_field
     @property
     def x_error(self) -> float | None:
-        if self.center_coords and self.pred_x is not None:
-            return self.pred_x - self.center_coords[0]
+        if self.center_coords and self.prediction_point is not None:
+            return self.prediction_point[0] - self.center_coords[0]
         return None
 
     @computed_field
     @property
     def y_error(self) -> float | None:
-        if self.center_coords and self.pred_y is not None:
-            return self.pred_y - self.center_coords[1]
+        if self.center_coords and self.prediction_point is not None:
+            return self.prediction_point[1] - self.center_coords[1]
         return None
 
     @computed_field
@@ -121,6 +151,104 @@ class AugmentedEvaluationResult(EvaluationResult):
         if self.x_error is not None and self.y_error is not None:
             return ((self.x_error) ** 2 + (self.y_error) ** 2) ** 0.5
         return None
+
+    @computed_field
+    @property
+    def is_in_bbox(self) -> bool:
+        if self.prediction_point is not None:
+            return (
+                self.input.x1 <= self.prediction_point[0] <= self.input.x2
+                and self.input.y1 <= self.prediction_point[1] <= self.input.y2
+            )
+        return False
+
+
+def get_base64_from_image_path(
+    image_path: str, image_dimensions: tuple[int, int] | None = None
+) -> str:
+    """
+    Load an image from a URL, filesystem path, or base64 string (optionally a data URL),
+    convert it to PNG, optionally assert its dimensions, and return a data URL:
+    'data:image/png;base64,<...>'.
+
+    Supports PNG/JPEG/WebP inputs.
+    Prefers assertion to silent failure when dimensions are provided.
+    """
+    data_url_prefix = "data:image/png;base64,"
+
+    def _read_bytes_from_input(s: str) -> bytes:
+        s = s.strip()
+
+        # Case 1: data URL like "data:image/xxx;base64,<b64>"
+        m = re.match(r"^data:image/[^;]+;base64,(?P<payload>[A-Za-z0-9+/=\n\r]+)$", s)
+        if m:
+            return base64.b64decode(m.group("payload"), validate=True)
+
+        # Case 2: looks like raw base64 (no filesystem path, no scheme)
+        looks_like_path = ("://" in s) or os.path.exists(s)
+        if not looks_like_path:
+            try:
+                return base64.b64decode(s, validate=True)
+            except Exception:
+                pass  # fall through to other options
+
+        # Case 3: URL (http/https)
+        if s.startswith(("http://", "https://")):
+            with urllib.request.urlopen(s, timeout=30) as resp:
+                return resp.read()
+
+        # Case 4: filesystem path
+        if os.path.exists(s):
+            with open(s, "rb") as f:
+                return f.read()
+
+        raise ValueError("Input is not a valid URL, file path, or base64 image.")
+
+    raw_bytes = _read_bytes_from_input(image_path)
+
+    # Open with Pillow, apply EXIF-aware orientation, then (optionally) assert size.
+    with Image.open(io.BytesIO(raw_bytes)) as im:
+        im = ImageOps.exif_transpose(im)
+        if image_dimensions is not None:
+            assert im.size == image_dimensions, (
+                f"Image dimensions mismatch: expected {image_dimensions}, got {im.size}"
+            )
+
+        # Convert to PNG bytes
+        # Use RGBA for broad compatibility; Pillow will drop alpha if not needed.
+        converted = im.convert("RGBA")
+        buf = io.BytesIO()
+        converted.save(buf, format="PNG")
+        png_bytes = buf.getvalue()
+
+    b64 = base64.b64encode(png_bytes).decode("ascii")
+    return f"{data_url_prefix}{b64}"
+
+
+def process_single_item(
+    item: ClickInput,
+    click_client: ClickModelClient,
+    model_template: BaseClickModelTemplate,
+) -> AugmentedEvaluationResult:
+    base64_image = get_base64_from_image_path(item.image_url)
+    prompt_text = model_template.instruction_text(item.instruction)
+    response: ClickModelClientResponse = click_client.call_model(
+        base64_image=base64_image,
+        prompt_text=prompt_text,
+    )
+    response_point = model_template.extract_coordinates(
+        response.content, (item.width, item.height)
+    )
+    return AugmentedEvaluationResult(
+        input=item,
+        response=response,
+        prompt_text=prompt_text,
+        prediction_point=response_point,
+    )
+
+
+#
+# return process_single_item
 
 
 @app.async_command(name="run")
@@ -132,8 +260,15 @@ async def run_clicks_evaluation(
         str, typer.Option("--checkpoint-dir", help="UI-TARS model name")
     ] = DEFAULT_UI_TARS_MODEL,
     dataset: Annotated[
-        str, typer.Option("--dataset", help="Dataset to evaluate on")
+        ClickDatasets, typer.Option("--dataset", help="Dataset to evaluate on")
     ] = DEFAULT_DATASET,
+    model_template: Annotated[
+        ModelTemplateChoice,
+        typer.Option(
+            "--model-template",
+            help="Model template to use for prompt formatting and response parsing",
+        ),
+    ] = DEFAULT_MODEL_TEMPLATE,
     num_workers: Annotated[
         int, typer.Option("--num-workers", help="Number of concurrent workers")
     ] = DEFAULT_NUM_WORKERS,
@@ -146,16 +281,6 @@ async def run_clicks_evaluation(
     frequency_penalty: Annotated[
         float, typer.Option("--frequency-penalty", help="Frequency penalty parameter")
     ] = DEFAULT_FREQUENCY_PENALTY,
-    prompt_template: Annotated[
-        PromptTemplates,
-        typer.Option(
-            "--prompt-template",
-            help="Prompt template to use for evaluation",
-            case_sensitive=False,
-            show_choices=True,
-            show_default=True,
-        ),
-    ] = DEFAULT_PROMPT_TEMPLATE,
     sample_size: Annotated[
         int | None,
         typer.Option(
@@ -177,7 +302,6 @@ async def run_clicks_evaluation(
     # Handle print-cmd option
     if print_cmd:
         cmd_parts = ["eve", "clicks", "run"]
-
         # Add all options that differ from defaults
         if api_url != DEFAULT_API_URL:
             cmd_parts.extend(["--api-url", api_url])
@@ -195,8 +319,8 @@ async def run_clicks_evaluation(
             cmd_parts.extend(["--frequency-penalty", str(frequency_penalty)])
         if sample_size is not None:
             cmd_parts.extend(["--sample-size", str(sample_size)])
-        if prompt_template != DEFAULT_PROMPT_TEMPLATE:
-            cmd_parts.extend(["--prompt-template", prompt_template.value])
+        if model_template != DEFAULT_MODEL_TEMPLATE:
+            cmd_parts.extend(["--model-template", model_template.value])
         if output_folder != DEFAULT_OUTPUT_FOLDER:
             cmd_parts.extend(["--output", output_folder])
         if run_id is not None:
@@ -218,16 +342,8 @@ async def run_clicks_evaluation(
         timedelta(minutes=5),
         "Timeout waiting for vLLM server to be ready",
     )
-
-    # Setup output folder handling
     local_output_folder, cloud_output_path = setup_output_folder(output_folder)
-    prompt_template_str = prompt_templates[prompt_template].format(
-        language=LANG_EN,
-        thought_mode=THOUGHT_LONG,
-        instruction="{instruction}",
-    )
 
-    # Initialize wandb
     wandb.init(
         project="clicks-eval",
         name=run_id,
@@ -242,78 +358,46 @@ async def run_clicks_evaluation(
             "sample_size": sample_size,
             "output_folder": output_folder,
             "cloud_output_path": cloud_output_path.uri if cloud_output_path else None,
-            "prompt_template_str": prompt_template_str,
-            "prompt_template": prompt_template.value,
+            "model_template": model_template.value,
         },
         tags=["clicks", "evaluation", "ui-tars"],
     )
 
-    # Download the dataset from GCS
-    print("Downloading clicks dataset from GCS...")
-    dataset_tmpdir = tempfile.mkdtemp(prefix="clicks_dataset_")
+    model_template_instance: BaseClickModelTemplate = MODEL_TEMPLATES[model_template]
+    click_client = ClickModelClient(
+        api_url=api_url,
+        max_tokens=max_tokens,
+        temperature=temperature,
+        frequency_penalty=frequency_penalty,
+        model_name="",
+    )
+    process_func = partial(
+        process_single_item,
+        click_client=click_client,
+        model_template=model_template_instance,
+    )
+    data_df = pd.read_json(dataset, lines=True)
+    if sample_size is not None:
+        data_df = data_df.sample(n=sample_size, random_state=42)
+        print(f"limited dataset to {len(data_df)} samples")
+    data_inputs = [
+        ClickInput.model_validate(row) for row in data_df.to_dict(orient="records")
+    ]
 
     try:
-        # Create API client
-        api_client = get_ui_tars_api_client(
-            api_url=api_url,
-            prompt_template=prompt_template_str,
-            api_key="super-secret-key",  # Default key for vLLM
-            max_tokens=max_tokens,
-            temperature=temperature,
-            frequency_penalty=frequency_penalty,
-            # Model name is always blank because we set blank model name on vllm.
-            model_name="",
+        results = await asyncio.to_thread(
+            run_mp,
+            items=data_inputs,
+            process_func=process_func,
+            output_cls=AugmentedEvaluationResult,
+            num_workers=num_workers,
         )
-
-        await asyncio.to_thread(
-            download_gcs_folder,
-            bucket_name="click-eval",
-            prefix="generalagents-showdown-clicks",
-            local_dir=Path(dataset_tmpdir),
-        )
-        data_dir = dataset_tmpdir
-
-        if dataset == "dev":
-            csv_file = os.path.join(data_dir, "showdown-clicks-dev/data.csv")
-            frames_dir = os.path.join(data_dir, "showdown-clicks-dev")
-        else:
-            raise ValueError("Only 'dev' dataset is currently supported")
-
-        # Set output file path
-        output_file = os.path.join(local_output_folder, f"clicks_results_{dataset}.csv")
-
-        print("Running evaluation:")
-        print(f"  Dataset: {dataset}")
-        print(f"  CSV file: {csv_file}")
-        print(f"  Frames directory: {frames_dir}")
-        print(f"  API URL: {api_url}")
-        print(f"  Max tokens: {max_tokens}")
-        print(f"  Workers: {num_workers}")
-        print(f"  Output file: {output_file}")
-        if sample_size:
-            print(f"  Sample size: {sample_size}")
 
         # Run the evaluation using the evaluate_csv function from showdown
-        results = await asyncio.to_thread(
-            evaluate_csv,
-            csv_file=csv_file,
-            frames_dir=frames_dir,
-            api_client=api_client,
-            output_file=output_file,
-            sample_size=sample_size,
-            num_workers=num_workers,
-            run_id=run_id,
-        )
-        results = [
-            AugmentedEvaluationResult.model_validate(result.model_dump())
-            for result in results
-        ]
-        print(f"len(results)={len(results)}")
 
         if results:
             print("\nEvaluation completed successfully!")
             print(f"Results: {len(results)} items processed")
-            print(f"Results saved to: {output_file}")
 
             # Calculate accuracy
             total_processed = len(results)
@@ -340,7 +424,8 @@ async def run_clicks_evaluation(
                 else 0
             )
             avg_elapsed = (
-                sum(result.latency_seconds for result in results) / total_processed
+                sum(result.response.latency_seconds for result in results)
+                / total_processed
                 if total_processed > 0
                 else 0
             )
@@ -369,7 +454,6 @@ async def run_clicks_evaluation(
                 "temperature": temperature,
                 "num_workers": num_workers,
                 "sample_size": sample_size,
-                "prompt_template_str": prompt_template_str,
                 **wandb_metrics,
             }
 
@@ -417,10 +501,6 @@ async def run_clicks_evaluation(
     finally:
         # Finish wandb run
         wandb.finish()
-
-        # Clean up dataset temporary directory
-        if os.path.exists(dataset_tmpdir):
-            shutil.rmtree(dataset_tmpdir)
 
         # Clean up output temporary directory if used
         if cloud_output_path and os.path.exists(local_output_folder):
