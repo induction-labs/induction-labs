@@ -18,8 +18,6 @@ from typing import Annotated
 import pandas as pd
 import typer
 from PIL import Image, ImageOps
-
-# Import the evaluate_csv function from the showdown clicks package
 from pydantic import BaseModel, computed_field
 from synapse.utils.async_typer import AsyncTyper
 from synapse.utils.logging import configure_logging, logging

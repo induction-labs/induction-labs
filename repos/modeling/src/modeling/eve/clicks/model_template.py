@@ -5,7 +5,11 @@ from enum import Enum
 
 from pydantic import BaseModel
 
-from modeling.eve.os_world.agents.uitars15 import COMPUTER_USE_15, LANG_EN, THOUGHT_LONG
+from modeling.eve.os_world.agents.uitars15 import (
+    COMPUTER_USE_15_ONLY_CLICKS,
+    LANG_EN,
+    THOUGHT_LONG,
+)
 
 
 class BaseClickModelTemplate(BaseModel, ABC):
@@ -43,7 +47,7 @@ class UITarsModelTemplate(BaseClickModelTemplate):
         if not instruction.endswith("."):
             instruction += "."
 
-        return COMPUTER_USE_15.format(
+        return COMPUTER_USE_15_ONLY_CLICKS.format(
             thought_mode=THOUGHT_LONG,
             language=LANG_EN,
             instruction=instruction,
