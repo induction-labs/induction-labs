@@ -1,9 +1,4 @@
 import re
-from abc import ABC, abstractmethod
-from collections.abc import Mapping
-from enum import Enum
-
-from pydantic import BaseModel
 
 from modeling.eve.os_world.agents.uitars15 import (
     COMPUTER_USE_15_ONLY_CLICKS,
@@ -11,17 +6,7 @@ from modeling.eve.os_world.agents.uitars15 import (
     THOUGHT_LONG,
 )
 
-
-class BaseClickModelTemplate(BaseModel, ABC):
-    @abstractmethod
-    def instruction_text(self, instruction: str) -> str:
-        pass
-
-    @abstractmethod
-    def extract_coordinates(
-        self, response: str, image_dimensions: tuple[float, float]
-    ) -> tuple[float, float] | None:
-        pass
+from .base import BaseClickModelTemplate
 
 
 def convert_point_to_coordinates(text, is_answer=False):
@@ -124,12 +109,3 @@ class UITarsModelTemplate(BaseClickModelTemplate):
             return pred_x, pred_y
 
         return None
-
-
-class ModelTemplateChoice(str, Enum):
-    uitars = "uitars"
-
-
-MODEL_TEMPLATES: Mapping[ModelTemplateChoice, BaseClickModelTemplate] = {
-    ModelTemplateChoice.uitars: UITarsModelTemplate(),
-}
