@@ -59,21 +59,6 @@ class ClickModelClient:
         self,
         messages: list[dict],
     ) -> ClickModelClientResponse:
-        # base64_image = self._encode_image(image_data_uri)
-        # width, height = self._extract_image_dimensions(base64_image)
-
-        # Note: UI-TARS is not a generalist VLM: prompting it with plain English will cause the model to severely collapse.
-        # Hence, it is unclear how to change the given computer use prompt, so we just use the default one provided in the UI-TARS repo.
-        # drag, right_single, hotkey, type, scroll, wait, finished, call_user are here but we won't use them and will treat it as a failure.
-        # assert "{instruction}" in self.prompt_template, (
-        #     "Prompt template must contain {instruction} placeholder"
-        # )
-
-        # text = self.prompt_template.format(
-        #     instruction=prompt,
-        # )
-        # Prepare the multimodal message
-
         request_data = {
             "messages": messages,
             "model": self.model_name,

@@ -105,24 +105,49 @@ def process_single_item(
     click_client: ClickModelClient,
     model_template: BaseClickModelTemplate,
 ) -> AugmentedEvaluationResult:
-    base64_image = get_base64_from_image_path(item.image_url)
-    prompt_text = model_template.instruction_text(item.instruction)
-    messages = model_template.format_messages(
-        base64_image=base64_image,
-        prompt_text=prompt_text,
-    )
-    response: ClickModelClientResponse = click_client.call_model(
-        messages=messages,
-    )
-    response_point = model_template.extract_coordinates(
-        response.content, (item.width, item.height)
-    )
-    return AugmentedEvaluationResult(
-        input=item,
-        response=response,
-        prompt_text=prompt_text,
-        prediction_point=response_point,
-    )
+    try:
+        base64_image = get_base64_from_image_path(item.image_url)
+        if base64_image is None:
+            return AugmentedEvaluationResult(
+                input=item,
+                response=ClickModelClientResponse(
+                    raw_response="",
+                    content="",
+                    latency_seconds=0.0,
+                ),
+                prompt_text="",
+                prediction_point=None,
+            )
+
+        prompt_text = model_template.instruction_text(item.instruction)
+        messages = model_template.format_messages(
+            base64_image=base64_image,
+            prompt_text=prompt_text,
+        )
+        response: ClickModelClientResponse = click_client.call_model(
+            messages=messages,
+        )
+        response_point = model_template.extract_coordinates(
+            response.content, (item.width, item.height)
+        )
+        return AugmentedEvaluationResult(
+            input=item,
+            response=response,
+            prompt_text=prompt_text,
+            prediction_point=response_point,
+        )
+    except Exception as e:
+        logger.error(f"Error processing item {item.id}: {e}")
+        return AugmentedEvaluationResult(
+            input=item,
+            response=ClickModelClientResponse(
+                raw_response="",
+                content="",
+                latency_seconds=0.0,
+            ),
+            prompt_text="",
+            prediction_point=None,
+        )
 
 
 #

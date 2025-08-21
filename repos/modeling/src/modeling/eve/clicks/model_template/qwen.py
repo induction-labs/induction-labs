@@ -97,8 +97,6 @@ class QwenModelTemplate(BaseClickModelTemplate):
         # Use the exact same parsing logic as QwenVLClient
         content = response
 
-        print(f"Content: {content}")
-
         tool_call_match = re.search(
             r"<tool_call>\s*(\{.*?\})\s*</tool_call>", content, flags=re.DOTALL
         )

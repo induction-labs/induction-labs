@@ -117,9 +117,12 @@ async def run_processes(
 
         # wait for any process to finish
         pid, status = os.wait()  # blocks until any child process ends
-        first = next(p for p in processes if p.pid == pid)
-        exit_code = os.WEXITSTATUS(status)
-        print(f"Process {first.pid} finished first with exit code {exit_code}")
+        try:
+            first = next(p for p in processes if p.pid == pid)
+            exit_code = os.WEXITSTATUS(status)
+            print(f"Process {first.pid} finished first with exit code {exit_code}")
+        except StopIteration:
+            print(f"Unknown process {pid} finished with status {status}")
 
     except Exception as e:
         logger.error(f"Unexpected error: {e}")
