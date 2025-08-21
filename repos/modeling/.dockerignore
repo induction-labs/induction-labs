@@ -1,4 +1,4 @@
-wandb/
+**/wandb/
 k8s/
 embedding_dict*.pt
 output_head*.pt

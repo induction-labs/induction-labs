@@ -33,7 +33,7 @@ spec:
       containers:
         - name: modeling
           # image: us-central1-docker.pkg.dev/induction-labs/induction-docker/modeling:latest
-          image: registry.depot.dev/v2tbx2d1w1:pn5q09w87k-mdl
+          image: registry.depot.dev/v2tbx2d1w1:xcx4qsrnt3-mdl
           imagePullPolicy: Always # Always pull latest
           # Don't specify command, use default command in Dockerfile
           # command: ["devenv", "shell", "--offline"]

@@ -32,7 +32,7 @@ spec:
       containers:
         - name: vllm-server
           # image: <PLACEHOLDER>
-          image: registry.depot.dev/v2tbx2d1w1:bxsz6qv59s-eve
+          image: registry.depot.dev/v2tbx2d1w1:8sbv84wl2w-eve
           imagePullPolicy: Always
           # Don't specify command, use default command in Dockerfile
           env:

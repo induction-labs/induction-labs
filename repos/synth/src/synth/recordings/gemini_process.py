@@ -4,7 +4,6 @@ import base64
 import datetime
 import json
 import multiprocessing
-import os
 import secrets
 import string
 import tempfile
@@ -18,6 +17,7 @@ from enum import Enum
 from functools import wraps
 from multiprocessing import Manager, Process
 from multiprocessing.managers import ListProxy
+from pathlib import Path
 from queue import Empty, Queue
 from typing import Literal
 
@@ -30,7 +30,7 @@ import pandas as pd
 import PIL
 import PIL.Image
 import tqdm
-from PIL import ImageDraw
+from PIL import Image, ImageDraw
 from pydantic import BaseModel, computed_field
 from synapse.utils.logging import configure_logging, logging
 from synapse.video_loader.typess import VideoResolution, resolution_1080p
@@ -68,15 +68,16 @@ logger = configure_logging(__file__, logging.INFO)
 litellm.drop_params = True
 # DEFAULT_MODEL = "anthropic/claude-sonnet-4-20250514"
 # DEFAULT_MODEL = "o3"
+DEFAULT_MODEL = "gpt-5"
 # DEFAULT_MODEL = "azure/o3"
-DEFAULT_MODEL = "azure/gpt-5"
+# DEFAULT_MODEL = "azure/gpt-5"
 API_KEY = None
 API_BASE = None
 API_VERSION = None
-API_KEY = os.environ["AZURE_OPENAI_API_KEY"]
+# API_KEY = os.environ["AZURE_OPENAI_API_KEY"]
 
-API_BASE = os.environ["AZURE_OPENAI_ENDPOINT"]
-API_VERSION = os.environ.get("OPENAI_API_VERSION")
+# API_BASE = os.environ["AZURE_OPENAI_ENDPOINT"]
+# API_VERSION = os.environ.get("OPENAI_API_VERSION")
 
 
 def retry_with_backoff(
@@ -137,6 +138,90 @@ def retry_with_backoff(
     return decorator
 
 
+def _auto_hotspot(cursor: PIL.Image.Image) -> tuple[int, int]:
+    """Top-left of the non-transparent area, used as a sane default hotspot."""
+    alpha = cursor.split()[-1]
+    bbox = alpha.getbbox()
+    return (bbox[0], bbox[1]) if bbox else (0, 0)
+
+
+def _paste_with_clipping(
+    base: PIL.Image.Image,
+    overlay: PIL.Image.Image,
+    top_left: tuple[int, int],
+) -> None:
+    """Paste overlay onto base at top_left (x,y), clipping if it goes out of bounds."""
+    x0, y0 = top_left
+    x1, y1 = x0 + overlay.width, y0 + overlay.height
+    bx0, by0, bx1, by1 = 0, 0, base.width, base.height
+
+    # Compute overlap region
+    ox0, oy0 = max(x0, bx0), max(y0, by0)
+    ox1, oy1 = min(x1, bx1), min(y1, by1)
+    if ox0 >= ox1 or oy0 >= oy1:
+        return  # nothing visible
+
+    # Crop overlay and mask to the visible portion
+    crop_box_overlay = (ox0 - x0, oy0 - y0, ox1 - x0, oy1 - y0)
+    overlay_cropped = overlay.crop(crop_box_overlay)
+    base.paste(overlay_cropped, (ox0, oy0), overlay_cropped)
+
+
+MODULE_DIR = Path(__file__).resolve().parent.parent.parent.parent
+
+default_cursor_size = (20, 30)  # Default macOS cursor size in pixels
+
+
+def draw_cursor(  # now draws a mac cursor instead
+    image: PIL.Image.Image,
+    point: Point,
+    cursor_path: str = "assets/cursor.png",
+    hotspot: tuple[int, int] | None = None,
+    cursor_size: tuple[int, int]
+    | None = default_cursor_size,  # <-- NEW: (width, height) in px
+) -> PIL.Image.Image:
+    """
+    Paste a macOS cursor PNG at (point.x, point.y), aligned so the hotspot (tip)
+    lands exactly on that coordinate.
+
+    Args:
+        image: Base image/frame.
+        point: Object with .x and .y (pixel coordinates).
+        cursor_path: Path to cursor PNG with transparency.
+        hotspot: (x, y) pixel offset inside the cursor image that represents the tip.
+                 If None, auto-detected as the top-left of the non-transparent area.
+        scale: Uniform scale for the cursor image.
+
+    Returns:
+        A copy of the image with the cursor pasted.
+    """
+    base = image.copy().convert("RGBA")
+    # Write some text to cursor_path
+    CURSOR_PNG = MODULE_DIR / cursor_path
+
+    cursor = Image.open(CURSOR_PNG).convert("RGBA")
+
+    # Determine hotspot
+    hs = hotspot if hotspot is not None else _auto_hotspot(cursor)
+
+    # Optional scaling
+    if cursor_size is not None:
+        new_w = max(1, int(cursor_size[0]))
+        new_h = max(1, int(cursor_size[1]))
+        sx = new_w / cursor.width
+        sy = new_h / cursor.height
+        cursor = cursor.resize((new_w, new_h), PIL.Image.Resampling.LANCZOS)
+        hs = ((round(hs[0] * sx)), (round(hs[1] * sy)))
+
+    # Compute paste position so that the hotspot sits on (point.x, point.y)
+    paste_xy = ((round(point.x - hs[0])), (round(point.y - hs[1])))
+
+    _paste_with_clipping(base, cursor, paste_xy)
+
+    # Return in the original mode if needed
+    return base.convert(image.mode)
+
+
 # In addition, take note of whether the screen is ready or is in a transition state. Sometimes, the screenshot is taken before the page has finished loading or the application has finished rendering. In these rare cases, add `is_loading: true`. Default to `is_loading: false` unless there's clear evidence it's still loading.
 
 COMMON_INSTRUCTION = """
@@ -169,10 +254,14 @@ Here's the reasoning the user has done so far:
 
 **Here's the new action the user took that you should write the monolouge for**:
 {new_action}
-
-Now, write the user's internal monologue about what is on the screen, how they decided to take this action, and what they plan to do next. The monologue should be focused on the action just taken.
+**This is the screenshot right before the action was taken**:
 """
 )
+
+
+INTERNAL_MONOLOGUE_PROMPT = """
+Now, write the user's internal monologue about what is on the screen, how they decided to take this action, and what they plan to do next. The monologue should be focused on the action just taken.
+""".strip()
 
 
 class ModelProvider(Enum):
@@ -740,6 +829,7 @@ class ThinkingTextResponse(BaseModel):
 
 def get_thinking_texts(
     base_prompt: list[dict],
+    frames: list[PIL.Image.Image],
     instruction: str,
     actions: list[Action],
     model_name: str = DEFAULT_MODEL,
@@ -763,7 +853,20 @@ def get_thinking_texts(
 
         # Build interleaved content with text and the two consecutive frames
         content = base_prompt.copy()
+        frame = frames[i]
+        if hasattr(action.action, "point") and action.action.action_type != "scroll":
+            point = action.action.point
+            text_prompt += f" (The point that was clicked ({point.x}, {point.y}) is highlighted in red.)"
+            frame = draw_red_circle(frame, point)
+
         content.append({"type": "text", "text": text_prompt})
+        content.append(image_content(pil_to_bytes(frame, format="PNG")))
+        content.append(
+            {
+                "type": "text",
+                "text": INTERNAL_MONOLOGUE_PROMPT,
+            }
+        )
 
         # Add the frame before the action
 
@@ -846,10 +949,10 @@ def build_base_prompt(
         prompt.append(text_content(f"\n\nScreenshot #{i + 1}:"))
         # text = f"Screenshot {i}:\n"
         text = f"Action #{i + 1}: {action.dump_to_text()}."
-        if hasattr(action.action, "point") and action.action.action_type != "scroll":
-            point = action.action.point
-            text += f" (The point that was clicked ({point.x}, {point.y}) is highlighted in red.)"
-            frame = draw_red_circle(frame, point)
+        # if hasattr(action.action, "point") and action.action.action_type != "scroll":
+        #     point = action.action.point
+        #     text += f" (The point that was clicked ({point.x}, {point.y}) is highlighted in red.)"
+        #     frame = draw_red_circle(frame, point)
         prompt.append(image_content(pil_to_bytes(frame, format="PNG")))
         prompt.append(text_content(text))
     prompt.append(
@@ -883,8 +986,7 @@ def process_actions_range(
     Returns:
         List of TrainSamples created from the actions
     """
-    first_t, rest_timestamps = get_timesteps_range(actions)
-    timestamps = [first_t, *rest_timestamps]
+    timestamps = get_timesteps_range(actions)
     logger.debug(f"{timestamps=}")
     frames_with_metadata = get_frames_at_timestamps(
         source_dir,
@@ -926,6 +1028,7 @@ def process_actions_range(
     try:
         thinking_texts, thinking_costs = get_thinking_texts(
             base_prompt,
+            frames[:-1],
             instruction_response.instruction,
             actions,
         )
@@ -939,7 +1042,6 @@ def process_actions_range(
             step=i,
             image=b64_images[i],
             action=action.dump_to_text(),
-            text=f"Thought: {thinking_texts[i].user_monologue}\nAction: {action.dump_to_text()}",
             thinking=thinking_texts[i].user_monologue,
             frame_metadata=frame_metadatas[i],
             reward=1.0,
@@ -952,7 +1054,6 @@ def process_actions_range(
             step=len(actions),
             image=b64_images[-1],
             action="finished()",
-            text="Action: finished()",
             thinking="",
             frame_metadata=frame_metadatas[-1],  # Use the last frame metadata
             reward=0.0,
@@ -1134,6 +1235,7 @@ def get_frames_at_timestamps_from_video(
                 )
             ]
             return frames_with_metadata
+    return []
 
 
 def get_frames_at_timestamps(
@@ -1422,10 +1524,10 @@ def thread_worker(
 
 
 def process_worker[*T](
+    video_args_chunk: list[tuple[*T]],
     thread_worker: Callable[[*T], tuple[dict | None, str | None]],
     threads_per_proc: int,
     update_queue: Queue[tuple[dict | None, str | None]],
-    video_args_chunk: list[tuple[*T]],
 ):
     """
     Runs in each separate process. Spins up a thread pool to process its chunk of videos.
@@ -1716,18 +1818,19 @@ def process_videos(
 
     # Split video args among processes
     chunks = chunkify(process_args, num_processes)
-    worker = process_worker(
-        thread_worker,
-        threads_per_process,
-        update_queue,
-    )
+    # worker = partial(
+    #     process_worker,
+    #     thread_worker=thread_worker,
+    #     threads_per_proc=threads_per_process,
+    #     update_queue=update_queue,
+    # )
     processes = []
     for chunk in chunks:
         if not chunk:
             continue
         p = Process(
-            target=worker,
-            args=(chunk, threads_per_process, update_queue),
+            target=process_worker,
+            args=(chunk, thread_worker, threads_per_process, update_queue),
         )
         p.start()
         processes.append(p)
@@ -1750,7 +1853,7 @@ def process_videos(
 
 
 def main() -> None:
-    dataset_name = "kunal_data"
+    dataset_name = "reprocess_good"
     process_videos(
         [
             # # Jeffrey
@@ -1764,10 +1867,10 @@ def main() -> None:
             #     (None, None),
             # ),
             # # Jarry
-            # (
-            #     "gs://induction-labs-data-ext/action_capture/Jarry/2025-07-07_002920_0SPCN",
-            #     (None, None),
-            # ),
+            (
+                "gs://induction-labs-data-ext/action_capture/Jarry/2025-07-07_002920_0SPCN",
+                (None, None),
+            ),
             # (
             #     "gs://induction-labs-data-ext/action_capture/Jarry/2025-08-10_121140_Q4KI9",
             #     (None, None),
@@ -1776,7 +1879,7 @@ def main() -> None:
             #     "gs://induction-labs-data-ext/action_capture/Jarry/2025-08-11_185116_OXFUY",
             #     (None, None),
             # ),
-            # # Aryan
+            # # # Aryan
             # (
             #     # This one has second monitor stuffs
             #     "gs://induction-labs-data-ext/action_capture/aryan_91532/2025-07-07_170814_A2QD2",
@@ -1791,7 +1894,7 @@ def main() -> None:
             #     # Filters to video 414. TODO: write auto filter based on timestamps
             #     (None, 1752017846.856214),
             # ),
-            # # Joyce
+            # # # Joyce
             # *(
             #     (
             #         data,
@@ -1816,40 +1919,49 @@ def main() -> None:
             #         "gs://induction-labs-data-ext/action_capture/joyceliu/2025-07-31_200548_0Z5EH/",
             #     ]
             # ),
-            # Kunal
-            *(
-                (
-                    data,
-                    (None, None),
-                )
-                for data in [
-                    # "gs://induction-labs-data-ext/action_capture/Kunal/2025-07-18_101735_MIELX",
-                    "gs://induction-labs-data-ext/action_capture/Kunal/2025-07-19_121221_3A4PN",
-                    "gs://induction-labs-data-ext/action_capture/Kunal/2025-07-18_133213_FN0VR",
-                    "gs://induction-labs-data-ext/action_capture/Kunal/2025-07-18_172629_2RBSA",
-                    "gs://induction-labs-data-ext/action_capture/Kunal/2025-07-19_125156_PQS8V",
-                    "gs://induction-labs-data-ext/action_capture/Kunal/2025-07-19_150406_A27L7",
-                    "gs://induction-labs-data-ext/action_capture/Kunal/2025-07-21_111019_IF3S0",
-                    "gs://induction-labs-data-ext/action_capture/Kunal/2025-07-21_172805_4KV69",
-                    "gs://induction-labs-data-ext/action_capture/Kunal/2025-07-21_195634_CHHBR",
-                ]
-            ),
-            *(
-                (
-                    data,
-                    (None, None),
-                )
-                for data in [
-                    "gs://induction-labs-data-ext/action_capture/Mahdi_lumio/2025-07-19_202437_BSGP6",
-                    "gs://induction-labs-data-ext/action_capture/Mahdi_lumio/2025-07-19_202545_R9AN9",
-                    "gs://induction-labs-data-ext/action_capture/Mahdi_lumio/2025-07-21_145524_Y5HX2",
-                    "gs://induction-labs-data-ext/action_capture/Mahdi_lumio/2025-07-24_141207_3TWWR",
-                    "gs://induction-labs-data-ext/action_capture/Mahdi_lumio/2025-08-06_155356_WIGKJ",
-                ]
-            ),
+            # # Kunal
+            # *(
+            #     (
+            #         data,
+            #         (None, None),
+            #     )
+            #     for data in [
+            #         # "gs://induction-labs-data-ext/action_capture/Kunal/2025-07-18_101735_MIELX",
+            #         "gs://induction-labs-data-ext/action_capture/Kunal/2025-07-19_121221_3A4PN",
+            #         "gs://induction-labs-data-ext/action_capture/Kunal/2025-07-18_133213_FN0VR",
+            #         "gs://induction-labs-data-ext/action_capture/Kunal/2025-07-18_172629_2RBSA",
+            #         "gs://induction-labs-data-ext/action_capture/Kunal/2025-07-19_125156_PQS8V",
+            #         "gs://induction-labs-data-ext/action_capture/Kunal/2025-07-19_150406_A27L7",
+            #         "gs://induction-labs-data-ext/action_capture/Kunal/2025-07-21_111019_IF3S0",
+            #         "gs://induction-labs-data-ext/action_capture/Kunal/2025-07-21_172805_4KV69",
+            #         "gs://induction-labs-data-ext/action_capture/Kunal/2025-07-21_195634_CHHBR",
+            #     ]
+            # ),
+            # *(
+            #     (
+            #         data,
+            #         (None, None),
+            #     )
+            #     for data in [
+            #         "gs://induction-labs-data-ext/action_capture/Mahdi_lumio/2025-07-19_202437_BSGP6",
+            #         "gs://induction-labs-data-ext/action_capture/Mahdi_lumio/2025-07-19_202545_R9AN9",
+            #         "gs://induction-labs-data-ext/action_capture/Mahdi_lumio/2025-07-21_145524_Y5HX2",
+            #         "gs://induction-labs-data-ext/action_capture/Mahdi_lumio/2025-07-24_141207_3TWWR",
+            #         "gs://induction-labs-data-ext/action_capture/Mahdi_lumio/2025-08-06_155356_WIGKJ",
+            #     ]
+            # ),
+            # *(
+            #     (
+            #         data,
+            #         (None, None),
+            #     )
+            #     for data in [
+            #         "gs://induction-labs-data-ext-passive-mangodesk/action_capture/JayeshJadhav-Lumio/2025-08-13_200130_64GMN",
+            #     ]
+            # ),
         ],
         f"gs://induction-labs/passive_data/{datetime.datetime.now(datetime.UTC):%Y-%m-%d}/{dataset_name}-{datetime.datetime.now(datetime.UTC):%H-%M-%S}",
-        # max_video_files=20,
+        max_video_files=1,
         # num_processes=1,
     )
 
