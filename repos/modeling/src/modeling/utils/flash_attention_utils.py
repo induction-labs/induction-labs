@@ -1,10 +1,6 @@
 import inspect
 
 from synapse.utils.logging import configure_logging, logging
-from transformers.modeling_flash_attention_utils import (
-    _fa3_pad_input,
-    _fa3_unpad_input,
-)
 
 from modeling.types.attn_impl import AttentionImplementation
 
@@ -34,7 +30,7 @@ def _custom_lazy_imports(impl: AttentionImplementation):
             "Custom importing flash attention 2. Using 🥰 CUTE 🥰 Flash Attention Kernel"
         )
         from flash_attn.bert_padding import pad_input, unpad_input
-        from flash_attn_local.cute.interface import (
+        from flash_attn.cute.interface import (
             flash_attn_func,
         )
 
@@ -52,23 +48,23 @@ def _custom_lazy_imports(impl: AttentionImplementation):
         "Only FLASH_ATTENTION_2 and FLASH_ATTENTION_2_CUTE are supported."
     )
 
-    if impl == "flash_attention_3":
-        from flash_attn_interface import (  # type: ignore[import]
-            flash_attn_func,
-            flash_attn_varlen_func,
-        )
+    # if impl == "flash_attention_3":
+    #     from flash_attn_interface import (  # type: ignore[import]
+    #         flash_attn_func,
+    #         flash_attn_varlen_func,
+    #     )
 
-        pad_input, unpad_input = _fa3_pad_input, _fa3_unpad_input
-        return flash_attn_func, flash_attn_varlen_func, pad_input, unpad_input, True
-    else:
-        pad_input, unpad_input = _fa3_pad_input, _fa3_unpad_input
-        return (
-            getattr(impl, "flash_attn_func", None),
-            impl.flash_attn_varlen_func,  # type: ignore[union-attr]
-            pad_input,
-            unpad_input,
-            True,
-        )
+    #     pad_input, unpad_input = _fa3_pad_input, _fa3_unpad_input
+    #     return flash_attn_func, flash_attn_varlen_func, pad_input, unpad_input, True
+    # else:
+    #     pad_input, unpad_input = _fa3_pad_input, _fa3_unpad_input
+    #     return (
+    #         getattr(impl, "flash_attn_func", None),
+    #         impl.flash_attn_varlen_func,  # type: ignore[union-attr]
+    #         pad_input,
+    #         unpad_input,
+    #         True,
+    #     )
 
 
 def configure_flash_attention(impl: AttentionImplementation):

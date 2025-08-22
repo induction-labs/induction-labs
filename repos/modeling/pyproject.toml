@@ -9,9 +9,9 @@ dependencies = [
   "datasets>=3.6.0",
   "numpy>=2.2.6",
   "ray[client]>=2.47.1",
-  "torch==2.7.1",
+  "torch>=2.8.0",
   "torchvision>=0.22.1",
-  "torchaudio>=2.7.1",
+  "torchaudio>=2.8.0",
   "triton >=3.3.1",
   "tqdm>=4.67.1",
   "transformers>=4.52.4",
@@ -59,13 +59,13 @@ ssh-required = [
 ]
 # TODO: Validate that this is always correct version of torch + other deps
 flash-attn = [
-  # "flash-attn @ https://github.com/Dao-AILab/flash-attention/releases/download/v2.8.2/flash_attn-2.8.2+cu12torch2.7cxx11abiTRUE-cp312-cp312-linux_x86_64.whl ; sys_platform == 'linux' and platform_machine == 'x86_64'",
-  "flash-attn-local ; sys_platform == 'linux' and platform_machine == 'x86_64'",
+  "flash-attn @ https://github.com/Dao-AILab/flash-attention/releases/download/v2.8.3/flash_attn-2.8.3+cu12torch2.8cxx11abiTRUE-cp312-cp312-linux_x86_64.whl ; sys_platform == 'linux' and platform_machine == 'x86_64'",
+  # "flash-attn-local ; sys_platform == 'linux' and platform_machine == 'x86_64'",
 ]
 evals = [
   "qwen-vl-utils>=0.0.11",
   "fastapi[standard]>=0.115.5",
-  "vllm>=0.10.0",
+  # "vllm>=0.10.0",
   "google-cloud-compute>=1.33.0",
   "clicks",
 ]
@@ -89,7 +89,7 @@ torchaudio = [{ index = "torch_12.8", marker = "sys_platform == 'linux'" }]
 synapse = { workspace = true }
 tomli-w = { git = "https://github.com/induction-labs/tomli-w-none.git" }
 tomli = { git = "https://github.com/induction-labs/tomli-none.git" }
-transformers = { git = "https://github.com/induction-labs/transformers.git", branch = "qwen25_compile_break" }
+transformers = { git = "https://github.com/induction-labs/transformers.git", branch = "main" }
 clicks = { workspace = true }
 # This is so troll - we need to use local path package instead of workspace because we need to rewuv syrite 
 # `flash_attn` -> `flash_attn_local` https://github.com/pfmoore/editables/issues/20

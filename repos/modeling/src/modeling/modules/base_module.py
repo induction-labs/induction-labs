@@ -5,7 +5,7 @@ from abc import ABC, abstractmethod
 from enum import Enum
 from functools import partial
 from pathlib import Path
-from typing import Any, Generic, Literal, TypeVar, cast, final
+from typing import Any, Literal, TypeVar, cast, final
 
 import torch
 from pydantic import BaseModel
@@ -138,7 +138,11 @@ def get_param_with_parent_module(
     return mod, param, param_name
 
 
-class BaseLITModule(ABC, Generic[MODEL_TYPE, DATA_TYPE, CONFIG_TYPE]):
+class BaseLITModule[
+    MODEL_TYPE: PreTrainedModel,
+    DATA_TYPE: Any,
+    CONFIG_TYPE: BaseModuleConfig,
+](ABC):
     model: MODEL_TYPE
 
     @class_property
@@ -246,18 +250,14 @@ class BaseLITModule(ABC, Generic[MODEL_TYPE, DATA_TYPE, CONFIG_TYPE]):
             self.model = self.activation_checkpoint_model()  # type: ignore[assignment]
         # # Enable activation checkpointing if configured
 
-        #! TODO: Fix this
-        # This is really ugly but we are getting an error on saving checkpoint when we fully shard and only run on one device
-        # https://github.com/pytorch/pytorch/issues/147724
-        if self.run_config.distributed.world_size > 1:
-            self.model = self.shard_model(
-                mp_policy=self.run_config.mp_policy,
-                device_mesh=device_mesh,
-            )  # type: ignore[assignment]
+        self.model = self.shard_model(
+            mp_policy=self.run_config.mp_policy,
+            device_mesh=device_mesh,
+        )  # type: ignore[assignment]
 
-            assert isinstance(self.model, FSDPModule), (
-                f"Expected self.model to be a FullyShardedDataParallel, got {type(self.model)}"
-            )
+        assert isinstance(self.model, FSDPModule), (
+            f"Expected self.model to be a FullyShardedDataParallel, got {type(self.model)}"
+        )
         # logger.debug(f"Sharded model {self.model} with dtype {self.dtype}")
         # NOTE: For now we are just going to shard all params, and `ignore_params` is not supported because
         # sharding in torch is all manual anyways and if we want to support replicate on some params only then

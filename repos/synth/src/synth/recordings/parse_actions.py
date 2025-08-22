@@ -33,7 +33,8 @@ class SpecialKeys(str, Enum):
     ALT = "alt"
     OPTION = "option"
     DELETE = "delete"
-
+    CMD = "cmd"
+    CTRL = "ctrl"
     # Arrows
     SHIFT = "shift"
     L_ARROW = "left"
@@ -282,7 +283,7 @@ def parse_scroll(
 def convert_key_for_lock_state(
     original_key: str,
     lock_keys: dict[LockKeys, LockState],
-    modifier_keys: dict[str, bool],
+    modifier_keys: dict[SpecialKeys, bool],
 ) -> str:
     physical_key = normalize_key_to_physical(original_key)
     assert isinstance(physical_key, str)
@@ -291,7 +292,7 @@ def convert_key_for_lock_state(
         return SHIFT_MAP[physical_key]
 
     # TODO: Handle numlock behavior
-    shift_held = modifier_keys.get("shift", False)
+    shift_held = modifier_keys.get(SpecialKeys.SHIFT, False)
     if shift_held:
         return SHIFT_MAP.get(physical_key, physical_key)
     return physical_key
@@ -324,10 +325,10 @@ WINDOWS_ESCAPE_SEQS = {
     "\x18": "x",
     "\x19": "y",
     "\x1a": "z",
-    "shift_r": "shift",
-    "shift_l": "shift",
-    "ctrl_l": "ctrl",
-    "ctrl_r": "ctrl",
+    "shift_r": SpecialKeys.SHIFT,
+    "shift_l": SpecialKeys.SHIFT,
+    "ctrl_l": SpecialKeys.CTRL,
+    "ctrl_r": SpecialKeys.CTRL,
     "alt_l": SpecialKeys.ALT,
     "alt_r": SpecialKeys.ALT,
 }
@@ -377,7 +378,12 @@ def parse_actions(raw_actions: list[dict]) -> list[Action]:
     last_click_pos = None
     mouse_activity_since_typing = False
 
-    modifier_keys = {"ctrl": False, "alt": False, "shift": False, "cmd": False}
+    modifier_keys = {
+        SpecialKeys.CTRL: False,
+        SpecialKeys.ALT: False,
+        SpecialKeys.SHIFT: False,
+        SpecialKeys.CMD: False,
+    }
     lock_keys: dict[LockKeys, LockState] = {
         SpecialKeys.CAPSLOCK: LockState(),
         SpecialKeys.NUMLOCK: LockState(),
@@ -394,7 +400,7 @@ def parse_actions(raw_actions: list[dict]) -> list[Action]:
     enter_pressed_before_shift_up = False
 
     def get_modifiers():
-        return {k for k, v in modifier_keys.items() if v}
+        return {k.value for k, v in modifier_keys.items() if v}
 
     def add_parsed_action(action_instance, timestamp, end_timestamp):
         """Add a parsed action with the given timestamp"""
@@ -575,8 +581,7 @@ def parse_actions(raw_actions: list[dict]) -> list[Action]:
                         )
                         typing_buffer = []
 
-                    modifiers = {k for k, v in modifier_keys.items() if v}
-                    hotkey_action = HotkeyAction(key=key, modifiers=modifiers)
+                    hotkey_action = HotkeyAction(key=key, modifiers=get_modifiers())
                     hotkey_endtime = find_next_key_action(i, timestamp + 0.5)
                     if key == "tab" or key == "`":
                         hotkey_endtime += 0.1
@@ -689,7 +694,7 @@ def parse_actions(raw_actions: list[dict]) -> list[Action]:
 
                         case SpecialKeys.ENTER:
                             if not enter_pressed_before_shift_up and modifier_keys.get(
-                                "shift", False
+                                SpecialKeys.SHIFT, False
                             ):
                                 typing_buffer.append(("<shift>", timestamp))
                                 enter_pressed_before_shift_up = True

@@ -1,6 +1,6 @@
 import torch
 import torch.nn.functional as F
-from flash_attn_local.cute.interface import flash_attn_varlen_func as fa_cute
+from flash_attn.cute.interface import flash_attn_varlen_func as fa_cute
 from synapse.utils.logging import configure_logging, logging
 from torch.autograd import Function
 
