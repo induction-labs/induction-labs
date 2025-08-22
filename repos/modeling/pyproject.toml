@@ -65,7 +65,7 @@ flash-attn = [
 evals = [
   "qwen-vl-utils>=0.0.11",
   "fastapi[standard]>=0.115.5",
-  # "vllm>=0.10.0",
+  # "vllm",
   "google-cloud-compute>=1.33.0",
   "clicks",
 ]
@@ -94,6 +94,7 @@ clicks = { workspace = true }
 # This is so troll - we need to use local path package instead of workspace because we need to rewuv syrite 
 # `flash_attn` -> `flash_attn_local` https://github.com/pfmoore/editables/issues/20
 flash-attn-local = { path = "../flash-attention-local", editable = false }
+vllm = { git = "https://github.com/huydhn/vllm.git", branch = "pytorch-2.8.0" }
 
 [[tool.uv.index]]
 name = "torch_general"
