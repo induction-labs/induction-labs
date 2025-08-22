@@ -5046,7 +5046,7 @@ wheels = [
 [[package]]
 name = "transformers"
 version = "4.56.0.dev0"
-source = { git = "https://github.com/induction-labs/transformers.git?branch=main#186d3ed6659db3fab1ed66f55fe11a8966374734" }
+source = { git = "https://github.com/induction-labs/transformers.git?branch=main#7fcfda4ecac6c60ddc5645c1baf9d766a5c6507a" }
 dependencies = [
     { name = "filelock" },
     { name = "huggingface-hub" },
