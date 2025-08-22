@@ -4,9 +4,31 @@
 FROM base_image as eval
 # Here we first sync *without* workspace and ssh required deps, because those always need docker rebuild.
 # NOTE: This stage does not require ssh mount
+
+# TODO: Fix and make vllm dep work. Right now vllm does not have a 12.8 build
+# SHELL ["/bin/bash", "-c"]
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+  PYTHONUNBUFFERED=1 \
+  PIP_NO_CACHE_DIR=1 \
+  PIP_DISABLE_PIP_VERSION_CHECK=1
+
+RUN apt-get update && apt-get install -y \
+  python3.12 \
+  python3.12-dev \
+  python3-pip \
+  python3.12-venv \
+  build-essential \
+  && rm -rf /var/lib/apt/lists/*
+
+RUN mkdir -p /vllm
+RUN python3 -m venv /vllm/venv
+RUN /vllm/venv/bin/pip install vllm
+RUN ln -s /vllm/venv/bin/vllm /usr/local/bin/vllm
+
+
 RUN --mount=type=cache,target=/root/.cache/uv \
   uv sync --frozen --no-install-workspace --group evals --no-group ssh-required
-# New we add secrets
 
 RUN mkdir -p /secrets
 # TODO: Don't bake these into the image, mount them as secrets at runtime.

@@ -18,6 +18,7 @@ from synapse.utils.logging import configure_logging, logging
 from modeling.checkpoints.load import download_cloud_dir
 from modeling.eve.run_procs import cleanup_processes
 from modeling.eve.vllm_utils import wait_for_servers_ready
+from modeling.eve.write_extra_files import download_tokenizer_and_preprocessor
 from modeling.utils.cloud_path import CloudPath
 from modeling.utils.max_timeout import max_timeout
 
@@ -39,6 +40,9 @@ def delete_model_tmpdir(model_tmpdir: Path | None):
 async def start_vllm_servers(
     model: Annotated[
         str, typer.Argument(help="Model to serve with vLLM")
+    ] = "ByteDance-Seed/UI-TARS-1.5-7B",
+    hf_model_id: Annotated[
+        str, typer.Option("--hf-model-id", "-m", help="Hugging Face model ID")
     ] = "ByteDance-Seed/UI-TARS-1.5-7B",
     base_port: Annotated[
         int, typer.Option("--base-port", "-p", help="Starting port number")
@@ -97,19 +101,17 @@ async def start_vllm_servers(
             logger.info(
                 f"Model downloaded to {model_tmpdir} in {download_timer.elapsed:.2f} seconds"
             )
-
-            # Copy config files from eval/uitars_config to the model directory
-            config_dir = Path(__file__).parent / "uitars_config"
-            if config_dir.exists():
-                logger.info(f"Copying config files from {config_dir} to {model_tmpdir}")
-                for config_file in config_dir.iterdir():
-                    if config_file.is_file():
-                        dest_file = model_tmpdir / config_file.name
-                        shutil.copy2(config_file, dest_file)
-                        logger.debug(f"Copied {config_file.name}")
-                logger.info("Config files copied successfully")
-            else:
-                logger.warning(f"Config directory {config_dir} not found")
+            _, missing_after = download_tokenizer_and_preprocessor(
+                model_id=hf_model_id,
+                out_dir=str(model_tmpdir),
+                token=None,  # No token needed for public models
+                trust_remote_code=True,
+            )
+            if missing_after:
+                logger.warning(
+                    f"Missing expected files after download: {missing_after}. "
+                    "Ensure the model is compatible with vLLM."
+                )
 
             # Use the local path for vLLM
             model = str(model_tmpdir)
