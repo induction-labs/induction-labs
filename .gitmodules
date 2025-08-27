@@ -7,9 +7,6 @@
 [submodule "repos/osworld"]
 	path = repos/osworld
 	url = git@github.com:induction-labs/osworld.git
-[submodule "repos/flash-attention-local"]
-	path = repos/flash-attention-local
-	url = git@github.com:induction-labs/flash-attention.git
 [submodule "repos/showdown"]
 	path = repos/showdown
 	url = git@github.com:induction-labs/showdown.git
