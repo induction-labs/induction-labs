@@ -30,10 +30,9 @@ async def wait_for_servers_ready(server_urls: list[str]):
         return False
 
     ready_servers = set()
-    max_attempts = 300  # 5 minutes with 1 second intervals
     attempt = 0
 
-    while len(ready_servers) < len(server_urls) and attempt < max_attempts:
+    while len(ready_servers) < len(server_urls):
         attempt += 1
 
         # Check all servers that aren't ready yet

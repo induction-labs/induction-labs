@@ -67,7 +67,7 @@ DEFAULT_UI_TARS_MODEL = ""
 DEFAULT_DATASETS = [
     ClickDatasets.click,
     ClickDatasets.screenspot2_desktop,
-    ClickDatasets.screenspot_pro_excel,
+    # ClickDatasets.screenspot_pro_excel,
 ]
 DEFAULT_NUM_WORKERS = 1
 DEFAULT_MAX_TOKENS = 256
@@ -243,7 +243,7 @@ async def run_clicks_evaluation(
     print(f"Waiting for vLLM server at {api_url} to be ready...")
     await max_timeout(
         wait_for_servers_ready([api_url]),
-        timedelta(minutes=5),
+        timedelta(minutes=20),
         "Timeout waiting for vLLM server to be ready",
     )
     local_output_folder, cloud_output_path = setup_output_folder(output_folder)

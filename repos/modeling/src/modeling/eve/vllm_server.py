@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Annotated
 
 import typer
+from huggingface_hub import snapshot_download
 from synapse.elapsed_timer import elapsed_timer
 from synapse.utils.async_typer import AsyncTyper
 from synapse.utils.logging import configure_logging, logging
@@ -115,6 +116,12 @@ async def start_vllm_servers(
 
             # Use the local path for vLLM
             model = str(model_tmpdir)
+        else:
+            logger.info(f"Model is a Hugging Face ID: {model}")
+            # Download the model snapshot to cache
+            snapshot_download(
+                repo_id=model,
+            )
 
         logger.info(
             f"Starting vllm {model=} on {num_gpus=} GPUs, starting at port {base_port}"
@@ -137,6 +144,8 @@ async def start_vllm_servers(
                 "--enable-prefix-caching",
                 "--tensor-parallel-size",
                 "1",
+                # "--max-model-len",
+                # "11520",
             ]
 
             logger.info(f"Starting vLLM server on GPU {gpu}, port {port}")
@@ -181,7 +190,7 @@ async def start_vllm_servers(
         with elapsed_timer("vllm_servers_startup") as startup_timer:
             await max_timeout(
                 wait_for_servers_ready(backend_urls),
-                timedelta(minutes=5),
+                timedelta(minutes=10),
                 "Timeout waiting for vLLM servers to be ready",
             )
 
